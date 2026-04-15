@@ -7,15 +7,19 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/password-manager/password-manager/internal/admin"
 	"github.com/password-manager/password-manager/internal/auth"
+	"github.com/password-manager/password-manager/internal/vault"
 )
 
 // Router sets up all API v1 routes.
-func Router(authService *auth.Service, totpService *auth.TOTPService, smsService *auth.SMSService) chi.Router {
+func Router(authService *auth.Service, totpService *auth.TOTPService, smsService *auth.SMSService, vaultService *vault.Service, adminService *admin.Service) chi.Router {
 	r := chi.NewRouter()
 
 	authHandler := NewAuthHandler(authService)
 	tfaHandler := NewTwoFactorHandler(totpService, smsService, authService)
+	vaultHandler := NewVaultHandler(vaultService)
+	adminHandler := NewAdminHandler(adminService)
 
 	// Rate limiter for auth endpoints: 5 requests per minute per IP
 	authLimiter := NewRateLimiter(5, 1*time.Minute)
@@ -47,14 +51,32 @@ func Router(authService *auth.Service, totpService *auth.TOTPService, smsService
 			r.Post("/claim/{id}", tfaHandler.Claim)
 		})
 
-		// Vault routes (Prompt 6)
+		// Vault routes
 		r.Route("/vault", func(r chi.Router) {
-			r.Get("/", placeholder("vault endpoints coming soon"))
+			r.Post("/entries", vaultHandler.CreateEntry)
+			r.Get("/entries", vaultHandler.ListEntries)
+			r.Get("/entries/{id}", vaultHandler.GetEntry)
+			r.Put("/entries/{id}", vaultHandler.UpdateEntry)
+			r.Delete("/entries/{id}", vaultHandler.DeleteEntry)
+
+			r.Post("/folders", vaultHandler.CreateFolder)
+			r.Get("/folders", vaultHandler.ListFolders)
+			r.Delete("/folders/{id}", vaultHandler.DeleteFolder)
 		})
 
-		// Admin routes (Prompt 7)
+		// Admin routes
 		r.Route("/admin", func(r chi.Router) {
-			r.Get("/", placeholder("admin endpoints coming soon"))
+			r.Post("/orgs", adminHandler.CreateOrg)
+			r.Route("/orgs/{id}", func(r chi.Router) {
+				r.Post("/invite", adminHandler.InviteUser)
+				r.Post("/accept", adminHandler.AcceptInvite)
+				r.Get("/members", adminHandler.ListMembers)
+				r.Delete("/members/{uid}", adminHandler.RemoveUser)
+				r.Get("/vault/{uid}", adminHandler.AccessUserVault)
+				r.Post("/vault/{uid}/reset-password", adminHandler.ResetPassword)
+				r.Put("/policy", adminHandler.SetPolicy)
+				r.Get("/audit", adminHandler.GetAuditLog)
+			})
 		})
 
 		// Sync routes (Prompt 8)

@@ -14,10 +14,12 @@ import (
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 
+	"github.com/password-manager/password-manager/internal/admin"
 	"github.com/password-manager/password-manager/internal/api"
 	"github.com/password-manager/password-manager/internal/auth"
 	"github.com/password-manager/password-manager/internal/config"
 	"github.com/password-manager/password-manager/internal/db"
+	"github.com/password-manager/password-manager/internal/vault"
 )
 
 func main() {
@@ -73,15 +75,22 @@ func main() {
 	var authService *auth.Service
 	var totpService *auth.TOTPService
 	var smsService *auth.SMSService
+	var vaultService *vault.Service
+	var adminService *admin.Service
 	if database != nil {
 		userRepo := db.NewUserRepo(database.Pool)
 		totpRepo := db.NewTOTPRepo(database.Pool)
+		vaultRepo := db.NewVaultRepo(database.Pool)
+		orgRepo := db.NewOrgRepo(database.Pool)
+		auditRepo := db.NewAuditRepo(database.Pool)
 		var authErr error
 		authService, authErr = auth.NewService(userRepo, nil, nil, auth.ServiceConfig{})
 		if authErr != nil {
 			log.Fatal().Err(authErr).Msg("failed to create auth service")
 		}
 		totpService = auth.NewTOTPService(totpRepo, userRepo)
+		vaultService = vault.NewService(vaultRepo)
+		adminService = admin.NewService(orgRepo, userRepo, vaultRepo, auditRepo)
 
 		if cfg.EnableSMS2FA {
 			smsService = auth.NewSMSService(auth.SMSConfig{
@@ -99,7 +108,7 @@ func main() {
 		})
 
 		if authService != nil {
-			r.Mount("/", api.Router(authService, totpService, smsService))
+			r.Mount("/", api.Router(authService, totpService, smsService, vaultService, adminService))
 		}
 	})
 
