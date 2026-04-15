@@ -1,0 +1,356 @@
+package auth
+
+import (
+	"context"
+	"crypto/rand"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"time"
+
+	"github.com/golang-jwt/jwt/v5"
+	"github.com/rs/zerolog/log"
+	"golang.org/x/crypto/bcrypt"
+
+	"github.com/password-manager/password-manager/internal/crypto"
+	"github.com/password-manager/password-manager/internal/db"
+)
+
+// Errors
+var (
+	ErrInvalidCredentials = errors.New("invalid credentials")
+	ErrUserExists         = errors.New("user already exists")
+	ErrTwoFactorRequired  = errors.New("2fa required")
+	ErrInvalidToken       = errors.New("invalid token")
+)
+
+// RegisterRequest contains the fields needed to register a new user.
+type RegisterRequest struct {
+	Email               string          `json:"email"`
+	AuthHash            string          `json:"auth_hash"`    // hex-encoded
+	Salt                string          `json:"salt"`         // hex-encoded
+	KDFParams           json.RawMessage `json:"kdf_params"`
+	PublicKey           string          `json:"public_key"`   // hex-encoded
+	EncryptedPrivateKey string          `json:"encrypted_private_key"` // hex-encoded
+}
+
+// RegisterResponse is returned after successful registration.
+type RegisterResponse struct {
+	UserID       string `json:"user_id"`
+	AccessToken  string `json:"access_token"`
+	RefreshToken string `json:"refresh_token"`
+}
+
+// LoginRequest contains the fields needed to log in.
+type LoginRequest struct {
+	Email    string `json:"email"`
+	AuthHash string `json:"auth_hash"` // hex-encoded
+}
+
+// LoginResponse is returned after successful login.
+type LoginResponse struct {
+	UserID       string `json:"user_id,omitempty"`
+	AccessToken  string `json:"access_token,omitempty"`
+	RefreshToken string `json:"refresh_token,omitempty"`
+	Requires2FA  bool   `json:"requires_2fa,omitempty"`
+	TempToken    string `json:"temp_token,omitempty"` // partial token for 2FA flow
+}
+
+// TokenResponse is returned when refreshing tokens.
+type TokenResponse struct {
+	AccessToken  string `json:"access_token"`
+	RefreshToken string `json:"refresh_token"`
+}
+
+// Claims are the JWT claims used for access tokens.
+type Claims struct {
+	jwt.RegisteredClaims
+	UserID string `json:"uid"`
+	OrgID  string `json:"org_id,omitempty"`
+	Role   string `json:"role,omitempty"`
+	Is2FA  bool   `json:"is_2fa,omitempty"` // true = partial token awaiting 2FA
+}
+
+// ServiceConfig holds configuration for the auth service.
+type ServiceConfig struct {
+	AccessTokenDuration  time.Duration
+	RefreshTokenDuration time.Duration
+}
+
+// Service provides authentication operations.
+type Service struct {
+	userRepo    *db.UserRepo
+	signingKey  []byte // ML-DSA-65 private key
+	verifyKey   []byte // ML-DSA-65 public key
+	config      ServiceConfig
+}
+
+// NewService creates a new auth Service.
+// It generates an ML-DSA-65 keypair for JWT signing if keys are not provided.
+func NewService(userRepo *db.UserRepo, signingKey, verifyKey []byte, cfg ServiceConfig) (*Service, error) {
+	if signingKey == nil || verifyKey == nil {
+		var err error
+		verifyKey, signingKey, err = crypto.GenerateSigningKeyPair()
+		if err != nil {
+			return nil, fmt.Errorf("generate signing keypair: %w", err)
+		}
+		log.Info().Msg("generated new ML-DSA-65 signing keypair for JWT")
+	}
+
+	if cfg.AccessTokenDuration == 0 {
+		cfg.AccessTokenDuration = 15 * time.Minute
+	}
+	if cfg.RefreshTokenDuration == 0 {
+		cfg.RefreshTokenDuration = 7 * 24 * time.Hour
+	}
+
+	return &Service{
+		userRepo:   userRepo,
+		signingKey: signingKey,
+		verifyKey:  verifyKey,
+		config:     cfg,
+	}, nil
+}
+
+// Register creates a new user account.
+func (s *Service) Register(ctx context.Context, req RegisterRequest) (RegisterResponse, error) {
+	authHashBytes, err := hex.DecodeString(req.AuthHash)
+	if err != nil {
+		return RegisterResponse{}, fmt.Errorf("decode auth_hash: %w", err)
+	}
+	saltBytes, err := hex.DecodeString(req.Salt)
+	if err != nil {
+		return RegisterResponse{}, fmt.Errorf("decode salt: %w", err)
+	}
+	pubKeyBytes, err := hex.DecodeString(req.PublicKey)
+	if err != nil {
+		return RegisterResponse{}, fmt.Errorf("decode public_key: %w", err)
+	}
+	encPrivKeyBytes, err := hex.DecodeString(req.EncryptedPrivateKey)
+	if err != nil {
+		return RegisterResponse{}, fmt.Errorf("decode encrypted_private_key: %w", err)
+	}
+
+	// Server-side bcrypt of the client's auth hash (double-hashing)
+	bcryptHash, err := bcrypt.GenerateFromPassword(authHashBytes, bcrypt.DefaultCost)
+	if err != nil {
+		return RegisterResponse{}, fmt.Errorf("bcrypt auth hash: %w", err)
+	}
+
+	kdfParams := req.KDFParams
+	if kdfParams == nil {
+		kdfParams = json.RawMessage(`{"memory":65536,"iterations":3,"parallelism":4}`)
+	}
+
+	user, err := s.userRepo.CreateUser(ctx, req.Email, bcryptHash, saltBytes, kdfParams, pubKeyBytes, encPrivKeyBytes)
+	if err != nil {
+		return RegisterResponse{}, fmt.Errorf("create user: %w", err)
+	}
+
+	accessToken, err := s.generateAccessToken(user.ID, "", "")
+	if err != nil {
+		return RegisterResponse{}, err
+	}
+
+	refreshToken, err := s.generateRefreshToken(user.ID)
+	if err != nil {
+		return RegisterResponse{}, err
+	}
+
+	log.Info().Str("user_id", user.ID).Str("email", req.Email).Msg("user registered")
+
+	return RegisterResponse{
+		UserID:       user.ID,
+		AccessToken:  accessToken,
+		RefreshToken: refreshToken,
+	}, nil
+}
+
+// Login authenticates a user with email and auth hash.
+func (s *Service) Login(ctx context.Context, req LoginRequest) (LoginResponse, error) {
+	user, err := s.userRepo.GetUserByEmail(ctx, req.Email)
+	if err != nil {
+		// Use generic error to avoid user enumeration
+		log.Debug().Err(err).Str("email", req.Email).Msg("login: user lookup failed")
+		return LoginResponse{}, ErrInvalidCredentials
+	}
+
+	authHashBytes, err := hex.DecodeString(req.AuthHash)
+	if err != nil {
+		return LoginResponse{}, ErrInvalidCredentials
+	}
+
+	if err := bcrypt.CompareHashAndPassword(user.AuthHash, authHashBytes); err != nil {
+		log.Debug().Str("user_id", user.ID).Msg("login: password mismatch")
+		return LoginResponse{}, ErrInvalidCredentials
+	}
+
+	// Check if 2FA is enabled
+	if user.Has2FA {
+		tempToken, err := s.generateTempToken(user.ID)
+		if err != nil {
+			return LoginResponse{}, err
+		}
+		log.Info().Str("user_id", user.ID).Msg("login: 2FA required")
+		return LoginResponse{
+			Requires2FA: true,
+			TempToken:   tempToken,
+		}, nil
+	}
+
+	accessToken, err := s.generateAccessToken(user.ID, "", "")
+	if err != nil {
+		return LoginResponse{}, err
+	}
+
+	refreshToken, err := s.generateRefreshToken(user.ID)
+	if err != nil {
+		return LoginResponse{}, err
+	}
+
+	log.Info().Str("user_id", user.ID).Msg("login successful")
+
+	return LoginResponse{
+		UserID:       user.ID,
+		AccessToken:  accessToken,
+		RefreshToken: refreshToken,
+	}, nil
+}
+
+// Complete2FALogin exchanges a temp token + valid 2FA for full access tokens.
+func (s *Service) Complete2FALogin(ctx context.Context, tempToken string, userID string) (LoginResponse, error) {
+	// Validate the temp token
+	claims, err := s.ValidateToken(tempToken)
+	if err != nil {
+		return LoginResponse{}, ErrInvalidToken
+	}
+	if !claims.Is2FA || claims.UserID != userID {
+		return LoginResponse{}, ErrInvalidToken
+	}
+
+	accessToken, err := s.generateAccessToken(userID, "", "")
+	if err != nil {
+		return LoginResponse{}, err
+	}
+
+	refreshToken, err := s.generateRefreshToken(userID)
+	if err != nil {
+		return LoginResponse{}, err
+	}
+
+	return LoginResponse{
+		UserID:       userID,
+		AccessToken:  accessToken,
+		RefreshToken: refreshToken,
+	}, nil
+}
+
+// RefreshToken validates a refresh token and issues new token pair.
+func (s *Service) RefreshToken(ctx context.Context, refreshTokenStr string) (TokenResponse, error) {
+	claims, err := s.ValidateToken(refreshTokenStr)
+	if err != nil {
+		return TokenResponse{}, ErrInvalidToken
+	}
+
+	// Verify it's a refresh token (longer expiry, no role)
+	if claims.UserID == "" {
+		return TokenResponse{}, ErrInvalidToken
+	}
+
+	accessToken, err := s.generateAccessToken(claims.UserID, claims.OrgID, claims.Role)
+	if err != nil {
+		return TokenResponse{}, err
+	}
+
+	newRefresh, err := s.generateRefreshToken(claims.UserID)
+	if err != nil {
+		return TokenResponse{}, err
+	}
+
+	return TokenResponse{
+		AccessToken:  accessToken,
+		RefreshToken: newRefresh,
+	}, nil
+}
+
+// ValidateToken parses and validates a JWT, returning the claims.
+func (s *Service) ValidateToken(tokenStr string) (*Claims, error) {
+	claims := &Claims{}
+
+	token, err := jwt.ParseWithClaims(tokenStr, claims, func(token *jwt.Token) (interface{}, error) {
+		if _, ok := token.Method.(*MLDSASigningMethod); !ok {
+			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
+		}
+		return s.verifyKey, nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("parse token: %w", err)
+	}
+	if !token.Valid {
+		return nil, ErrInvalidToken
+	}
+
+	return claims, nil
+}
+
+// GetVerifyKey returns the public verification key (for middleware).
+func (s *Service) GetVerifyKey() []byte {
+	return s.verifyKey
+}
+
+func (s *Service) generateAccessToken(userID, orgID, role string) (string, error) {
+	now := time.Now()
+	claims := Claims{
+		RegisteredClaims: jwt.RegisteredClaims{
+			ExpiresAt: jwt.NewNumericDate(now.Add(s.config.AccessTokenDuration)),
+			IssuedAt:  jwt.NewNumericDate(now),
+			Issuer:    "password-manager",
+		},
+		UserID: userID,
+		OrgID:  orgID,
+		Role:   role,
+	}
+
+	token := jwt.NewWithClaims(&MLDSASigningMethod{}, claims)
+	return token.SignedString(s.signingKey)
+}
+
+func (s *Service) generateRefreshToken(userID string) (string, error) {
+	now := time.Now()
+
+	// Add random jti to prevent token reuse
+	jti := make([]byte, 16)
+	if _, err := rand.Read(jti); err != nil {
+		return "", fmt.Errorf("generate jti: %w", err)
+	}
+
+	claims := Claims{
+		RegisteredClaims: jwt.RegisteredClaims{
+			ExpiresAt: jwt.NewNumericDate(now.Add(s.config.RefreshTokenDuration)),
+			IssuedAt:  jwt.NewNumericDate(now),
+			Issuer:    "password-manager",
+			ID:        hex.EncodeToString(jti),
+		},
+		UserID: userID,
+	}
+
+	token := jwt.NewWithClaims(&MLDSASigningMethod{}, claims)
+	return token.SignedString(s.signingKey)
+}
+
+func (s *Service) generateTempToken(userID string) (string, error) {
+	now := time.Now()
+	claims := Claims{
+		RegisteredClaims: jwt.RegisteredClaims{
+			ExpiresAt: jwt.NewNumericDate(now.Add(5 * time.Minute)), // short-lived
+			IssuedAt:  jwt.NewNumericDate(now),
+			Issuer:    "password-manager",
+		},
+		UserID: userID,
+		Is2FA:  true,
+	}
+
+	token := jwt.NewWithClaims(&MLDSASigningMethod{}, claims)
+	return token.SignedString(s.signingKey)
+}
