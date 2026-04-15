@@ -11,10 +11,11 @@ import (
 )
 
 // Router sets up all API v1 routes.
-func Router(authService *auth.Service) chi.Router {
+func Router(authService *auth.Service, totpService *auth.TOTPService, smsService *auth.SMSService) chi.Router {
 	r := chi.NewRouter()
 
 	authHandler := NewAuthHandler(authService)
+	tfaHandler := NewTwoFactorHandler(totpService, smsService, authService)
 
 	// Rate limiter for auth endpoints: 5 requests per minute per IP
 	authLimiter := NewRateLimiter(5, 1*time.Minute)
@@ -26,11 +27,25 @@ func Router(authService *auth.Service) chi.Router {
 		r.Post("/login", authHandler.Login)
 		r.Post("/refresh", authHandler.Refresh)
 		r.Post("/logout", authHandler.Logout)
+
+		// 2FA routes that use temp token (no auth middleware)
+		r.Post("/2fa/validate", tfaHandler.Validate)
+		r.Post("/2fa/sms/send", tfaHandler.SendSMS)
+		r.Post("/2fa/sms/validate", tfaHandler.ValidateSMS)
 	})
 
-	// Protected routes (placeholder groups for future prompts)
+	// Protected routes
 	r.Group(func(r chi.Router) {
 		r.Use(AuthMiddleware(authService))
+
+		// 2FA management (requires full auth)
+		r.Route("/auth/2fa", func(r chi.Router) {
+			r.Post("/setup", tfaHandler.Setup)
+			r.Post("/verify-setup", tfaHandler.VerifySetup)
+			r.Post("/disable", tfaHandler.Disable)
+			r.Post("/share", tfaHandler.Share)
+			r.Post("/claim/{id}", tfaHandler.Claim)
+		})
 
 		// Vault routes (Prompt 6)
 		r.Route("/vault", func(r chi.Router) {

@@ -71,12 +71,24 @@ func main() {
 
 	// Initialize auth service
 	var authService *auth.Service
+	var totpService *auth.TOTPService
+	var smsService *auth.SMSService
 	if database != nil {
 		userRepo := db.NewUserRepo(database.Pool)
+		totpRepo := db.NewTOTPRepo(database.Pool)
 		var authErr error
 		authService, authErr = auth.NewService(userRepo, nil, nil, auth.ServiceConfig{})
 		if authErr != nil {
 			log.Fatal().Err(authErr).Msg("failed to create auth service")
+		}
+		totpService = auth.NewTOTPService(totpRepo, userRepo)
+
+		if cfg.EnableSMS2FA {
+			smsService = auth.NewSMSService(auth.SMSConfig{
+				Enabled:    true,
+				APIKey:     cfg.TelnyxAPIKey,
+				FromNumber: cfg.TelnyxFromNum,
+			})
 		}
 	}
 
@@ -87,7 +99,7 @@ func main() {
 		})
 
 		if authService != nil {
-			r.Mount("/", api.Router(authService))
+			r.Mount("/", api.Router(authService, totpService, smsService))
 		}
 	})
 

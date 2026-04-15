@@ -12,6 +12,11 @@ type Config struct {
 	TLSCert       string
 	TLSKey        string
 	LogLevel      string
+
+	// SMS 2FA (Telnyx)
+	EnableSMS2FA   bool
+	TelnyxAPIKey   string
+	TelnyxFromNum  string
 }
 
 func Load() *Config {
@@ -34,5 +39,8 @@ func Load() *Config {
 		TLSCert:       os.Getenv("TLS_CERT"),
 		TLSKey:        os.Getenv("TLS_KEY"),
 		LogLevel:      logLevel,
+		EnableSMS2FA:  os.Getenv("ENABLE_SMS_2FA") == "true",
+		TelnyxAPIKey:  os.Getenv("TELNYX_API_KEY"),
+		TelnyxFromNum: os.Getenv("TELNYX_FROM_NUMBER"),
 	}
 }
