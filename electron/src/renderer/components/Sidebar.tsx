@@ -28,7 +28,7 @@ export function Sidebar() {
       <div className="flex items-center gap-2 px-4 pt-12 pb-4 border-b border-surface-700">
         <span className="text-xl">🔑</span>
         <span className="text-sm font-semibold text-surface-100 tracking-tight">
-          Quantum PM
+          LGI Pass
         </span>
       </div>
 

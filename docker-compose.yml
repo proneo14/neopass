@@ -1,0 +1,33 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: password_manager
+      POSTGRES_USER: pmuser
+      POSTGRES_PASSWORD: pmpass_dev_only
+    # No host port mapping needed — server connects internally
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pmuser -d password_manager"]
+      interval: 3s
+      timeout: 3s
+      retries: 10
+
+  server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      DATABASE_URL: postgres://pmuser:pmpass_dev_only@postgres:5432/password_manager?sslmode=disable
+      PORT: "8443"
+      MIGRATIONS_DIR: migrations
+      LOG_LEVEL: debug
+    ports:
+      - "8444:8443"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  pgdata:

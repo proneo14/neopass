@@ -14,18 +14,11 @@ body {
     sans-serif;
 }
 
-::-webkit-scrollbar {
-  width: 8px;
+* {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
 }
 
-::-webkit-scrollbar-track {
-  @apply bg-surface-900;
-}
-
-::-webkit-scrollbar-thumb {
-  @apply bg-surface-600 rounded;
-}
-
-::-webkit-scrollbar-thumb:hover {
-  @apply bg-surface-500;
+*::-webkit-scrollbar {
+  display: none;
 }

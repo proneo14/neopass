@@ -1,0 +1,6 @@
+electron/
+.git/
+*.exe
+*.md
+PROMPTS.md
+.gitignore

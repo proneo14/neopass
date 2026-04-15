@@ -46,9 +46,7 @@ export function Register() {
     try {
       const result = (await window.api.auth.register({
         email,
-        authHash: password,
-        salt: '',
-        kdfParams: { memory: 65536, iterations: 3, parallelism: 4 },
+        password,
       })) as Record<string, unknown>;
 
       if (result.error) {
@@ -57,7 +55,7 @@ export function Register() {
       }
 
       login(
-        result.token as string,
+        (result.access_token ?? result.token) as string,
         result.user_id as string,
         email,
       );

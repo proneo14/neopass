@@ -1,6 +1,7 @@
 import { app, BrowserWindow, ipcMain, Menu, session } from 'electron';
 import path from 'path';
 import fs from 'fs';
+import nodeCrypto from 'crypto';
 import { spawn, ChildProcess } from 'child_process';
 
 let mainWindow: BrowserWindow | null = null;
@@ -8,6 +9,15 @@ let sidecarProcess: ChildProcess | null = null;
 let sidecarPort: number | null = null;
 
 const isDev = process.env.NODE_ENV === 'development';
+
+// API server URL: use BACKEND_URL env or try sidecar
+const backendUrl = process.env.BACKEND_URL || '';
+
+function getApiBase(): string {
+  if (backendUrl) return backendUrl;
+  if (sidecarPort) return `http://127.0.0.1:${sidecarPort}`;
+  return '';
+}
 
 function getSidecarPath(): string {
   const platform = process.platform;
@@ -85,7 +95,7 @@ function createWindow(): void {
     height: 800,
     minWidth: 800,
     minHeight: 600,
-    title: 'Quantum Password Manager',
+    title: 'LGI Pass',
     backgroundColor: '#020617',
     autoHideMenuBar: true,
     titleBarStyle: 'hidden',
@@ -156,12 +166,18 @@ function registerIpcHandlers(): void {
   });
 
   ipcMain.handle('auth:login', async (_event, credentials: { email: string; authHash: string }) => {
-    if (!sidecarPort) return { error: 'Sidecar not running' };
+    const api = getApiBase();
+    if (!api) return { error: 'Backend not available' };
     try {
-      const res = await fetch(`http://127.0.0.1:${sidecarPort}/api/v1/auth/login`, {
+      // Derive auth hash from password using PBKDF2 (stand-in for Argon2id until Go sidecar handles it)
+      const salt = nodeCrypto.createHash('sha256').update(credentials.email).digest();
+      const derived = nodeCrypto.pbkdf2Sync(credentials.authHash, salt, 100000, 64, 'sha512');
+      const authHashHex = derived.subarray(32, 64).toString('hex');
+
+      const res = await fetch(`${api}/api/v1/auth/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(credentials),
+        body: JSON.stringify({ email: credentials.email, auth_hash: authHashHex }),
       });
       return await res.json();
     } catch {
@@ -169,24 +185,51 @@ function registerIpcHandlers(): void {
     }
   });
 
-  ipcMain.handle('auth:register', async (_event, data: Record<string, unknown>) => {
-    if (!sidecarPort) return { error: 'Sidecar not running' };
+  ipcMain.handle('auth:register', async (_event, data: { email: string; password: string }) => {
+    const api = getApiBase();
+    if (!api) return { error: 'Backend not available' };
     try {
-      const res = await fetch(`http://127.0.0.1:${sidecarPort}/api/v1/auth/register`, {
+      // Generate deterministic salt from email, derive auth hash
+      const salt = nodeCrypto.createHash('sha256').update(data.email).digest();
+      const derived = nodeCrypto.pbkdf2Sync(data.password, salt, 100000, 64, 'sha512');
+      const masterKey = derived.subarray(0, 32);
+      const authHash = derived.subarray(32, 64);
+
+      // Generate a key pair (placeholder using X25519 until X-Wing sidecar is wired)
+      const keyPair = nodeCrypto.generateKeyPairSync('x25519');
+      const publicKeyBuf = keyPair.publicKey.export({ type: 'spki', format: 'der' });
+      const privateKeyBuf = keyPair.privateKey.export({ type: 'pkcs8', format: 'der' });
+
+      // Encrypt private key with master key
+      const iv = nodeCrypto.randomBytes(12);
+      const cipher = nodeCrypto.createCipheriv('aes-256-gcm', masterKey, iv);
+      const encrypted = Buffer.concat([iv, cipher.update(privateKeyBuf), cipher.final(), cipher.getAuthTag()]);
+
+      const body = {
+        email: data.email,
+        auth_hash: authHash.toString('hex'),
+        salt: salt.toString('hex'),
+        kdf_params: { memory: 65536, iterations: 3, parallelism: 4 },
+        public_key: publicKeyBuf.toString('hex'),
+        encrypted_private_key: encrypted.toString('hex'),
+      };
+
+      const res = await fetch(`${api}/api/v1/auth/register`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(data),
+        body: JSON.stringify(body),
       });
       return await res.json();
-    } catch {
+    } catch (err) {
       return { error: 'Failed to connect to backend' };
     }
   });
 
   ipcMain.handle('vault:list', async (_event, token: string) => {
-    if (!sidecarPort) return { error: 'Sidecar not running' };
+    const api = getApiBase();
+    if (!api) return { error: 'Backend not available' };
     try {
-      const res = await fetch(`http://127.0.0.1:${sidecarPort}/api/v1/vault/entries`, {
+      const res = await fetch(`${api}/api/v1/vault/entries`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       return await res.json();
@@ -196,9 +239,10 @@ function registerIpcHandlers(): void {
   });
 
   ipcMain.handle('vault:get', async (_event, token: string, entryId: string) => {
-    if (!sidecarPort) return { error: 'Sidecar not running' };
+    const api = getApiBase();
+    if (!api) return { error: 'Backend not available' };
     try {
-      const res = await fetch(`http://127.0.0.1:${sidecarPort}/api/v1/vault/entries/${encodeURIComponent(entryId)}`, {
+      const res = await fetch(`${api}/api/v1/vault/entries/${encodeURIComponent(entryId)}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       return await res.json();
@@ -208,9 +252,10 @@ function registerIpcHandlers(): void {
   });
 
   ipcMain.handle('vault:create', async (_event, token: string, data: Record<string, unknown>) => {
-    if (!sidecarPort) return { error: 'Sidecar not running' };
+    const api = getApiBase();
+    if (!api) return { error: 'Backend not available' };
     try {
-      const res = await fetch(`http://127.0.0.1:${sidecarPort}/api/v1/vault/entries`, {
+      const res = await fetch(`${api}/api/v1/vault/entries`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -225,9 +270,10 @@ function registerIpcHandlers(): void {
   });
 
   ipcMain.handle('vault:update', async (_event, token: string, entryId: string, data: Record<string, unknown>) => {
-    if (!sidecarPort) return { error: 'Sidecar not running' };
+    const api = getApiBase();
+    if (!api) return { error: 'Backend not available' };
     try {
-      const res = await fetch(`http://127.0.0.1:${sidecarPort}/api/v1/vault/entries/${encodeURIComponent(entryId)}`, {
+      const res = await fetch(`${api}/api/v1/vault/entries/${encodeURIComponent(entryId)}`, {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
@@ -242,9 +288,10 @@ function registerIpcHandlers(): void {
   });
 
   ipcMain.handle('vault:delete', async (_event, token: string, entryId: string) => {
-    if (!sidecarPort) return { error: 'Sidecar not running' };
+    const api = getApiBase();
+    if (!api) return { error: 'Backend not available' };
     try {
-      const res = await fetch(`http://127.0.0.1:${sidecarPort}/api/v1/vault/entries/${encodeURIComponent(entryId)}`, {
+      const res = await fetch(`${api}/api/v1/vault/entries/${encodeURIComponent(entryId)}`, {
         method: 'DELETE',
         headers: { Authorization: `Bearer ${token}` },
       });

@@ -35,7 +35,7 @@ export function Login() {
       }
 
       login(
-        result.token as string,
+        (result.access_token ?? result.token) as string,
         result.user_id as string,
         email,
         result.role as string | undefined,
