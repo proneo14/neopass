@@ -19,6 +19,7 @@ import (
 	"github.com/password-manager/password-manager/internal/auth"
 	"github.com/password-manager/password-manager/internal/config"
 	"github.com/password-manager/password-manager/internal/db"
+	syncsvc "github.com/password-manager/password-manager/internal/sync"
 	"github.com/password-manager/password-manager/internal/vault"
 )
 
@@ -77,12 +78,14 @@ func main() {
 	var smsService *auth.SMSService
 	var vaultService *vault.Service
 	var adminService *admin.Service
+	var syncService *syncsvc.Service
 	if database != nil {
 		userRepo := db.NewUserRepo(database.Pool)
 		totpRepo := db.NewTOTPRepo(database.Pool)
 		vaultRepo := db.NewVaultRepo(database.Pool)
 		orgRepo := db.NewOrgRepo(database.Pool)
 		auditRepo := db.NewAuditRepo(database.Pool)
+		syncRepo := db.NewSyncRepo(database.Pool)
 		var authErr error
 		authService, authErr = auth.NewService(userRepo, nil, nil, auth.ServiceConfig{})
 		if authErr != nil {
@@ -91,6 +94,7 @@ func main() {
 		totpService = auth.NewTOTPService(totpRepo, userRepo)
 		vaultService = vault.NewService(vaultRepo)
 		adminService = admin.NewService(orgRepo, userRepo, vaultRepo, auditRepo)
+		syncService = syncsvc.NewService(vaultRepo, syncRepo)
 
 		if cfg.EnableSMS2FA {
 			smsService = auth.NewSMSService(auth.SMSConfig{
@@ -108,7 +112,7 @@ func main() {
 		})
 
 		if authService != nil {
-			r.Mount("/", api.Router(authService, totpService, smsService, vaultService, adminService))
+			r.Mount("/", api.Router(authService, totpService, smsService, vaultService, adminService, syncService))
 		}
 	})
 

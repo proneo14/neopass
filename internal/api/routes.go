@@ -9,17 +9,19 @@ import (
 
 	"github.com/password-manager/password-manager/internal/admin"
 	"github.com/password-manager/password-manager/internal/auth"
+	syncsvc "github.com/password-manager/password-manager/internal/sync"
 	"github.com/password-manager/password-manager/internal/vault"
 )
 
 // Router sets up all API v1 routes.
-func Router(authService *auth.Service, totpService *auth.TOTPService, smsService *auth.SMSService, vaultService *vault.Service, adminService *admin.Service) chi.Router {
+func Router(authService *auth.Service, totpService *auth.TOTPService, smsService *auth.SMSService, vaultService *vault.Service, adminService *admin.Service, syncService *syncsvc.Service) chi.Router {
 	r := chi.NewRouter()
 
 	authHandler := NewAuthHandler(authService)
 	tfaHandler := NewTwoFactorHandler(totpService, smsService, authService)
 	vaultHandler := NewVaultHandler(vaultService)
 	adminHandler := NewAdminHandler(adminService)
+	syncHandler := NewSyncHandler(syncService)
 
 	// Rate limiter for auth endpoints: 5 requests per minute per IP
 	authLimiter := NewRateLimiter(5, 1*time.Minute)
@@ -79,9 +81,11 @@ func Router(authService *auth.Service, totpService *auth.TOTPService, smsService
 			})
 		})
 
-		// Sync routes (Prompt 8)
+		// Sync routes
 		r.Route("/sync", func(r chi.Router) {
-			r.Get("/", placeholder("sync endpoints coming soon"))
+			r.Post("/pull", syncHandler.Pull)
+			r.Post("/push", syncHandler.Push)
+			r.Post("/resolve", syncHandler.Resolve)
 		})
 	})
 

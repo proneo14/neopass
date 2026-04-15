@@ -19,6 +19,7 @@ type VaultEntry struct {
 	Nonce         []byte    `json:"nonce"`
 	Version       int       `json:"version"`
 	FolderID      *string   `json:"folder_id,omitempty"`
+	IsDeleted     bool      `json:"is_deleted"`
 	CreatedAt     time.Time `json:"created_at"`
 	UpdatedAt     time.Time `json:"updated_at"`
 }
@@ -68,12 +69,12 @@ func (r *VaultRepo) CreateEntry(ctx context.Context, entry VaultEntry) (VaultEnt
 func (r *VaultRepo) GetEntry(ctx context.Context, entryID, userID string) (VaultEntry, error) {
 	var out VaultEntry
 	err := r.pool.QueryRow(ctx,
-		`SELECT id, user_id, org_id, entry_type, encrypted_data, nonce, version, folder_id, created_at, updated_at
+		`SELECT id, user_id, org_id, entry_type, encrypted_data, nonce, version, folder_id, is_deleted, created_at, updated_at
 		 FROM vault_entries
-		 WHERE id = $1 AND user_id = $2`,
+		 WHERE id = $1 AND user_id = $2 AND is_deleted = false`,
 		entryID, userID,
 	).Scan(&out.ID, &out.UserID, &out.OrgID, &out.EntryType, &out.EncryptedData, &out.Nonce,
-		&out.Version, &out.FolderID, &out.CreatedAt, &out.UpdatedAt)
+		&out.Version, &out.FolderID, &out.IsDeleted, &out.CreatedAt, &out.UpdatedAt)
 	if err != nil {
 		if err == pgx.ErrNoRows {
 			return VaultEntry{}, fmt.Errorf("vault entry not found")
@@ -83,11 +84,11 @@ func (r *VaultRepo) GetEntry(ctx context.Context, entryID, userID string) (Vault
 	return out, nil
 }
 
-// ListEntries returns vault entries for a user with optional filters.
+// ListEntries returns vault entries for a user with optional filters (excludes soft-deleted).
 func (r *VaultRepo) ListEntries(ctx context.Context, userID string, filters VaultFilters) ([]VaultEntry, error) {
-	query := `SELECT id, user_id, org_id, entry_type, encrypted_data, nonce, version, folder_id, created_at, updated_at
+	query := `SELECT id, user_id, org_id, entry_type, encrypted_data, nonce, version, folder_id, is_deleted, created_at, updated_at
 	          FROM vault_entries
-	          WHERE user_id = $1`
+	          WHERE user_id = $1 AND is_deleted = false`
 	args := []interface{}{userID}
 	argIdx := 2
 
@@ -119,7 +120,7 @@ func (r *VaultRepo) ListEntries(ctx context.Context, userID string, filters Vaul
 	for rows.Next() {
 		var e VaultEntry
 		if err := rows.Scan(&e.ID, &e.UserID, &e.OrgID, &e.EntryType, &e.EncryptedData, &e.Nonce,
-			&e.Version, &e.FolderID, &e.CreatedAt, &e.UpdatedAt); err != nil {
+			&e.Version, &e.FolderID, &e.IsDeleted, &e.CreatedAt, &e.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("scan vault entry: %w", err)
 		}
 		entries = append(entries, e)
@@ -134,10 +135,10 @@ func (r *VaultRepo) UpdateEntry(ctx context.Context, entry VaultEntry) (VaultEnt
 		`UPDATE vault_entries
 		 SET encrypted_data = $1, nonce = $2, entry_type = $3, folder_id = $4, version = version + 1
 		 WHERE id = $5 AND user_id = $6
-		 RETURNING id, user_id, org_id, entry_type, encrypted_data, nonce, version, folder_id, created_at, updated_at`,
+		 RETURNING id, user_id, org_id, entry_type, encrypted_data, nonce, version, folder_id, is_deleted, created_at, updated_at`,
 		entry.EncryptedData, entry.Nonce, entry.EntryType, entry.FolderID, entry.ID, entry.UserID,
 	).Scan(&out.ID, &out.UserID, &out.OrgID, &out.EntryType, &out.EncryptedData, &out.Nonce,
-		&out.Version, &out.FolderID, &out.CreatedAt, &out.UpdatedAt)
+		&out.Version, &out.FolderID, &out.IsDeleted, &out.CreatedAt, &out.UpdatedAt)
 	if err != nil {
 		if err == pgx.ErrNoRows {
 			return VaultEntry{}, fmt.Errorf("vault entry not found")
@@ -147,10 +148,11 @@ func (r *VaultRepo) UpdateEntry(ctx context.Context, entry VaultEntry) (VaultEnt
 	return out, nil
 }
 
-// DeleteEntry removes a vault entry by ID, scoped to the user.
+// DeleteEntry soft-deletes a vault entry by ID, scoped to the user.
 func (r *VaultRepo) DeleteEntry(ctx context.Context, entryID, userID string) error {
 	tag, err := r.pool.Exec(ctx,
-		`DELETE FROM vault_entries WHERE id = $1 AND user_id = $2`,
+		`UPDATE vault_entries SET is_deleted = true, version = version + 1
+		 WHERE id = $1 AND user_id = $2 AND is_deleted = false`,
 		entryID, userID,
 	)
 	if err != nil {
@@ -160,6 +162,73 @@ func (r *VaultRepo) DeleteEntry(ctx context.Context, entryID, userID string) err
 		return fmt.Errorf("vault entry not found")
 	}
 	return nil
+}
+
+// ListEntriesForSync returns all vault entries (including soft-deleted) updated after the given time.
+func (r *VaultRepo) ListEntriesForSync(ctx context.Context, userID string, since time.Time) ([]VaultEntry, error) {
+	rows, err := r.pool.Query(ctx,
+		`SELECT id, user_id, org_id, entry_type, encrypted_data, nonce, version, folder_id, is_deleted, created_at, updated_at
+		 FROM vault_entries
+		 WHERE user_id = $1 AND updated_at > $2
+		 ORDER BY updated_at ASC`,
+		userID, since,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("list entries for sync: %w", err)
+	}
+	defer rows.Close()
+
+	var entries []VaultEntry
+	for rows.Next() {
+		var e VaultEntry
+		if err := rows.Scan(&e.ID, &e.UserID, &e.OrgID, &e.EntryType, &e.EncryptedData, &e.Nonce,
+			&e.Version, &e.FolderID, &e.IsDeleted, &e.CreatedAt, &e.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("scan sync entry: %w", err)
+		}
+		entries = append(entries, e)
+	}
+	return entries, rows.Err()
+}
+
+// GetEntryByID retrieves a vault entry by ID only (no user scope, no soft-delete filter). Used for sync conflict checks.
+func (r *VaultRepo) GetEntryByID(ctx context.Context, entryID string) (VaultEntry, error) {
+	var out VaultEntry
+	err := r.pool.QueryRow(ctx,
+		`SELECT id, user_id, org_id, entry_type, encrypted_data, nonce, version, folder_id, is_deleted, created_at, updated_at
+		 FROM vault_entries WHERE id = $1`,
+		entryID,
+	).Scan(&out.ID, &out.UserID, &out.OrgID, &out.EntryType, &out.EncryptedData, &out.Nonce,
+		&out.Version, &out.FolderID, &out.IsDeleted, &out.CreatedAt, &out.UpdatedAt)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return VaultEntry{}, fmt.Errorf("vault entry not found")
+		}
+		return VaultEntry{}, fmt.Errorf("get entry by id: %w", err)
+	}
+	return out, nil
+}
+
+// UpdateEntryVersioned updates a vault entry only if the current version matches expectedVersion.
+// Returns the updated entry or an error.
+func (r *VaultRepo) UpdateEntryVersioned(ctx context.Context, entry VaultEntry, expectedVersion int) (VaultEntry, error) {
+	var out VaultEntry
+	err := r.pool.QueryRow(ctx,
+		`UPDATE vault_entries
+		 SET encrypted_data = $1, nonce = $2, entry_type = $3, folder_id = $4,
+		     is_deleted = $5, version = version + 1
+		 WHERE id = $6 AND user_id = $7 AND version = $8
+		 RETURNING id, user_id, org_id, entry_type, encrypted_data, nonce, version, folder_id, is_deleted, created_at, updated_at`,
+		entry.EncryptedData, entry.Nonce, entry.EntryType, entry.FolderID,
+		entry.IsDeleted, entry.ID, entry.UserID, expectedVersion,
+	).Scan(&out.ID, &out.UserID, &out.OrgID, &out.EntryType, &out.EncryptedData, &out.Nonce,
+		&out.Version, &out.FolderID, &out.IsDeleted, &out.CreatedAt, &out.UpdatedAt)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return VaultEntry{}, fmt.Errorf("version conflict")
+		}
+		return VaultEntry{}, fmt.Errorf("update entry versioned: %w", err)
+	}
+	return out, nil
 }
 
 // CreateFolder inserts a new folder and returns it.
