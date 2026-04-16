@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useAuthStore } from '../store/authStore';
 import { PasswordGenerator } from '../components/PasswordGenerator';
 
@@ -174,12 +174,116 @@ function TwoFactorModal({ onClose }: { onClose: () => void }) {
   );
 }
 
+function BiometricEnrollModal({ onClose, onConfirm }: { onClose: () => void; onConfirm: (password: string) => void }) {
+  const [password, setPassword] = useState('');
+  const [error, setError] = useState('');
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!password.trim()) {
+      setError('Please enter your master password');
+      return;
+    }
+    onConfirm(password);
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={onClose}>
+      <div className="bg-surface-800 rounded-lg p-5 w-96 shadow-2xl" onClick={(e) => e.stopPropagation()}>
+        <h3 className="text-sm font-semibold text-surface-100 mb-2">Enable Biometric Unlock</h3>
+        <p className="text-xs text-surface-400 mb-4">
+          Enter your master password to securely store it for biometric unlock. Your password will be encrypted and protected by Windows Hello.
+        </p>
+        <form onSubmit={handleSubmit} className="space-y-3">
+          <input
+            type="password"
+            placeholder="Master password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            autoFocus
+            required
+            className="w-full px-3 py-2 rounded-md bg-surface-900 border border-surface-600 text-surface-100 text-sm placeholder-surface-500 focus:outline-none focus:ring-2 focus:ring-accent-500"
+          />
+          {error && <p className="text-xs text-red-400">{error}</p>}
+          <div className="flex gap-2 pt-1">
+            <button type="button" onClick={onClose} className="flex-1 py-2 rounded-md bg-surface-700 text-surface-300 text-sm hover:bg-surface-600 transition-colors">
+              Cancel
+            </button>
+            <button type="submit" className="flex-1 py-2 rounded-md bg-accent-600 hover:bg-accent-500 text-white text-sm font-medium transition-colors">
+              Enable
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
 export function Settings() {
   const { email } = useAuthStore();
   const [autoLock, setAutoLock] = useState<AutoLockOption>('15');
   const [biometricEnabled, setBiometricEnabled] = useState(false);
+  const [biometricAvailable, setBiometricAvailable] = useState(false);
+  const [biometricLoading, setBiometricLoading] = useState(false);
+  const [biometricChecking, setBiometricChecking] = useState(true);
+  const [biometricError, setBiometricError] = useState('');
+  const [showBiometricEnroll, setShowBiometricEnroll] = useState(false);
   const [showChangePw, setShowChangePw] = useState(false);
   const [show2fa, setShow2fa] = useState(false);
+
+  useEffect(() => {
+    (async () => {
+      const available = await window.api.biometric.isAvailable();
+      setBiometricAvailable(available);
+      if (available) {
+        const configured = await window.api.biometric.isConfigured();
+        setBiometricEnabled(configured);
+      }
+      setBiometricChecking(false);
+    })();
+  }, []);
+
+  const handleBiometricToggle = async (enabled: boolean) => {
+    setBiometricError('');
+    if (enabled) {
+      setShowBiometricEnroll(true);
+    } else {
+      setBiometricLoading(true);
+      try {
+        const result = await window.api.biometric.disable();
+        if (result.error) {
+          setBiometricError(result.error);
+        } else {
+          setBiometricEnabled(false);
+        }
+      } catch {
+        setBiometricError('Failed to disable biometric');
+      } finally {
+        setBiometricLoading(false);
+      }
+    }
+  };
+
+  const handleBiometricEnroll = async (password: string) => {
+    setBiometricError('');
+    setBiometricLoading(true);
+    setShowBiometricEnroll(false);
+    try {
+      const result = await window.api.biometric.enableWithPassword({
+        email: email ?? '',
+        password,
+      });
+      if (result.error) {
+        setBiometricError(result.error);
+      } else {
+        setBiometricEnabled(true);
+      }
+    } catch {
+      setBiometricError('Biometric enrollment failed');
+    } finally {
+      setBiometricLoading(false);
+    }
+  };
 
   return (
     <div>
@@ -197,7 +301,13 @@ export function Settings() {
               </div>
             </div>
             <button
-              onClick={() => setShowChangePw(true)}
+              onClick={async () => {
+                if (biometricEnabled) {
+                  const result = await window.api.biometric.verify();
+                  if (!result.success) return;
+                }
+                setShowChangePw(true);
+              }}
               className="w-full text-left px-4 py-3 rounded-md bg-surface-800 hover:bg-surface-700 text-sm text-surface-200 transition-colors flex items-center justify-between"
             >
               Change Master Password
@@ -218,11 +328,20 @@ export function Settings() {
           <h2 className="text-xs font-semibold text-surface-500 uppercase tracking-wider mb-3">Security</h2>
           <div className="space-y-2">
             <SettingsToggle
-              label="Biometric Unlock"
-              description="Use Windows Hello or fingerprint to unlock"
+              label={biometricLoading ? 'Biometric Unlock (working…)' : biometricChecking ? 'Biometric Unlock (checking…)' : 'Biometric Unlock'}
+              description={
+                biometricChecking
+                  ? 'Checking availability…'
+                  : biometricAvailable
+                    ? 'Use Windows Hello or fingerprint to unlock'
+                    : 'Not available on this device'
+              }
               checked={biometricEnabled}
-              onChange={setBiometricEnabled}
+              onChange={biometricAvailable && !biometricLoading && !biometricChecking ? handleBiometricToggle : () => {}}
             />
+            {biometricError && (
+              <p className="text-xs text-red-400 px-4">{biometricError}</p>
+            )}
             <div className="px-4 py-3 rounded-md bg-surface-800">
               <div className="flex items-center justify-between">
                 <p className="text-sm text-surface-200">Auto-Lock Timeout</p>
@@ -260,13 +379,19 @@ export function Settings() {
 
         {/* About */}
         <div className="pt-4 border-t border-surface-800">
-          <p className="text-xs text-surface-600">Quantum Password Manager v1.0.0</p>
+          <p className="text-xs text-surface-600">LGI Pass v1.0.0</p>
           <p className="text-xs text-surface-700 mt-0.5">Post-quantum encryption: X-Wing KEM + AES-256-GCM</p>
         </div>
       </div>
 
       {showChangePw && <ChangePasswordModal onClose={() => setShowChangePw(false)} />}
       {show2fa && <TwoFactorModal onClose={() => setShow2fa(false)} />}
+      {showBiometricEnroll && (
+        <BiometricEnrollModal
+          onClose={() => setShowBiometricEnroll(false)}
+          onConfirm={handleBiometricEnroll}
+        />
+      )}
     </div>
   );
 }

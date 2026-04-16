@@ -3,6 +3,15 @@ import path from 'path';
 import fs from 'fs';
 import nodeCrypto from 'crypto';
 import { spawn, ChildProcess } from 'child_process';
+import {
+  isBiometricAvailable,
+  isBiometricConfigured,
+  enableBiometric,
+  unlockWithBiometric,
+  verifyBiometric,
+  disableBiometric,
+  warmUpBiometric,
+} from './biometric';
 
 let mainWindow: BrowserWindow | null = null;
 let sidecarProcess: ChildProcess | null = null;
@@ -300,6 +309,112 @@ function registerIpcHandlers(): void {
       return { error: 'Failed to connect to backend' };
     }
   });
+
+  // --- Biometric IPC handlers ---
+
+  ipcMain.handle('biometric:available', async () => {
+    const result = await isBiometricAvailable();
+    console.log('[ipc] biometric:available =', result);
+    return result;
+  });
+
+  ipcMain.handle('biometric:configured', () => {
+    const result = isBiometricConfigured();
+    console.log('[ipc] biometric:configured =', result);
+    return result;
+  });
+
+  ipcMain.handle('biometric:enable', async (_event, credentialsJson: string) => {
+    try {
+      if (typeof credentialsJson !== 'string' || credentialsJson.length === 0) {
+        return { success: false, error: 'Invalid credentials' };
+      }
+      await enableBiometric(credentialsJson);
+      return { success: true };
+    } catch (err) {
+      return { success: false, error: (err as Error).message };
+    }
+  });
+
+  ipcMain.handle('biometric:enableWithPassword', async (_event, data: { email: string; password: string }) => {
+    try {
+      // Derive keys using the same KDF as the login flow
+      const salt = nodeCrypto.createHash('sha256').update(data.email).digest();
+      const derived = nodeCrypto.pbkdf2Sync(data.password, salt, 100000, 64, 'sha512');
+      const authHashHex = derived.subarray(32, 64).toString('hex');
+
+      // Verify credentials against the backend first
+      const api = getApiBase();
+      if (api) {
+        const res = await fetch(`${api}/api/v1/auth/login`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email: data.email, auth_hash: authHashHex }),
+        });
+        const result = await res.json() as Record<string, unknown>;
+        if (result.error) {
+          return { success: false, error: result.error as string };
+        }
+      }
+
+      // Store email + authHash so biometric unlock can re-authenticate
+      const credentialsJson = JSON.stringify({
+        email: data.email,
+        authHash: authHashHex,
+      });
+      await enableBiometric(credentialsJson);
+
+      // Zero the derived buffer
+      derived.fill(0);
+      console.log('[ipc] biometric:enableWithPassword success');
+      return { success: true };
+    } catch (err) {
+      return { success: false, error: (err as Error).message };
+    }
+  });
+
+  ipcMain.handle('biometric:unlock', async () => {
+    try {
+      const credentialsJson = await unlockWithBiometric();
+      const creds = JSON.parse(credentialsJson) as { email: string; authHash: string };
+
+      // Authenticate with the backend using the stored credentials
+      const api = getApiBase();
+      if (!api) return { error: 'Backend not available' };
+
+      const res = await fetch(`${api}/api/v1/auth/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: creds.email, auth_hash: creds.authHash }),
+      });
+      const result = await res.json() as Record<string, unknown>;
+      if (result.error) {
+        return { error: result.error as string };
+      }
+      // Return the login result with email included
+      return { ...result, email: creds.email };
+    } catch (err) {
+      return { error: (err as Error).message };
+    }
+  });
+
+  ipcMain.handle('biometric:verify', async () => {
+    try {
+      await verifyBiometric();
+      return { success: true };
+    } catch (err) {
+      return { success: false, error: (err as Error).message };
+    }
+  });
+
+  ipcMain.handle('biometric:disable', async () => {
+    try {
+      await disableBiometric();
+      return { success: true };
+    } catch (err) {
+      return { success: false, error: (err as Error).message };
+    }
+  });
 }
 
 // App lifecycle
@@ -307,6 +422,9 @@ app.whenReady().then(async () => {
   await startSidecar();
   registerIpcHandlers();
   createWindow();
+
+  // Pre-warm the Windows Hello daemon in the background so biometric prompts are fast
+  warmUpBiometric();
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {

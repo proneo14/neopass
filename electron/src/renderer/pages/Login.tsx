@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../store/authStore';
 
@@ -9,9 +9,57 @@ export function Login() {
   const [needs2fa, setNeeds2fa] = useState(false);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [biometricAvailable, setBiometricAvailable] = useState(false);
+  const [biometricLoading, setBiometricLoading] = useState(false);
+  const [showManualLogin, setShowManualLogin] = useState(false);
 
   const login = useAuthStore((s) => s.login);
   const navigate = useNavigate();
+
+  const handleBiometricUnlock = async () => {
+    setError('');
+    setBiometricLoading(true);
+    try {
+      const result = await window.api.biometric.unlock();
+      if (result.error) {
+        setError(result.error as string);
+        setShowManualLogin(true);
+        return;
+      }
+      if (result.access_token || result.token) {
+        login(
+          (result.access_token ?? result.token) as string,
+          result.user_id as string,
+          (result.email ?? '') as string,
+          result.role as string | undefined,
+        );
+        navigate('/vault');
+      }
+    } catch {
+      setError('Biometric unlock failed');
+      setShowManualLogin(true);
+    } finally {
+      setBiometricLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    (async () => {
+      const available = await window.api.biometric.isAvailable();
+      if (available) {
+        const configured = await window.api.biometric.isConfigured();
+        setBiometricAvailable(configured);
+        if (configured) {
+          // Auto-trigger biometric unlock immediately
+          handleBiometricUnlock();
+        } else {
+          setShowManualLogin(true);
+        }
+      } else {
+        setShowManualLogin(true);
+      }
+    })();
+  }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -57,74 +105,115 @@ export function Login() {
       <div className="w-full max-w-sm px-6">
         <div className="text-center mb-8">
           <span className="text-4xl">🔑</span>
-          <h1 className="mt-3 text-xl font-semibold text-surface-100">Quantum Password Manager</h1>
+          <h1 className="mt-3 text-xl font-semibold text-surface-100">LGI Pass</h1>
           <p className="mt-1 text-sm text-surface-400">Unlock your vault</p>
         </div>
 
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <div>
-            <label htmlFor="email" className="block text-xs font-medium text-surface-400 mb-1">
-              Email
-            </label>
-            <input
-              id="email"
-              type="email"
-              autoComplete="email"
-              required
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              className="w-full px-3 py-2 rounded-md bg-surface-800 border border-surface-600 text-surface-100 text-sm placeholder-surface-500 focus:outline-none focus:ring-2 focus:ring-accent-500 focus:border-transparent"
-              placeholder="you@example.com"
-            />
+        {error && (
+          <div className="text-sm text-red-400 bg-red-400/10 px-3 py-2 rounded-md mb-4">{error}</div>
+        )}
+
+        {/* Biometric primary unlock */}
+        {biometricAvailable && (
+          <div className="mb-4">
+            <button
+              type="button"
+              disabled={biometricLoading}
+              onClick={handleBiometricUnlock}
+              className="w-full py-3 rounded-md bg-accent-600 hover:bg-accent-500 text-white text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+            >
+              <span>🔓</span>
+              {biometricLoading ? 'Verifying…' : 'Unlock with Biometrics'}
+            </button>
+
+            {!showManualLogin && (
+              <button
+                type="button"
+                onClick={() => setShowManualLogin(true)}
+                className="w-full mt-3 text-xs text-surface-500 hover:text-surface-300 transition-colors"
+              >
+                Use email &amp; password instead
+              </button>
+            )}
           </div>
+        )}
 
-          <div>
-            <label htmlFor="password" className="block text-xs font-medium text-surface-400 mb-1">
-              Master Password
-            </label>
-            <input
-              id="password"
-              type="password"
-              autoComplete="current-password"
-              required
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              className="w-full px-3 py-2 rounded-md bg-surface-800 border border-surface-600 text-surface-100 text-sm placeholder-surface-500 focus:outline-none focus:ring-2 focus:ring-accent-500 focus:border-transparent"
-              placeholder="Master password"
-            />
-          </div>
+        {/* Manual email/password login */}
+        {showManualLogin && (
+          <>
+            {biometricAvailable && (
+              <div className="relative my-4">
+                <div className="absolute inset-0 flex items-center">
+                  <div className="w-full border-t border-surface-700" />
+                </div>
+                <div className="relative flex justify-center">
+                  <span className="px-2 bg-surface-950 text-xs text-surface-500">or sign in manually</span>
+                </div>
+              </div>
+            )}
 
-          {needs2fa && (
-            <div>
-              <label htmlFor="totp" className="block text-xs font-medium text-surface-400 mb-1">
-                Two-Factor Code
-              </label>
-              <input
-                id="totp"
-                type="text"
-                inputMode="numeric"
-                maxLength={6}
-                required
-                value={twoFactorCode}
-                onChange={(e) => setTwoFactorCode(e.target.value.replace(/\D/g, ''))}
-                className="w-full px-3 py-2 rounded-md bg-surface-800 border border-surface-600 text-surface-100 text-sm placeholder-surface-500 focus:outline-none focus:ring-2 focus:ring-accent-500 focus:border-transparent"
-                placeholder="123456"
-              />
-            </div>
-          )}
+            <form onSubmit={handleSubmit} className="space-y-4">
+              <div>
+                <label htmlFor="email" className="block text-xs font-medium text-surface-400 mb-1">
+                  Email
+                </label>
+                <input
+                  id="email"
+                  type="email"
+                  autoComplete="email"
+                  required
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  className="w-full px-3 py-2 rounded-md bg-surface-800 border border-surface-600 text-surface-100 text-sm placeholder-surface-500 focus:outline-none focus:ring-2 focus:ring-accent-500 focus:border-transparent"
+                  placeholder="you@example.com"
+                />
+              </div>
 
-          {error && (
-            <div className="text-sm text-red-400 bg-red-400/10 px-3 py-2 rounded-md">{error}</div>
-          )}
+              <div>
+                <label htmlFor="password" className="block text-xs font-medium text-surface-400 mb-1">
+                  Master Password
+                </label>
+                <input
+                  id="password"
+                  type="password"
+                  autoComplete="current-password"
+                  required
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  className="w-full px-3 py-2 rounded-md bg-surface-800 border border-surface-600 text-surface-100 text-sm placeholder-surface-500 focus:outline-none focus:ring-2 focus:ring-accent-500 focus:border-transparent"
+                  placeholder="Master password"
+                />
+              </div>
 
-          <button
-            type="submit"
-            disabled={loading}
-            className="w-full py-2 rounded-md bg-accent-600 hover:bg-accent-500 text-white text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            {loading ? 'Unlocking…' : 'Unlock'}
-          </button>
-        </form>
+              {needs2fa && (
+                <div>
+                  <label htmlFor="totp" className="block text-xs font-medium text-surface-400 mb-1">
+                    Two-Factor Code
+                  </label>
+                  <input
+                    id="totp"
+                    type="text"
+                    inputMode="numeric"
+                    maxLength={6}
+                    required
+                    value={twoFactorCode}
+                    onChange={(e) => setTwoFactorCode(e.target.value.replace(/\D/g, ''))}
+                    className="w-full px-3 py-2 rounded-md bg-surface-800 border border-surface-600 text-surface-100 text-sm placeholder-surface-500 focus:outline-none focus:ring-2 focus:ring-accent-500 focus:border-transparent"
+                    placeholder="123456"
+                  />
+                </div>
+              )}
+
+              <button
+                type="submit"
+                disabled={loading}
+                className="w-full py-2 rounded-md bg-accent-600 hover:bg-accent-500 text-white text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {loading ? 'Unlocking…' : 'Unlock'}
+              </button>
+            </form>
+          </>
+        )}
 
         <p className="mt-6 text-center text-xs text-surface-500">
           Don&apos;t have an account?{' '}
