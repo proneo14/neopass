@@ -27,11 +27,21 @@ export function Login() {
         return;
       }
       if (result.access_token || result.token) {
+        const masterKey = (result.master_key_hex ?? '') as string;
+        if (!masterKey) {
+          // Old biometric blob missing master key — need manual login to derive it
+          setError('Please sign in with your password to update biometric enrollment.');
+          setShowManualLogin(true);
+          // Disable the old biometric enrollment so user re-enrolls in Settings
+          await window.api.biometric.disable();
+          return;
+        }
         login(
           (result.access_token ?? result.token) as string,
           result.user_id as string,
           (result.email ?? '') as string,
           result.role as string | undefined,
+          masterKey,
         );
         navigate('/vault');
       }
@@ -87,6 +97,7 @@ export function Login() {
         result.user_id as string,
         email,
         result.role as string | undefined,
+        (result.master_key_hex ?? '') as string,
       );
       navigate('/vault');
     } catch {

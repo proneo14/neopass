@@ -1,6 +1,7 @@
 import React, { useState, useMemo, useRef, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useVaultStore } from '../store/vaultStore';
+import { useAuthStore } from '../store/authStore';
 import { ENTRY_TYPE_ICONS, ENTRY_TYPE_LABELS } from '../types/vault';
 import { PasswordGenerator } from '../components/PasswordGenerator';
 import type { VaultEntry } from '../types/vault';
@@ -198,10 +199,71 @@ function NewEntryModal({ entryType, onCancel, onSave }: {
 
 export function Vault() {
   const navigate = useNavigate();
-  const { entries, entryFields, addEntry, searchQuery, setSearchQuery, sortBy, setSortBy, selectedTypeFilter, setSelectedTypeFilter } = useVaultStore();
+  const { entries, entryFields, addEntry, setEntries, removeEntry, searchQuery, setSearchQuery, sortBy, setSortBy, selectedTypeFilter, setSelectedTypeFilter } = useVaultStore();
+  const { token, masterKeyHex } = useAuthStore();
   const [showAddDropdown, setShowAddDropdown] = useState(false);
   const [newEntryType, setNewEntryType] = useState<string | null>(null);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; entryId: string } | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  // Load entries from backend on mount
+  useEffect(() => {
+    if (!token || !masterKeyHex) {
+      setLoading(false);
+      return;
+    }
+    let cancelled = false;
+
+    (async () => {
+      try {
+        const listResult = await window.api.vault.list(token) as { error?: string } | Array<{ id: string; entry_type: string; folder_id: string | null; version: number; created_at: string; updated_at: string }>;
+        if (!Array.isArray(listResult)) {
+          console.error('[vault] list returned non-array:', listResult);
+          return;
+        }
+        if (cancelled) return;
+
+        const loadedEntries: VaultEntry[] = [];
+        const loadedFields: Record<string, Record<string, string>> = {};
+
+        for (const summary of listResult) {
+          const detail = await window.api.vault.get(token, summary.id) as { id: string; entry_type: string; encrypted_data: string; nonce: string; folder_id: string | null; version: number; created_at: string; updated_at: string; error?: string };
+          if (cancelled) return;
+          if (detail.error || !detail.encrypted_data || !detail.nonce) continue;
+
+          const decResult = await window.api.vault.decrypt(masterKeyHex, detail.encrypted_data, detail.nonce);
+          if (decResult.error || !decResult.plaintext) continue;
+
+          try {
+            const fields = JSON.parse(decResult.plaintext) as Record<string, string>;
+            loadedEntries.push({
+              id: detail.id,
+              entry_type: detail.entry_type as VaultEntry['entry_type'],
+              encrypted_data: detail.encrypted_data,
+              nonce: detail.nonce,
+              version: detail.version,
+              folder_id: detail.folder_id ?? null,
+              created_at: detail.created_at,
+              updated_at: detail.updated_at,
+            });
+            loadedFields[detail.id] = fields;
+          } catch { /* skip entries that fail to parse */ }
+        }
+
+        if (!cancelled) {
+          useVaultStore.getState().setEntries(loadedEntries);
+          // Load all decrypted fields into the store
+          for (const [id, fields] of Object.entries(loadedFields)) {
+            useVaultStore.getState().updateEntryFields(id, fields);
+          }
+        }
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+
+    return () => { cancelled = true; };
+  }, [token, masterKeyHex]);
 
 
 
@@ -243,17 +305,32 @@ export function Vault() {
     setNewEntryType(type);
   };
 
-  const handleSaveNewEntry = (type: string, fields: Record<string, string>) => {
-    const now = new Date().toISOString();
+  const handleSaveNewEntry = async (type: string, fields: Record<string, string>) => {
+    if (!token || !masterKeyHex) return;
+
+    // Encrypt the fields
+    const plaintext = JSON.stringify(fields);
+    const encResult = await window.api.vault.encrypt(masterKeyHex, plaintext);
+    if (encResult.error) return;
+
+    // Save to backend
+    const createResult = await window.api.vault.create(token, {
+      entry_type: type,
+      encrypted_data: encResult.encrypted_data,
+      nonce: encResult.nonce,
+    }) as { id: string; entry_type: string; encrypted_data: string; nonce: string; version: number; folder_id: string | null; created_at: string; updated_at: string; error?: string };
+
+    if (createResult.error) return;
+
     const newEntry: VaultEntry = {
-      id: crypto.randomUUID(),
-      entry_type: type as VaultEntry['entry_type'],
-      encrypted_data: '',
-      nonce: '',
-      version: 1,
-      folder_id: null,
-      created_at: now,
-      updated_at: now,
+      id: createResult.id,
+      entry_type: createResult.entry_type as VaultEntry['entry_type'],
+      encrypted_data: createResult.encrypted_data,
+      nonce: createResult.nonce,
+      version: createResult.version,
+      folder_id: createResult.folder_id ?? null,
+      created_at: createResult.created_at,
+      updated_at: createResult.updated_at,
     };
     addEntry(newEntry, fields);
     setNewEntryType(null);
@@ -338,7 +415,11 @@ export function Vault() {
 
       {/* Entry list */}
       <div className="flex-1 overflow-auto">
-        {filtered.length === 0 ? (
+        {loading ? (
+          <div className="flex flex-col items-center justify-center py-20 text-surface-500">
+            <p className="text-sm">Loading vault…</p>
+          </div>
+        ) : filtered.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-20 text-surface-500">
             <span className="text-5xl mb-4">🔐</span>
             <p className="text-sm">{searchQuery ? 'No matching entries' : 'Your vault is empty'}</p>
@@ -398,15 +479,19 @@ export function Vault() {
             navigator.clipboard.writeText(entryFields[contextMenu.entryId]?.username ?? '');
             setContextMenu(null);
           }}
-          onCopyPassword={() => {
-            navigator.clipboard.writeText(entryFields[contextMenu.entryId]?.password ?? '');
+          onCopyPassword={async () => {
+            await window.api.clipboard.copySecure(entryFields[contextMenu.entryId]?.password ?? '');
             setContextMenu(null);
           }}
           onEdit={() => {
             navigate(`/vault/${contextMenu.entryId}`);
             setContextMenu(null);
           }}
-          onDelete={() => {
+          onDelete={async () => {
+            if (token) {
+              await window.api.vault.delete(token, contextMenu.entryId);
+            }
+            removeEntry(contextMenu.entryId);
             setContextMenu(null);
           }}
         />

@@ -58,6 +58,8 @@ export function Register() {
         (result.access_token ?? result.token) as string,
         result.user_id as string,
         email,
+        undefined,
+        (result.master_key_hex ?? '') as string,
       );
       navigate('/vault');
     } catch {

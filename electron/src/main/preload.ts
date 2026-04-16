@@ -21,6 +21,12 @@ const api = {
       ipcRenderer.invoke('vault:update', token, entryId, data),
     delete: (token: string, entryId: string): Promise<unknown> =>
       ipcRenderer.invoke('vault:delete', token, entryId),
+    encrypt: (masterKeyHex: string, plaintext: string): Promise<{ encrypted_data: string; nonce: string; error?: string }> =>
+      ipcRenderer.invoke('vault:encrypt', masterKeyHex, plaintext),
+    decrypt: (masterKeyHex: string, encryptedData: string, nonce: string): Promise<{ plaintext: string; error?: string }> =>
+      ipcRenderer.invoke('vault:decrypt', masterKeyHex, encryptedData, nonce),
+    exportFile: (jsonContent: string): Promise<{ success?: boolean; cancelled?: boolean; path?: string; error?: string }> =>
+      ipcRenderer.invoke('vault:exportFile', jsonContent),
   },
 
   biometric: {
@@ -36,6 +42,11 @@ const api = {
       ipcRenderer.invoke('biometric:verify'),
     disable: (): Promise<{ success: boolean; error?: string }> =>
       ipcRenderer.invoke('biometric:disable'),
+  },
+
+  clipboard: {
+    copySecure: (text: string, clearAfterMs?: number): Promise<{ success?: boolean; error?: string }> =>
+      ipcRenderer.invoke('clipboard:copySecure', text, clearAfterMs ?? 30_000),
   },
 } as const;
 

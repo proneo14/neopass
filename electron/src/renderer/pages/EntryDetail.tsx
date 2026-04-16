@@ -3,6 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { PasswordGenerator } from '../components/PasswordGenerator';
 import { ENTRY_TYPE_ICONS, ENTRY_TYPE_LABELS } from '../types/vault';
 import { useVaultStore } from '../store/vaultStore';
+import { useAuthStore } from '../store/authStore';
 
 const FIELD_LABELS: Record<string, string> = {
   name: 'Name', username: 'Username', password: 'Password', uri: 'Website',
@@ -13,10 +14,14 @@ const FIELD_LABELS: Record<string, string> = {
 
 const SENSITIVE_FIELDS = new Set(['password', 'cvv', 'number', 'content']);
 
-function CopyButton({ value }: { value: string }) {
+function CopyButton({ value, sensitive = false }: { value: string; sensitive?: boolean }) {
   const [copied, setCopied] = useState(false);
   const handleCopy = async () => {
-    await navigator.clipboard.writeText(value);
+    if (sensitive) {
+      await window.api.clipboard.copySecure(value);
+    } else {
+      await navigator.clipboard.writeText(value);
+    }
     setCopied(true);
     setTimeout(() => setCopied(false), 1500);
   };
@@ -30,7 +35,8 @@ function CopyButton({ value }: { value: string }) {
 export function EntryDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const { entries, entryFields, updateEntryFields } = useVaultStore();
+  const { entries, entryFields, updateEntryFields, updateEntry } = useVaultStore();
+  const { token, masterKeyHex } = useAuthStore();
   const [editing, setEditing] = useState(false);
   const [showGenerator, setShowGenerator] = useState(false);
   const [revealedFields, setRevealedFields] = useState<Set<string>>(new Set());
@@ -63,8 +69,31 @@ export function EntryDetail() {
     });
   };
 
-  const handleSave = () => {
-    if (id) updateEntryFields(id, editFields);
+  const handleSave = async () => {
+    if (!id || !token || !masterKeyHex) return;
+
+    // Encrypt the updated fields
+    const plaintext = JSON.stringify(editFields);
+    const encResult = await window.api.vault.encrypt(masterKeyHex, plaintext);
+    if (encResult.error) return;
+
+    // Save to backend
+    const updateResult = await window.api.vault.update(token, id, {
+      entry_type: vaultEntry.entry_type,
+      encrypted_data: encResult.encrypted_data,
+      nonce: encResult.nonce,
+    }) as { id: string; entry_type: string; encrypted_data: string; nonce: string; version: number; folder_id: string | null; created_at: string; updated_at: string; error?: string };
+
+    if (!updateResult.error) {
+      updateEntryFields(id, editFields);
+      updateEntry({
+        ...vaultEntry,
+        encrypted_data: encResult.encrypted_data,
+        nonce: encResult.nonce,
+        version: updateResult.version,
+        updated_at: updateResult.updated_at,
+      });
+    }
     setEditing(false);
   };
 
@@ -159,7 +188,7 @@ export function EntryDetail() {
                     {revealed ? 'Hide' : 'Show'}
                   </button>
                 )}
-                <CopyButton value={value} />
+                <CopyButton value={value} sensitive={isSensitive} />
               </div>
             </div>
           );

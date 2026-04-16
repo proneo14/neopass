@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, Menu, session } from 'electron';
+import { app, BrowserWindow, ipcMain, Menu, session, dialog, clipboard } from 'electron';
 import path from 'path';
 import fs from 'fs';
 import nodeCrypto from 'crypto';
@@ -181,6 +181,7 @@ function registerIpcHandlers(): void {
       // Derive auth hash from password using PBKDF2 (stand-in for Argon2id until Go sidecar handles it)
       const salt = nodeCrypto.createHash('sha256').update(credentials.email).digest();
       const derived = nodeCrypto.pbkdf2Sync(credentials.authHash, salt, 100000, 64, 'sha512');
+      const masterKeyHex = derived.subarray(0, 32).toString('hex');
       const authHashHex = derived.subarray(32, 64).toString('hex');
 
       const res = await fetch(`${api}/api/v1/auth/login`, {
@@ -188,7 +189,12 @@ function registerIpcHandlers(): void {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email: credentials.email, auth_hash: authHashHex }),
       });
-      return await res.json();
+      const result = await res.json() as Record<string, unknown>;
+      console.log('[ipc] auth:login result keys:', Object.keys(result));
+      if (result.access_token || result.token) {
+        result.master_key_hex = masterKeyHex;
+      }
+      return result;
     } catch {
       return { error: 'Failed to connect to backend' };
     }
@@ -228,7 +234,11 @@ function registerIpcHandlers(): void {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
       });
-      return await res.json();
+      const result = await res.json() as Record<string, unknown>;
+      if (result.access_token || result.token) {
+        result.master_key_hex = masterKey.toString('hex');
+      }
+      return result;
     } catch (err) {
       return { error: 'Failed to connect to backend' };
     }
@@ -310,6 +320,157 @@ function registerIpcHandlers(): void {
     }
   });
 
+  // --- Vault crypto IPC handlers ---
+
+  ipcMain.handle('vault:encrypt', (_event, masterKeyHex: string, plaintext: string) => {
+    try {
+      const key = Buffer.from(masterKeyHex, 'hex');
+      const iv = nodeCrypto.randomBytes(12);
+      const cipher = nodeCrypto.createCipheriv('aes-256-gcm', key, iv);
+      const encrypted = Buffer.concat([cipher.update(plaintext, 'utf8'), cipher.final()]);
+      const authTag = cipher.getAuthTag();
+      return {
+        encrypted_data: Buffer.concat([encrypted, authTag]).toString('hex'),
+        nonce: iv.toString('hex'),
+      };
+    } catch {
+      return { error: 'Encryption failed' };
+    }
+  });
+
+  ipcMain.handle('vault:decrypt', (_event, masterKeyHex: string, encryptedDataHex: string, nonceHex: string) => {
+    try {
+      const key = Buffer.from(masterKeyHex, 'hex');
+      const iv = Buffer.from(nonceHex, 'hex');
+      const data = Buffer.from(encryptedDataHex, 'hex');
+      const authTag = data.subarray(data.length - 16);
+      const ciphertext = data.subarray(0, data.length - 16);
+      const decipher = nodeCrypto.createDecipheriv('aes-256-gcm', key, iv);
+      decipher.setAuthTag(authTag);
+      const decrypted = Buffer.concat([decipher.update(ciphertext), decipher.final()]);
+      return { plaintext: decrypted.toString('utf8') };
+    } catch {
+      return { error: 'Decryption failed' };
+    }
+  });
+
+  ipcMain.handle('vault:exportFile', async (_event, jsonContent: string) => {
+    const win = BrowserWindow.getFocusedWindow();
+    const result = await dialog.showSaveDialog(win!, {
+      title: 'Export Vault',
+      defaultPath: `lgipass-export-${new Date().toISOString().slice(0, 10)}.json`,
+      filters: [{ name: 'JSON', extensions: ['json'] }],
+    });
+    if (result.canceled || !result.filePath) return { cancelled: true };
+    try {
+      fs.writeFileSync(result.filePath, jsonContent, 'utf8');
+      return { success: true, path: result.filePath };
+    } catch {
+      return { error: 'Failed to write file' };
+    }
+  });
+
+  // --- Secure clipboard IPC ---
+  let clipboardClearTimer: ReturnType<typeof setTimeout> | null = null;
+  let lastCopiedValue: string | null = null;
+
+  ipcMain.handle('clipboard:copySecure', (_event, text: string, clearAfterMs: number = 30_000) => {
+    try {
+      // Clear any previous timer
+      if (clipboardClearTimer) {
+        clearTimeout(clipboardClearTimer);
+        clipboardClearTimer = null;
+      }
+
+      // Write to clipboard with clipboard history exclusion on Windows
+      if (process.platform === 'win32') {
+        // Use native clipboard API via PowerShell to set the ExcludeClipboardContentFromMonitorProcessing flag.
+        // This prevents Windows Clipboard History (Win+V) and cloud sync from capturing the password.
+        // We pass the text via stdin (piped) to avoid shell injection.
+        const cp = require('child_process') as typeof import('child_process');
+        try {
+          cp.execFileSync('powershell.exe', [
+            '-NoProfile', '-NonInteractive', '-Command',
+            `$text = [Console]::In.ReadToEnd()
+Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+public class SecureClip {
+  [DllImport("user32.dll")] static extern bool OpenClipboard(IntPtr w);
+  [DllImport("user32.dll")] static extern bool EmptyClipboard();
+  [DllImport("user32.dll")] static extern bool CloseClipboard();
+  [DllImport("user32.dll")] static extern IntPtr SetClipboardData(uint f, IntPtr h);
+  [DllImport("user32.dll")] static extern uint RegisterClipboardFormatW([MarshalAs(UnmanagedType.LPWStr)] string n);
+  [DllImport("kernel32.dll")] static extern IntPtr GlobalAlloc(uint f, UIntPtr sz);
+  [DllImport("kernel32.dll")] static extern IntPtr GlobalLock(IntPtr h);
+  [DllImport("kernel32.dll")] static extern bool GlobalUnlock(IntPtr h);
+  public static void Copy(string t) {
+    OpenClipboard(IntPtr.Zero);
+    EmptyClipboard();
+    byte[] b = System.Text.Encoding.Unicode.GetBytes(t + "\\0");
+    IntPtr h = GlobalAlloc(0x0002, (UIntPtr)b.Length);
+    IntPtr p = GlobalLock(h);
+    Marshal.Copy(b, 0, p, b.Length);
+    GlobalUnlock(h);
+    SetClipboardData(13, h);
+    uint ex = RegisterClipboardFormatW("ExcludeClipboardContentFromMonitorProcessing");
+    IntPtr eh = GlobalAlloc(0x0002, (UIntPtr)1);
+    IntPtr ep = GlobalLock(eh);
+    Marshal.WriteByte(ep, 0);
+    GlobalUnlock(eh);
+    SetClipboardData(ex, eh);
+    CloseClipboard();
+  }
+}
+'@
+[SecureClip]::Copy($text)`
+          ], { input: text, timeout: 5000, windowsHide: true });
+        } catch {
+          // Fallback if P/Invoke fails
+          clipboard.writeText(text);
+        }
+      } else if (process.platform === 'darwin') {
+        // On macOS, set org.nspasteboard.ConcealedType to exclude from clipboard history
+        // (Spotlight clipboard history in macOS Tahoe+, and third-party clipboard managers).
+        // Uses ObjC bridge via osascript; password is piped via stdin to prevent injection.
+        const cp = require('child_process') as typeof import('child_process');
+        try {
+          cp.execFileSync('osascript', ['-l', 'ObjC', '-e', [
+            'ObjC.import("AppKit");',
+            'var data = $.NSFileHandle.fileHandleWithStandardInput.readDataToEndOfFile;',
+            'var text = $.NSString.alloc.initWithDataEncoding(data, $.NSUTF8StringEncoding);',
+            'var pb = $.NSPasteboard.generalPasteboard;',
+            'pb.clearContents;',
+            'pb.setStringForType(text, $.NSPasteboardTypeString);',
+            'pb.setDataForType($.NSData.alloc.init, $("org.nspasteboard.ConcealedType"));',
+          ].join('\n')], { input: text, timeout: 5000 });
+        } catch {
+          clipboard.writeText(text);
+        }
+      } else {
+        clipboard.writeText(text);
+      }
+
+      lastCopiedValue = text;
+
+      // Auto-clear after timeout (default 30s)
+      clipboardClearTimer = setTimeout(() => {
+        try {
+          const current = clipboard.readText();
+          if (current === lastCopiedValue) {
+            clipboard.clear();
+          }
+        } catch { /* ignore */ }
+        lastCopiedValue = null;
+        clipboardClearTimer = null;
+      }, clearAfterMs);
+
+      return { success: true };
+    } catch {
+      return { error: 'Failed to copy to clipboard' };
+    }
+  });
+
   // --- Biometric IPC handlers ---
 
   ipcMain.handle('biometric:available', async () => {
@@ -341,6 +502,7 @@ function registerIpcHandlers(): void {
       // Derive keys using the same KDF as the login flow
       const salt = nodeCrypto.createHash('sha256').update(data.email).digest();
       const derived = nodeCrypto.pbkdf2Sync(data.password, salt, 100000, 64, 'sha512');
+      const masterKeyHex = derived.subarray(0, 32).toString('hex');
       const authHashHex = derived.subarray(32, 64).toString('hex');
 
       // Verify credentials against the backend first
@@ -357,10 +519,11 @@ function registerIpcHandlers(): void {
         }
       }
 
-      // Store email + authHash so biometric unlock can re-authenticate
+      // Store email + authHash + masterKeyHex so biometric unlock can re-authenticate and decrypt vault
       const credentialsJson = JSON.stringify({
         email: data.email,
         authHash: authHashHex,
+        masterKeyHex,
       });
       await enableBiometric(credentialsJson);
 
@@ -376,7 +539,7 @@ function registerIpcHandlers(): void {
   ipcMain.handle('biometric:unlock', async () => {
     try {
       const credentialsJson = await unlockWithBiometric();
-      const creds = JSON.parse(credentialsJson) as { email: string; authHash: string };
+      const creds = JSON.parse(credentialsJson) as { email: string; authHash: string; masterKeyHex?: string };
 
       // Authenticate with the backend using the stored credentials
       const api = getApiBase();
@@ -391,8 +554,8 @@ function registerIpcHandlers(): void {
       if (result.error) {
         return { error: result.error as string };
       }
-      // Return the login result with email included
-      return { ...result, email: creds.email };
+      // Return the login result with email and master key included
+      return { ...result, email: creds.email, master_key_hex: creds.masterKeyHex ?? '' };
     } catch (err) {
       return { error: (err as Error).message };
     }

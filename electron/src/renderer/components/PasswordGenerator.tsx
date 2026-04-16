@@ -84,7 +84,7 @@ export function PasswordGenerator({ onUse }: PasswordGeneratorProps) {
   }, [generate]);
 
   const handleCopy = async () => {
-    await navigator.clipboard.writeText(generated);
+    await window.api.clipboard.copySecure(generated);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };

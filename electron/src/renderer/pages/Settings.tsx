@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useAuthStore } from '../store/authStore';
+import { useVaultStore } from '../store/vaultStore';
 import { PasswordGenerator } from '../components/PasswordGenerator';
 
 type AutoLockOption = '1' | '5' | '15' | '30' | '60' | 'never';
@@ -220,8 +221,8 @@ function BiometricEnrollModal({ onClose, onConfirm }: { onClose: () => void; onC
 }
 
 export function Settings() {
-  const { email } = useAuthStore();
-  const [autoLock, setAutoLock] = useState<AutoLockOption>('15');
+  const { email, token, masterKeyHex, autoLockMinutes, setAutoLockMinutes } = useAuthStore();
+  const { entries, entryFields } = useVaultStore();
   const [biometricEnabled, setBiometricEnabled] = useState(false);
   const [biometricAvailable, setBiometricAvailable] = useState(false);
   const [biometricLoading, setBiometricLoading] = useState(false);
@@ -346,8 +347,11 @@ export function Settings() {
               <div className="flex items-center justify-between">
                 <p className="text-sm text-surface-200">Auto-Lock Timeout</p>
                 <select
-                  value={autoLock}
-                  onChange={(e) => setAutoLock(e.target.value as AutoLockOption)}
+                  value={autoLockMinutes === 0 ? 'never' : String(autoLockMinutes)}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    setAutoLockMinutes(val === 'never' ? 0 : Number(val));
+                  }}
                   className="bg-surface-700 border border-surface-600 text-surface-300 text-xs rounded px-2 py-1 focus:outline-none focus:ring-2 focus:ring-accent-500"
                 >
                   {AUTO_LOCK_OPTIONS.map((opt) => (
@@ -367,11 +371,29 @@ export function Settings() {
               Sync Settings
               <span className="text-surface-600">→</span>
             </button>
-            <button className="w-full text-left px-4 py-3 rounded-md bg-surface-800 hover:bg-surface-700 text-sm text-surface-200 transition-colors flex items-center justify-between">
+            <button
+              onClick={async () => {
+                // Export decrypted vault data as JSON file
+                const exportData = entries.map((entry) => ({
+                  entry_type: entry.entry_type,
+                  fields: entryFields[entry.id] ?? {},
+                  created_at: entry.created_at,
+                  updated_at: entry.updated_at,
+                }));
+                const json = JSON.stringify(exportData, null, 2);
+                await window.api.vault.exportFile(json);
+              }}
+              className="w-full text-left px-4 py-3 rounded-md bg-surface-800 hover:bg-surface-700 text-sm text-surface-200 transition-colors flex items-center justify-between"
+            >
               Export Vault (Encrypted Backup)
               <span className="text-surface-600">→</span>
             </button>
-            <button className="w-full text-left px-4 py-3 rounded-md bg-surface-800 hover:bg-surface-700 text-sm text-red-400 transition-colors">
+            <button
+              onClick={() => {
+                useVaultStore.getState().setEntries([]);
+              }}
+              className="w-full text-left px-4 py-3 rounded-md bg-surface-800 hover:bg-surface-700 text-sm text-red-400 transition-colors"
+            >
               Clear Local Cache
             </button>
           </div>

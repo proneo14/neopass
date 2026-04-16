@@ -25,7 +25,7 @@ export function Sidebar() {
   return (
     <aside className="flex flex-col w-60 bg-surface-900 border-r border-surface-700 h-full">
       {/* Brand */}
-      <div className="flex items-center gap-2 px-4 pt-12 pb-4 border-b border-surface-700">
+      <div className="flex items-center gap-2 px-4 pt-10 pb-4 border-b border-surface-700">
         <span className="text-xl">🔑</span>
         <span className="text-sm font-semibold text-surface-100 tracking-tight">
           LGI Pass
