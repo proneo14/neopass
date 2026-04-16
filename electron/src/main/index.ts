@@ -473,6 +473,169 @@ public class SecureClip {
 
   // --- Biometric IPC handlers ---
 
+  // --- Admin IPC handlers ---
+
+  ipcMain.handle('admin:getMyOrg', async (_event, token: string) => {
+    const api = getApiBase();
+    if (!api) return { error: 'Backend not available' };
+    try {
+      const res = await fetch(`${api}/api/v1/admin/my-org`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      return await res.json();
+    } catch { return { error: 'Failed to connect to backend' }; }
+  });
+
+  ipcMain.handle('admin:getMyInvitations', async (_event, token: string) => {
+    const api = getApiBase();
+    if (!api) return { error: 'Backend not available' };
+    try {
+      const res = await fetch(`${api}/api/v1/admin/my-invitations`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      return await res.json();
+    } catch { return { error: 'Failed to connect to backend' }; }
+  });
+
+  ipcMain.handle('admin:createOrg', async (_event, token: string, name: string, masterKey: string) => {
+    const api = getApiBase();
+    if (!api) return { error: 'Backend not available' };
+    try {
+      const res = await fetch(`${api}/api/v1/admin/orgs`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ name, master_key: masterKey }),
+      });
+      return await res.json();
+    } catch { return { error: 'Failed to connect to backend' }; }
+  });
+
+  ipcMain.handle('admin:inviteUser', async (_event, token: string, orgId: string, email: string, role: string) => {
+    const api = getApiBase();
+    if (!api) return { error: 'Backend not available' };
+    try {
+      const res = await fetch(`${api}/api/v1/admin/orgs/${encodeURIComponent(orgId)}/invite`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ email, role }),
+      });
+      return await res.json();
+    } catch { return { error: 'Failed to connect to backend' }; }
+  });
+
+  ipcMain.handle('admin:acceptInvite', async (_event, token: string, orgId: string, masterKey: string) => {
+    const api = getApiBase();
+    if (!api) return { error: 'Backend not available' };
+    try {
+      const res = await fetch(`${api}/api/v1/admin/orgs/${encodeURIComponent(orgId)}/accept`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ master_key: masterKey }),
+      });
+      return await res.json();
+    } catch { return { error: 'Failed to connect to backend' }; }
+  });
+
+  ipcMain.handle('admin:listMembers', async (_event, token: string, orgId: string) => {
+    const api = getApiBase();
+    if (!api) return { error: 'Backend not available' };
+    try {
+      const res = await fetch(`${api}/api/v1/admin/orgs/${encodeURIComponent(orgId)}/members`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      return await res.json();
+    } catch { return { error: 'Failed to connect to backend' }; }
+  });
+
+  ipcMain.handle('admin:removeMember', async (_event, token: string, orgId: string, userId: string) => {
+    const api = getApiBase();
+    if (!api) return { error: 'Backend not available' };
+    try {
+      const res = await fetch(`${api}/api/v1/admin/orgs/${encodeURIComponent(orgId)}/members/${encodeURIComponent(userId)}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      return await res.json();
+    } catch { return { error: 'Failed to connect to backend' }; }
+  });
+
+  ipcMain.handle('admin:accessVault', async (_event, token: string, orgId: string, userId: string, masterKey: string) => {
+    const api = getApiBase();
+    if (!api) return { error: 'Backend not available' };
+    try {
+      const res = await fetch(`${api}/api/v1/admin/orgs/${encodeURIComponent(orgId)}/vault/${encodeURIComponent(userId)}?master_key=${encodeURIComponent(masterKey)}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      return await res.json();
+    } catch { return { error: 'Failed to connect to backend' }; }
+  });
+
+  ipcMain.handle('admin:resetPassword', async (_event, token: string, orgId: string, userId: string, data: Record<string, string>) => {
+    const api = getApiBase();
+    if (!api) return { error: 'Backend not available' };
+    try {
+      const res = await fetch(`${api}/api/v1/admin/orgs/${encodeURIComponent(orgId)}/vault/${encodeURIComponent(userId)}/reset-password`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify(data),
+      });
+      return await res.json();
+    } catch { return { error: 'Failed to connect to backend' }; }
+  });
+
+  ipcMain.handle('admin:setPolicy', async (_event, token: string, orgId: string, policy: Record<string, unknown>) => {
+    const api = getApiBase();
+    if (!api) return { error: 'Backend not available' };
+    try {
+      const res = await fetch(`${api}/api/v1/admin/orgs/${encodeURIComponent(orgId)}/policy`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify(policy),
+      });
+      return await res.json();
+    } catch { return { error: 'Failed to connect to backend' }; }
+  });
+
+  ipcMain.handle('admin:getPolicy', async (_event, token: string, orgId: string) => {
+    const api = getApiBase();
+    if (!api) return { error: 'Backend not available' };
+    try {
+      const res = await fetch(`${api}/api/v1/admin/orgs/${encodeURIComponent(orgId)}/policy`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      return await res.json();
+    } catch { return { error: 'Failed to connect to backend' }; }
+  });
+
+  ipcMain.handle('admin:listInvitations', async (_event, token: string, orgId: string) => {
+    const api = getApiBase();
+    if (!api) return { error: 'Backend not available' };
+    try {
+      const res = await fetch(`${api}/api/v1/admin/orgs/${encodeURIComponent(orgId)}/invitations`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      return await res.json();
+    } catch { return { error: 'Failed to connect to backend' }; }
+  });
+
+  ipcMain.handle('admin:getAuditLog', async (_event, token: string, orgId: string, filters?: Record<string, string>) => {
+    const api = getApiBase();
+    if (!api) return { error: 'Backend not available' };
+    try {
+      const params = new URLSearchParams();
+      if (filters) {
+        for (const [k, v] of Object.entries(filters)) {
+          if (v) params.set(k, v);
+        }
+      }
+      const qs = params.toString();
+      const res = await fetch(`${api}/api/v1/admin/orgs/${encodeURIComponent(orgId)}/audit${qs ? `?${qs}` : ''}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      return await res.json();
+    } catch { return { error: 'Failed to connect to backend' }; }
+  });
+
   ipcMain.handle('biometric:available', async () => {
     const result = await isBiometricAvailable();
     console.log('[ipc] biometric:available =', result);

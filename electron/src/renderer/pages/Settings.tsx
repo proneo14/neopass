@@ -221,7 +221,7 @@ function BiometricEnrollModal({ onClose, onConfirm }: { onClose: () => void; onC
 }
 
 export function Settings() {
-  const { email, token, masterKeyHex, autoLockMinutes, setAutoLockMinutes } = useAuthStore();
+  const { email, token, masterKeyHex, autoLockMinutes, setAutoLockMinutes, orgId, orgName, setOrg, clearOrg } = useAuthStore();
   const { entries, entryFields } = useVaultStore();
   const [biometricEnabled, setBiometricEnabled] = useState(false);
   const [biometricAvailable, setBiometricAvailable] = useState(false);
@@ -231,6 +231,11 @@ export function Settings() {
   const [showBiometricEnroll, setShowBiometricEnroll] = useState(false);
   const [showChangePw, setShowChangePw] = useState(false);
   const [show2fa, setShow2fa] = useState(false);
+  const [showCreateOrg, setShowCreateOrg] = useState(false);
+  const [pendingInvites, setPendingInvites] = useState<{ id: string; org_id: string; org_name: string; role: string; created_at: string }[]>([]);
+  const [newOrgName, setNewOrgName] = useState('');
+  const [orgLoading, setOrgLoading] = useState(false);
+  const [orgError, setOrgError] = useState('');
 
   useEffect(() => {
     (async () => {
@@ -285,6 +290,19 @@ export function Settings() {
       setBiometricLoading(false);
     }
   };
+
+  // Fetch pending invitations when user has no org
+  useEffect(() => {
+    if (orgId || !token) return;
+    (async () => {
+      try {
+        const result = await window.api.admin.getMyInvitations(token) as { id: string; org_id: string; org_name: string; role: string; created_at: string }[] | { error: string };
+        if (Array.isArray(result)) {
+          setPendingInvites(result);
+        }
+      } catch { /* ignore */ }
+    })();
+  }, [orgId, token]);
 
   return (
     <div>
@@ -360,6 +378,137 @@ export function Settings() {
                 </select>
               </div>
             </div>
+          </div>
+        </section>
+
+        {/* Organization / Enterprise */}
+        <section>
+          <h2 className="text-xs font-semibold text-surface-500 uppercase tracking-wider mb-3">Organization</h2>
+          <div className="space-y-2">
+            {orgId ? (
+              <>
+                <div className="px-4 py-3 rounded-md bg-surface-800">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-sm text-surface-200">{orgName || 'Organization'}</p>
+                      <p className="text-xs text-surface-500">Role: Admin</p>
+                    </div>
+                    <span className="text-xs px-2 py-0.5 rounded-full bg-accent-600/20 text-accent-400">Active</span>
+                  </div>
+                </div>
+                <button
+                  onClick={() => {
+                    clearOrg();
+                    setOrgError('');
+                  }}
+                  className="w-full text-left px-4 py-3 rounded-md bg-surface-800 hover:bg-surface-700 text-sm text-red-400 transition-colors"
+                >
+                  Leave Organization
+                </button>
+              </>
+            ) : showCreateOrg ? (
+              <div className="px-4 py-4 rounded-md bg-surface-800 space-y-3">
+                <p className="text-sm text-surface-200">Create a new organization</p>
+                <input
+                  type="text"
+                  value={newOrgName}
+                  onChange={(e) => setNewOrgName(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && newOrgName.trim() && token && masterKeyHex) {
+                      setOrgLoading(true);
+                      setOrgError('');
+                      window.api.admin.createOrg(token, newOrgName.trim(), masterKeyHex)
+                        .then((result: unknown) => {
+                          const res = result as { id?: string; name?: string; error?: string };
+                          if (res.error) { setOrgError(res.error); }
+                          else if (res.id) { setOrg(res.id, res.name ?? newOrgName.trim(), 'admin'); setShowCreateOrg(false); setNewOrgName(''); }
+                        })
+                        .catch(() => setOrgError('Failed to create organization'))
+                        .finally(() => setOrgLoading(false));
+                    }
+                  }}
+                  placeholder="Organization name"
+                  className="w-full px-3 py-2 rounded-md bg-surface-900 border border-surface-600 text-surface-100 text-sm placeholder-surface-500 focus:outline-none focus:ring-2 focus:ring-accent-500"
+                  autoFocus
+                />
+                {orgError && <p className="text-xs text-red-400">{orgError}</p>}
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => { setShowCreateOrg(false); setNewOrgName(''); setOrgError(''); }}
+                    className="flex-1 py-2 rounded-md bg-surface-700 text-surface-300 text-sm hover:bg-surface-600 transition-colors"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    disabled={orgLoading || !newOrgName.trim()}
+                    onClick={() => {
+                      if (!token || !masterKeyHex || !newOrgName.trim()) return;
+                      setOrgLoading(true);
+                      setOrgError('');
+                      window.api.admin.createOrg(token, newOrgName.trim(), masterKeyHex)
+                        .then((result: unknown) => {
+                          const res = result as { id?: string; name?: string; error?: string };
+                          if (res.error) { setOrgError(res.error); }
+                          else if (res.id) { setOrg(res.id, res.name ?? newOrgName.trim(), 'admin'); setShowCreateOrg(false); setNewOrgName(''); }
+                        })
+                        .catch(() => setOrgError('Failed to create organization'))
+                        .finally(() => setOrgLoading(false));
+                    }}
+                    className="flex-1 py-2 rounded-md bg-accent-600 hover:bg-accent-500 disabled:opacity-50 text-white text-sm font-medium transition-colors"
+                  >
+                    {orgLoading ? 'Creating…' : 'Create'}
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <>
+                <p className="text-xs text-surface-500 px-1 mb-2">
+                  Create an organization to enable admin features, or accept a pending invitation.
+                </p>
+                <button
+                  onClick={() => setShowCreateOrg(true)}
+                  className="w-full text-left px-4 py-3 rounded-md bg-surface-800 hover:bg-surface-700 text-sm text-accent-400 transition-colors flex items-center justify-between"
+                >
+                  Create Organization
+                  <span className="text-surface-600">→</span>
+                </button>
+                {pendingInvites.length > 0 && (
+                  <div className="space-y-2">
+                    <p className="text-xs text-surface-500 px-1 mt-3">Pending Invitations</p>
+                    {pendingInvites.map((inv) => (
+                      <div key={inv.id} className="px-4 py-3 rounded-md bg-surface-800 flex items-center justify-between">
+                        <div>
+                          <p className="text-sm text-surface-200">{inv.org_name}</p>
+                          <p className="text-xs text-surface-500">
+                            Role: {inv.role} · Invited {new Date(inv.created_at).toLocaleDateString()}
+                          </p>
+                        </div>
+                        <button
+                          disabled={orgLoading}
+                          onClick={() => {
+                            if (!token || !masterKeyHex) return;
+                            setOrgLoading(true);
+                            setOrgError('');
+                            window.api.admin.acceptInvite(token, inv.org_id, masterKeyHex)
+                              .then((result: unknown) => {
+                                const res = result as { status?: string; error?: string };
+                                if (res.error) { setOrgError(res.error); }
+                                else { setOrg(inv.org_id, inv.org_name, inv.role); setPendingInvites([]); }
+                              })
+                              .catch(() => setOrgError('Failed to accept invitation'))
+                              .finally(() => setOrgLoading(false));
+                          }}
+                          className="bg-accent-600 hover:bg-accent-500 disabled:opacity-50 text-white text-xs rounded-lg px-3 py-1.5 transition-colors"
+                        >
+                          {orgLoading ? 'Joining…' : 'Accept'}
+                        </button>
+                      </div>
+                    ))}
+                    {orgError && <p className="text-xs text-red-400 px-1">{orgError}</p>}
+                  </div>
+                )}
+              </>
+            )}
           </div>
         </section>
 

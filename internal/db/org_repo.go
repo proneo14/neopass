@@ -223,6 +223,28 @@ func (r *OrgRepo) MarkInvitationAccepted(ctx context.Context, invID string) erro
 	return err
 }
 
+// ListInvitations returns all invitations for an organization.
+func (r *OrgRepo) ListInvitations(ctx context.Context, orgID string) ([]Invitation, error) {
+	rows, err := r.pool.Query(ctx,
+		`SELECT id, org_id, email, role, invited_by, accepted, created_at
+		 FROM invitations WHERE org_id = $1 ORDER BY created_at DESC`, orgID,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("list invitations: %w", err)
+	}
+	defer rows.Close()
+
+	var invs []Invitation
+	for rows.Next() {
+		var inv Invitation
+		if err := rows.Scan(&inv.ID, &inv.OrgID, &inv.Email, &inv.Role, &inv.InvitedBy, &inv.Accepted, &inv.CreatedAt); err != nil {
+			return nil, fmt.Errorf("scan invitation: %w", err)
+		}
+		invs = append(invs, inv)
+	}
+	return invs, rows.Err()
+}
+
 // SetOrgPolicy updates the policy JSONB column on an organization.
 func (r *OrgRepo) SetOrgPolicy(ctx context.Context, orgID string, policy json.RawMessage) error {
 	tag, err := r.pool.Exec(ctx,
@@ -236,4 +258,51 @@ func (r *OrgRepo) SetOrgPolicy(ctx context.Context, orgID string, policy json.Ra
 		return fmt.Errorf("organization not found")
 	}
 	return nil
+}
+
+// GetUserOrg returns the organization membership for a user (first org found).
+func (r *OrgRepo) GetUserOrg(ctx context.Context, userID string) (OrgMember, Organization, error) {
+	var m OrgMember
+	var org Organization
+	err := r.pool.QueryRow(ctx,
+		`SELECT om.org_id, om.user_id, u.email, om.role, om.joined_at,
+		        o.id, o.name, o.created_at
+		 FROM org_members om
+		 JOIN users u ON u.id = om.user_id
+		 JOIN organizations o ON o.id = om.org_id
+		 WHERE om.user_id = $1
+		 LIMIT 1`, userID,
+	).Scan(&m.OrgID, &m.UserID, &m.Email, &m.Role, &m.JoinedAt,
+		&org.ID, &org.Name, &org.CreatedAt)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return OrgMember{}, Organization{}, fmt.Errorf("no org membership")
+		}
+		return OrgMember{}, Organization{}, fmt.Errorf("get user org: %w", err)
+	}
+	return m, org, nil
+}
+
+// GetInvitationsByEmail returns all pending invitations for an email address.
+func (r *OrgRepo) GetInvitationsByEmail(ctx context.Context, email string) ([]Invitation, error) {
+	rows, err := r.pool.Query(ctx,
+		`SELECT i.id, i.org_id, i.email, i.role, i.invited_by, i.accepted, i.created_at
+		 FROM invitations i
+		 WHERE i.email = $1 AND i.accepted = false
+		 ORDER BY i.created_at DESC`, email,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("get invitations by email: %w", err)
+	}
+	defer rows.Close()
+
+	var invs []Invitation
+	for rows.Next() {
+		var inv Invitation
+		if err := rows.Scan(&inv.ID, &inv.OrgID, &inv.Email, &inv.Role, &inv.InvitedBy, &inv.Accepted, &inv.CreatedAt); err != nil {
+			return nil, fmt.Errorf("scan invitation: %w", err)
+		}
+		invs = append(invs, inv)
+	}
+	return invs, rows.Err()
 }

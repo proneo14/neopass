@@ -48,6 +48,35 @@ const api = {
     copySecure: (text: string, clearAfterMs?: number): Promise<{ success?: boolean; error?: string }> =>
       ipcRenderer.invoke('clipboard:copySecure', text, clearAfterMs ?? 30_000),
   },
+
+  admin: {
+    getMyOrg: (token: string): Promise<unknown> =>
+      ipcRenderer.invoke('admin:getMyOrg', token),
+    getMyInvitations: (token: string): Promise<unknown> =>
+      ipcRenderer.invoke('admin:getMyInvitations', token),
+    createOrg: (token: string, name: string, masterKey: string): Promise<unknown> =>
+      ipcRenderer.invoke('admin:createOrg', token, name, masterKey),
+    inviteUser: (token: string, orgId: string, email: string, role: string): Promise<unknown> =>
+      ipcRenderer.invoke('admin:inviteUser', token, orgId, email, role),
+    acceptInvite: (token: string, orgId: string, masterKey: string): Promise<unknown> =>
+      ipcRenderer.invoke('admin:acceptInvite', token, orgId, masterKey),
+    listMembers: (token: string, orgId: string): Promise<unknown> =>
+      ipcRenderer.invoke('admin:listMembers', token, orgId),
+    removeMember: (token: string, orgId: string, userId: string): Promise<unknown> =>
+      ipcRenderer.invoke('admin:removeMember', token, orgId, userId),
+    accessVault: (token: string, orgId: string, userId: string, masterKey: string): Promise<unknown> =>
+      ipcRenderer.invoke('admin:accessVault', token, orgId, userId, masterKey),
+    resetPassword: (token: string, orgId: string, userId: string, data: { master_key: string; new_auth_hash: string; new_salt: string }): Promise<unknown> =>
+      ipcRenderer.invoke('admin:resetPassword', token, orgId, userId, data),
+    setPolicy: (token: string, orgId: string, policy: Record<string, unknown>): Promise<unknown> =>
+      ipcRenderer.invoke('admin:setPolicy', token, orgId, policy),
+    getPolicy: (token: string, orgId: string): Promise<unknown> =>
+      ipcRenderer.invoke('admin:getPolicy', token, orgId),
+    listInvitations: (token: string, orgId: string): Promise<unknown> =>
+      ipcRenderer.invoke('admin:listInvitations', token, orgId),
+    getAuditLog: (token: string, orgId: string, filters?: Record<string, string>): Promise<unknown> =>
+      ipcRenderer.invoke('admin:getAuditLog', token, orgId, filters),
+  },
 } as const;
 
 contextBridge.exposeInMainWorld('api', api);

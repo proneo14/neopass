@@ -418,6 +418,37 @@ func (s *Service) GetOrgPolicy(ctx context.Context, orgID string) (OrgPolicy, er
 	return policy, nil
 }
 
+// ListInvitations returns all invitations for an organization.
+func (s *Service) ListInvitations(ctx context.Context, adminUserID, orgID string) ([]db.Invitation, error) {
+	if err := s.verifyAdmin(ctx, orgID, adminUserID); err != nil {
+		return nil, err
+	}
+	return s.orgRepo.ListInvitations(ctx, orgID)
+}
+
+// GetMyOrg returns the current user's organization membership and org info.
+func (s *Service) GetMyOrg(ctx context.Context, userID string) (db.OrgMember, db.Organization, error) {
+	return s.orgRepo.GetUserOrg(ctx, userID)
+}
+
+// GetMyInvitations returns pending invitations for the current user's email.
+func (s *Service) GetMyInvitations(ctx context.Context, userID string) ([]db.Invitation, error) {
+	user, err := s.userRepo.GetUserByID(ctx, userID)
+	if err != nil {
+		return nil, fmt.Errorf("get user: %w", err)
+	}
+	invs, err := s.orgRepo.GetInvitationsByEmail(ctx, user.Email)
+	if err != nil {
+		return nil, err
+	}
+	return invs, nil
+}
+
+// GetOrgByID returns an organization by its ID.
+func (s *Service) GetOrgByID(ctx context.Context, orgID string) (db.Organization, error) {
+	return s.orgRepo.GetOrg(ctx, orgID)
+}
+
 // GetAuditLog retrieves the audit log for an organization's context.
 func (s *Service) GetAuditLog(ctx context.Context, adminUserID, orgID string, filters db.AuditFilters) ([]db.AuditEntry, error) {
 	if err := s.verifyAdmin(ctx, orgID, adminUserID); err != nil {

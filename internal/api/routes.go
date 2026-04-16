@@ -68,6 +68,8 @@ func Router(authService *auth.Service, totpService *auth.TOTPService, smsService
 
 		// Admin routes
 		r.Route("/admin", func(r chi.Router) {
+			r.Get("/my-org", adminHandler.GetMyOrg)
+			r.Get("/my-invitations", adminHandler.GetMyInvitations)
 			r.Post("/orgs", adminHandler.CreateOrg)
 			r.Route("/orgs/{id}", func(r chi.Router) {
 				r.Post("/invite", adminHandler.InviteUser)
@@ -76,7 +78,9 @@ func Router(authService *auth.Service, totpService *auth.TOTPService, smsService
 				r.Delete("/members/{uid}", adminHandler.RemoveUser)
 				r.Get("/vault/{uid}", adminHandler.AccessUserVault)
 				r.Post("/vault/{uid}/reset-password", adminHandler.ResetPassword)
+				r.Get("/policy", adminHandler.GetPolicy)
 				r.Put("/policy", adminHandler.SetPolicy)
+				r.Get("/invitations", adminHandler.ListInvitations)
 				r.Get("/audit", adminHandler.GetAuditLog)
 			})
 		})

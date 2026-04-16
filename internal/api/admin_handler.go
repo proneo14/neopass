@@ -326,6 +326,54 @@ func (h *AdminHandler) SetPolicy(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "policy_updated"})
 }
 
+// GetPolicy handles GET /api/v1/admin/orgs/{id}/policy
+func (h *AdminHandler) GetPolicy(w http.ResponseWriter, r *http.Request) {
+	claims := GetClaims(r.Context())
+	if claims == nil {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
+	orgID := chi.URLParam(r, "id")
+
+	policy, err := h.adminService.GetOrgPolicy(r.Context(), orgID)
+	if err != nil {
+		log.Error().Err(err).Msg("get policy failed")
+		writeError(w, http.StatusInternalServerError, "failed to get policy")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, policy)
+}
+
+// ListInvitations handles GET /api/v1/admin/orgs/{id}/invitations
+func (h *AdminHandler) ListInvitations(w http.ResponseWriter, r *http.Request) {
+	claims := GetClaims(r.Context())
+	if claims == nil {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
+	orgID := chi.URLParam(r, "id")
+
+	invs, err := h.adminService.ListInvitations(r.Context(), claims.UserID, orgID)
+	if err != nil {
+		if errors.Is(err, admin.ErrNotAdmin) {
+			writeError(w, http.StatusForbidden, "admin role required")
+			return
+		}
+		log.Error().Err(err).Msg("list invitations failed")
+		writeError(w, http.StatusInternalServerError, "failed to list invitations")
+		return
+	}
+
+	if invs == nil {
+		invs = []db.Invitation{}
+	}
+
+	writeJSON(w, http.StatusOK, invs)
+}
+
 // GetAuditLog handles GET /api/v1/admin/orgs/{id}/audit
 func (h *AdminHandler) GetAuditLog(w http.ResponseWriter, r *http.Request) {
 	claims := GetClaims(r.Context())
@@ -385,4 +433,72 @@ func (h *AdminHandler) GetAuditLog(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, entries)
+}
+
+// GetMyOrg handles GET /api/v1/admin/my-org
+func (h *AdminHandler) GetMyOrg(w http.ResponseWriter, r *http.Request) {
+	claims := GetClaims(r.Context())
+	if claims == nil {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
+	member, org, err := h.adminService.GetMyOrg(r.Context(), claims.UserID)
+	if err != nil {
+		// No org membership is not an error — return empty
+		writeJSON(w, http.StatusOK, map[string]interface{}{
+			"member": false,
+		})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"member":   true,
+		"org_id":   org.ID,
+		"org_name": org.Name,
+		"role":     member.Role,
+	})
+}
+
+// GetMyInvitations handles GET /api/v1/admin/my-invitations
+func (h *AdminHandler) GetMyInvitations(w http.ResponseWriter, r *http.Request) {
+	claims := GetClaims(r.Context())
+	if claims == nil {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
+	invs, err := h.adminService.GetMyInvitations(r.Context(), claims.UserID)
+	if err != nil {
+		log.Error().Err(err).Msg("get my invitations failed")
+		writeError(w, http.StatusInternalServerError, "failed to get invitations")
+		return
+	}
+
+	type invWithOrg struct {
+		ID        string    `json:"id"`
+		OrgID     string    `json:"org_id"`
+		OrgName   string    `json:"org_name"`
+		Email     string    `json:"email"`
+		Role      string    `json:"role"`
+		CreatedAt time.Time `json:"created_at"`
+	}
+
+	results := make([]invWithOrg, 0, len(invs))
+	for _, inv := range invs {
+		orgName := inv.OrgID // fallback
+		if org, err := h.adminService.GetOrgByID(r.Context(), inv.OrgID); err == nil {
+			orgName = org.Name
+		}
+		results = append(results, invWithOrg{
+			ID:        inv.ID,
+			OrgID:     inv.OrgID,
+			OrgName:   orgName,
+			Email:     inv.Email,
+			Role:      inv.Role,
+			CreatedAt: inv.CreatedAt,
+		})
+	}
+
+	writeJSON(w, http.StatusOK, results)
 }

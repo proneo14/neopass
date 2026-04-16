@@ -14,7 +14,22 @@ export function Login() {
   const [showManualLogin, setShowManualLogin] = useState(false);
 
   const login = useAuthStore((s) => s.login);
+  const setOrg = useAuthStore((s) => s.setOrg);
   const navigate = useNavigate();
+
+  const clearOrg = useAuthStore((s) => s.clearOrg);
+
+  // After login, fetch org membership from backend and update store
+  const loadOrgAfterLogin = async (token: string) => {
+    try {
+      const result = await window.api.admin.getMyOrg(token) as { member?: boolean; org_id?: string; org_name?: string; role?: string; error?: string };
+      if (result.member && result.org_id) {
+        setOrg(result.org_id, result.org_name ?? '', result.role ?? 'member');
+      } else {
+        clearOrg();
+      }
+    } catch { /* ignore — org loading is best-effort */ }
+  };
 
   const handleBiometricUnlock = async () => {
     setError('');
@@ -43,6 +58,7 @@ export function Login() {
           result.role as string | undefined,
           masterKey,
         );
+        await loadOrgAfterLogin((result.access_token ?? result.token) as string);
         navigate('/vault');
       }
     } catch {
@@ -99,6 +115,7 @@ export function Login() {
         result.role as string | undefined,
         (result.master_key_hex ?? '') as string,
       );
+      await loadOrgAfterLogin((result.access_token ?? result.token) as string);
       navigate('/vault');
     } catch {
       setError('Failed to connect to server');
