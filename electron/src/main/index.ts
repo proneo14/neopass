@@ -244,6 +244,41 @@ function registerIpcHandlers(): void {
     }
   });
 
+  ipcMain.handle('auth:changePassword', async (_event, token: string, data: { email: string; currentPassword: string; newPassword: string }) => {
+    const api = getApiBase();
+    if (!api) return { error: 'Backend not available' };
+    try {
+      const salt = nodeCrypto.createHash('sha256').update(data.email).digest();
+
+      // Derive old keys
+      const oldDerived = nodeCrypto.pbkdf2Sync(data.currentPassword, salt, 100000, 64, 'sha512');
+      const oldMasterKey = oldDerived.subarray(0, 32).toString('hex');
+
+      // Derive new keys
+      const newDerived = nodeCrypto.pbkdf2Sync(data.newPassword, salt, 100000, 64, 'sha512');
+      const newMasterKey = newDerived.subarray(0, 32).toString('hex');
+      const newAuthHash = newDerived.subarray(32, 64).toString('hex');
+
+      const res = await fetch(`${api}/api/v1/auth/change-password`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({
+          old_master_key: oldMasterKey,
+          new_master_key: newMasterKey,
+          new_auth_hash: newAuthHash,
+          new_salt: salt.toString('hex'),
+        }),
+      });
+      const result = await res.json() as Record<string, unknown>;
+      if (result.status === 'password_changed') {
+        result.master_key_hex = newMasterKey;
+      }
+      return result;
+    } catch {
+      return { error: 'Failed to connect to backend' };
+    }
+  });
+
   ipcMain.handle('vault:list', async (_event, token: string) => {
     const api = getApiBase();
     if (!api) return { error: 'Backend not available' };
@@ -559,6 +594,18 @@ public class SecureClip {
     } catch { return { error: 'Failed to connect to backend' }; }
   });
 
+  ipcMain.handle('admin:leaveOrg', async (_event, token: string, orgId: string) => {
+    const api = getApiBase();
+    if (!api) return { error: 'Backend not available' };
+    try {
+      const res = await fetch(`${api}/api/v1/admin/orgs/${encodeURIComponent(orgId)}/leave`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      return await res.json();
+    } catch { return { error: 'Failed to connect to backend' }; }
+  });
+
   ipcMain.handle('admin:accessVault', async (_event, token: string, orgId: string, userId: string, masterKey: string) => {
     const api = getApiBase();
     if (!api) return { error: 'Backend not available' };
@@ -574,10 +621,29 @@ public class SecureClip {
     const api = getApiBase();
     if (!api) return { error: 'Backend not available' };
     try {
+      // Derive new auth credentials from target user's email + new password
+      const targetEmail = data.target_email;
+      const newPassword = data.new_password;
+      const adminMasterKey = data.master_key;
+      if (!targetEmail || !newPassword || !adminMasterKey) {
+        return { error: 'Missing target_email, new_password, or master_key' };
+      }
+
+      const salt = nodeCrypto.createHash('sha256').update(targetEmail).digest();
+      const derived = nodeCrypto.pbkdf2Sync(newPassword, salt, 100000, 64, 'sha512');
+      const newMasterKeyHex = derived.subarray(0, 32).toString('hex');
+      const newAuthHash = derived.subarray(32, 64).toString('hex');
+      const saltHex = salt.toString('hex');
+
       const res = await fetch(`${api}/api/v1/admin/orgs/${encodeURIComponent(orgId)}/vault/${encodeURIComponent(userId)}/reset-password`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify(data),
+        body: JSON.stringify({
+          master_key: adminMasterKey,
+          new_master_key: newMasterKeyHex,
+          new_auth_hash: newAuthHash,
+          new_salt: saltHex,
+        }),
       });
       return await res.json();
     } catch { return { error: 'Failed to connect to backend' }; }

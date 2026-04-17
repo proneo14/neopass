@@ -13,6 +13,26 @@ const ENTRY_ICONS: Record<string, string> = {
   identity: '👤',
 };
 
+const SENSITIVE_FIELDS = new Set(['password', 'cvv', 'number', 'content']);
+
+function CopyButton({ value, sensitive = false }: { value: string; sensitive?: boolean }) {
+  const [copied, setCopied] = useState(false);
+  const handleCopy = async () => {
+    if (sensitive) {
+      await window.api.clipboard.copySecure(value);
+    } else {
+      await navigator.clipboard.writeText(value);
+    }
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1500);
+  };
+  return (
+    <button onClick={handleCopy} className="text-xs text-surface-500 hover:text-accent-400 transition-colors shrink-0">
+      {copied ? '✓ Copied' : 'Copy'}
+    </button>
+  );
+}
+
 export function VaultAccessPanel({ orgId }: Props) {
   const [members, setMembers] = useState<OrgMember[]>([]);
   const [selectedUser, setSelectedUser] = useState<OrgMember | null>(null);
@@ -20,10 +40,13 @@ export function VaultAccessPanel({ orgId }: Props) {
   const [loading, setLoading] = useState(true);
   const [accessLoading, setAccessLoading] = useState(false);
   const [error, setError] = useState('');
+  const [successMsg, setSuccessMsg] = useState('');
   const [showResetPassword, setShowResetPassword] = useState(false);
   const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
   const [resetting, setResetting] = useState(false);
   const [expandedEntry, setExpandedEntry] = useState<string | null>(null);
+  const [revealedFields, setRevealedFields] = useState<Set<string>>(new Set());
 
   const { token, masterKeyHex } = useAuthStore();
 
@@ -52,6 +75,8 @@ export function VaultAccessPanel({ orgId }: Props) {
     setAccessLoading(true);
     setError('');
     setEntries([]);
+    setExpandedEntry(null);
+    setRevealedFields(new Set());
     try {
       const result = await window.api.admin.accessVault(token, orgId, member.user_id, masterKeyHex) as DecryptedEntry[] | { error: string };
       if ('error' in result) {
@@ -66,31 +91,47 @@ export function VaultAccessPanel({ orgId }: Props) {
     }
   };
 
+  const toggleReveal = (entryId: string, fieldKey: string) => {
+    const key = `${entryId}:${fieldKey}`;
+    setRevealedFields((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  };
+
   const handleResetPassword = async () => {
     if (!token || !masterKeyHex || !selectedUser || !newPassword) return;
+    if (newPassword !== confirmPassword) {
+      setError('Passwords do not match');
+      return;
+    }
+    if (newPassword.length < 10) {
+      setError('Password must be at least 10 characters');
+      return;
+    }
     setResetting(true);
     setError('');
     try {
       const result = await window.api.admin.resetPassword(token, orgId, selectedUser.user_id, {
         master_key: masterKeyHex,
-        new_auth_hash: newPassword, // In production, this would be properly derived
-        new_salt: '',
+        target_email: selectedUser.email || '',
+        new_password: newPassword,
       }) as { error?: string };
       if (result.error) {
         setError(result.error);
       } else {
+        setSuccessMsg(`Password reset for ${selectedUser.email || selectedUser.user_id}. They will need to log in with the new password.`);
         setShowResetPassword(false);
         setNewPassword('');
+        setConfirmPassword('');
       }
     } catch {
       setError('Failed to reset password');
     } finally {
       setResetting(false);
     }
-  };
-
-  const handleCopyField = async (value: string) => {
-    await window.api.clipboard.copySecure(value);
   };
 
   if (loading) {
@@ -117,6 +158,11 @@ export function VaultAccessPanel({ orgId }: Props) {
       {error && (
         <div className="bg-red-500/10 border border-red-500/30 text-red-400 text-sm px-4 py-2 rounded-lg">
           {error}
+        </div>
+      )}
+      {successMsg && (
+        <div className="bg-green-500/10 border border-green-500/30 text-green-400 text-sm px-4 py-2 rounded-lg">
+          {successMsg}
         </div>
       )}
 
@@ -159,10 +205,10 @@ export function VaultAccessPanel({ orgId }: Props) {
                   {selectedUser.email || selectedUser.user_id}'s Vault ({entries.length} entries)
                 </h2>
                 <button
-                  onClick={() => setShowResetPassword(true)}
+                  onClick={() => { setShowResetPassword(true); setError(''); }}
                   className="text-xs text-red-400 hover:text-red-300 transition-colors"
                 >
-                  Reset Password
+                  Reset Master Password
                 </button>
               </div>
 
@@ -172,49 +218,62 @@ export function VaultAccessPanel({ orgId }: Props) {
                 </div>
               ) : (
                 <div className="bg-surface-800 rounded-xl divide-y divide-surface-700">
-                  {entries.map((entry) => (
-                    <div key={entry.id} className="px-4 py-3">
-                      <button
-                        onClick={() => setExpandedEntry(expandedEntry === entry.id ? null : entry.id)}
-                        className="w-full flex items-center justify-between text-left"
-                      >
-                        <div className="flex items-center gap-2">
-                          <span>{ENTRY_ICONS[entry.entry_type] || '📄'}</span>
-                          <span className="text-sm text-surface-100">
-                            {(entry.data as Record<string, string>)?.name || entry.entry_type}
+                  {entries.map((entry) => {
+                    const data = entry.data as Record<string, string>;
+                    return (
+                      <div key={entry.id} className="px-4 py-3">
+                        <button
+                          onClick={() => setExpandedEntry(expandedEntry === entry.id ? null : entry.id)}
+                          className="w-full flex items-center justify-between text-left"
+                        >
+                          <div className="flex items-center gap-2">
+                            <span>{ENTRY_ICONS[entry.entry_type] || '📄'}</span>
+                            <span className="text-sm text-surface-100">
+                              {data?.name || entry.entry_type}
+                            </span>
+                            <span className="text-xs text-surface-500">v{entry.version}</span>
+                          </div>
+                          <span className="text-xs text-surface-500">
+                            {expandedEntry === entry.id ? '▼' : '▶'}
                           </span>
-                          <span className="text-xs text-surface-500">v{entry.version}</span>
-                        </div>
-                        <span className="text-xs text-surface-500">
-                          {expandedEntry === entry.id ? '▼' : '▶'}
-                        </span>
-                      </button>
-                      {expandedEntry === entry.id && (
-                        <div className="mt-3 pl-7 space-y-2">
-                          {Object.entries(entry.data).map(([key, value]) => {
-                            if (!value || key === 'name') return null;
-                            const isSecret = ['password', 'cvv', 'number'].includes(key);
-                            return (
-                              <div key={key} className="flex items-center justify-between text-sm">
-                                <span className="text-surface-500 text-xs w-24">{key}</span>
-                                <div className="flex items-center gap-2 flex-1 min-w-0">
-                                  <span className="text-surface-300 text-xs truncate">
-                                    {isSecret ? '••••••••' : String(value)}
-                                  </span>
-                                  <button
-                                    onClick={() => handleCopyField(String(value))}
-                                    className="text-xs text-surface-500 hover:text-accent-400 transition-colors shrink-0"
-                                  >
-                                    Copy
-                                  </button>
+                        </button>
+                        {expandedEntry === entry.id && (
+                          <div className="mt-3 pl-7 space-y-2">
+                            {Object.entries(data).map(([key, value]) => {
+                              if (!value || key === 'name') return null;
+                              const isSensitive = SENSITIVE_FIELDS.has(key);
+                              const revealKey = `${entry.id}:${key}`;
+                              const revealed = revealedFields.has(revealKey);
+                              const displayValue = isSensitive && !revealed
+                                ? '•'.repeat(Math.min(String(value).length, 20))
+                                : String(value);
+                              return (
+                                <div key={key} className="flex items-center justify-between text-sm">
+                                  <span className="text-surface-500 text-xs w-24">{key}</span>
+                                  <div className="flex items-center gap-2 flex-1 min-w-0">
+                                    <span className={`text-xs truncate ${isSensitive && !revealed ? 'text-surface-500 font-mono tracking-wider' : 'text-surface-300'}`}>
+                                      {displayValue}
+                                    </span>
+                                    <div className="flex gap-2 shrink-0">
+                                      {isSensitive && (
+                                        <button
+                                          onClick={() => toggleReveal(entry.id, key)}
+                                          className="text-xs text-surface-500 hover:text-surface-300 transition-colors"
+                                        >
+                                          {revealed ? 'Hide' : 'Show'}
+                                        </button>
+                                      )}
+                                      <CopyButton value={String(value)} sensitive={isSensitive} />
+                                    </div>
+                                  </div>
                                 </div>
-                              </div>
-                            );
-                          })}
-                        </div>
-                      )}
-                    </div>
-                  ))}
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
                 </div>
               )}
             </div>
@@ -226,32 +285,52 @@ export function VaultAccessPanel({ orgId }: Props) {
       {showResetPassword && selectedUser && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={() => setShowResetPassword(false)}>
           <div className="bg-surface-800 rounded-xl p-6 w-full max-w-md space-y-4" onClick={(e) => e.stopPropagation()}>
-            <h3 className="text-sm font-medium text-surface-100">Reset Password</h3>
+            <h3 className="text-sm font-medium text-surface-100">Reset Master Password</h3>
             <p className="text-xs text-surface-400">
-              Reset password for <span className="text-surface-200">{selectedUser.email || selectedUser.user_id}</span>.
-              This will re-encrypt all vault entries with the new key.
+              Reset the master password for <span className="text-surface-200">{selectedUser.email || selectedUser.user_id}</span>.
+              This will re-encrypt all their vault entries with a new key.
             </p>
-            <div className="bg-red-500/10 border border-red-500/30 text-red-400 text-xs px-3 py-2 rounded-lg">
-              This action is irreversible and will invalidate all existing sessions for this user.
+            <div className="bg-red-500/10 border border-red-500/30 text-red-400 text-xs px-3 py-2 rounded-lg space-y-1">
+              <div className="font-medium">Warning: Irreversible action</div>
+              <ul className="list-disc list-inside text-red-400/80">
+                <li>All existing sessions for this user will be invalidated</li>
+                <li>The user must log in with the new password</li>
+                <li>This action is logged in the audit trail</li>
+              </ul>
             </div>
-            <input
-              type="password"
-              value={newPassword}
-              onChange={(e) => setNewPassword(e.target.value)}
-              placeholder="New password"
-              className="w-full bg-surface-900 border border-surface-600 text-surface-100 text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-accent-500"
-              autoFocus
-            />
+            <div className="space-y-2">
+              <input
+                type="password"
+                value={newPassword}
+                onChange={(e) => setNewPassword(e.target.value)}
+                placeholder="New master password (min 10 characters)"
+                className="w-full bg-surface-900 border border-surface-600 text-surface-100 text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-accent-500"
+                autoFocus
+              />
+              <input
+                type="password"
+                value={confirmPassword}
+                onChange={(e) => setConfirmPassword(e.target.value)}
+                placeholder="Confirm new password"
+                className="w-full bg-surface-900 border border-surface-600 text-surface-100 text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-accent-500"
+              />
+              {newPassword && confirmPassword && newPassword !== confirmPassword && (
+                <p className="text-xs text-red-400">Passwords do not match</p>
+              )}
+              {newPassword && newPassword.length < 10 && (
+                <p className="text-xs text-amber-400">Password must be at least 10 characters</p>
+              )}
+            </div>
             <div className="flex gap-2 justify-end">
               <button
-                onClick={() => { setShowResetPassword(false); setNewPassword(''); }}
+                onClick={() => { setShowResetPassword(false); setNewPassword(''); setConfirmPassword(''); }}
                 className="text-sm text-surface-400 hover:text-surface-200 px-4 py-2 transition-colors"
               >
                 Cancel
               </button>
               <button
                 onClick={handleResetPassword}
-                disabled={resetting || !newPassword}
+                disabled={resetting || !newPassword || !confirmPassword || newPassword !== confirmPassword || newPassword.length < 10}
                 className="bg-red-600 hover:bg-red-500 disabled:opacity-50 text-white text-sm rounded-lg px-4 py-2 transition-colors"
               >
                 {resetting ? 'Resetting...' : 'Reset Password'}

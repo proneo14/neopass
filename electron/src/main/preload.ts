@@ -8,6 +8,8 @@ const api = {
       ipcRenderer.invoke('auth:login', credentials),
     register: (data: { email: string; password: string }): Promise<unknown> =>
       ipcRenderer.invoke('auth:register', data),
+    changePassword: (token: string, data: { email: string; currentPassword: string; newPassword: string }): Promise<unknown> =>
+      ipcRenderer.invoke('auth:changePassword', token, data),
   },
 
   vault: {
@@ -64,9 +66,11 @@ const api = {
       ipcRenderer.invoke('admin:listMembers', token, orgId),
     removeMember: (token: string, orgId: string, userId: string): Promise<unknown> =>
       ipcRenderer.invoke('admin:removeMember', token, orgId, userId),
+    leaveOrg: (token: string, orgId: string): Promise<unknown> =>
+      ipcRenderer.invoke('admin:leaveOrg', token, orgId),
     accessVault: (token: string, orgId: string, userId: string, masterKey: string): Promise<unknown> =>
       ipcRenderer.invoke('admin:accessVault', token, orgId, userId, masterKey),
-    resetPassword: (token: string, orgId: string, userId: string, data: { master_key: string; new_auth_hash: string; new_salt: string }): Promise<unknown> =>
+    resetPassword: (token: string, orgId: string, userId: string, data: { master_key: string; target_email: string; new_password: string }): Promise<unknown> =>
       ipcRenderer.invoke('admin:resetPassword', token, orgId, userId, data),
     setPolicy: (token: string, orgId: string, policy: Record<string, unknown>): Promise<unknown> =>
       ipcRenderer.invoke('admin:setPolicy', token, orgId, policy),

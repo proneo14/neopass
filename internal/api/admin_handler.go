@@ -177,6 +177,25 @@ func (h *AdminHandler) RemoveUser(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "removed"})
 }
 
+// LeaveOrg handles POST /api/v1/admin/orgs/{id}/leave
+func (h *AdminHandler) LeaveOrg(w http.ResponseWriter, r *http.Request) {
+	claims := GetClaims(r.Context())
+	if claims == nil {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
+	orgID := chi.URLParam(r, "id")
+
+	if err := h.adminService.LeaveOrg(r.Context(), claims.UserID, orgID); err != nil {
+		log.Error().Err(err).Msg("leave org failed")
+		writeError(w, http.StatusInternalServerError, "failed to leave organization")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{"status": "left"})
+}
+
 // ListMembers handles GET /api/v1/admin/orgs/{id}/members
 func (h *AdminHandler) ListMembers(w http.ResponseWriter, r *http.Request) {
 	claims := GetClaims(r.Context())
@@ -261,16 +280,17 @@ func (h *AdminHandler) ResetPassword(w http.ResponseWriter, r *http.Request) {
 	targetUID := chi.URLParam(r, "uid")
 
 	var body struct {
-		MasterKey   string `json:"master_key"`    // admin's hex-encoded master key
-		NewAuthHash string `json:"new_auth_hash"` // hex-encoded
-		NewSalt     string `json:"new_salt"`       // hex-encoded
+		MasterKey    string `json:"master_key"`     // admin's hex-encoded master key
+		NewMasterKey string `json:"new_master_key"` // new user master key hex
+		NewAuthHash  string `json:"new_auth_hash"`  // hex-encoded
+		NewSalt      string `json:"new_salt"`       // hex-encoded
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
 
-	if body.MasterKey == "" || body.NewAuthHash == "" || body.NewSalt == "" {
+	if body.MasterKey == "" || body.NewMasterKey == "" || body.NewAuthHash == "" || body.NewSalt == "" {
 		writeError(w, http.StatusBadRequest, "missing required fields")
 		return
 	}
@@ -281,10 +301,19 @@ func (h *AdminHandler) ResetPassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	newMasterKeyBytes, err := hex.DecodeString(body.NewMasterKey)
+	if err != nil || len(newMasterKeyBytes) != 32 {
+		writeError(w, http.StatusBadRequest, "invalid new_master_key")
+		return
+	}
+
 	var masterKey [32]byte
 	copy(masterKey[:], keyBytes)
 
-	if err := h.adminService.ChangeUserPassword(r.Context(), claims.UserID, orgID, targetUID, masterKey, body.NewAuthHash, body.NewSalt); err != nil {
+	var newMasterKey [32]byte
+	copy(newMasterKey[:], newMasterKeyBytes)
+
+	if err := h.adminService.ChangeUserPassword(r.Context(), claims.UserID, orgID, targetUID, masterKey, newMasterKey, body.NewAuthHash, body.NewSalt); err != nil {
 		if errors.Is(err, admin.ErrNotAdmin) {
 			writeError(w, http.StatusForbidden, "admin role required")
 			return

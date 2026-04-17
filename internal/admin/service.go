@@ -56,6 +56,11 @@ func NewService(orgRepo *db.OrgRepo, userRepo *db.UserRepo, vaultRepo *db.VaultR
 // CreateOrg creates a new organization. The caller becomes the admin.
 // adminMasterKey is the admin's 32-byte master key (hex-encoded by handler).
 func (s *Service) CreateOrg(ctx context.Context, adminUserID, orgName string, adminMasterKey [32]byte) (db.Organization, error) {
+	// Check if user already belongs to an org
+	if _, _, err := s.orgRepo.GetUserOrg(ctx, adminUserID); err == nil {
+		return db.Organization{}, fmt.Errorf("user already belongs to an organization")
+	}
+
 	// Generate org X-Wing keypair, encrypted with admin's master key
 	orgPubKey, encOrgPrivKey, err := crypto.GenerateOrgKeyPair(adminMasterKey)
 	if err != nil {
@@ -168,6 +173,19 @@ func (s *Service) RemoveUser(ctx context.Context, adminUserID, orgID, targetUser
 	return nil
 }
 
+// LeaveOrg lets a user leave an organization voluntarily.
+func (s *Service) LeaveOrg(ctx context.Context, userID, orgID string) error {
+	if err := s.orgRepo.RemoveMember(ctx, orgID, userID); err != nil {
+		return err
+	}
+
+	s.audit(ctx, &userID, nil, "user_left_org", map[string]string{
+		"org_id": orgID,
+	})
+
+	return nil
+}
+
 // ListMembers returns all members of an organization.
 func (s *Service) ListMembers(ctx context.Context, adminUserID, orgID string) ([]db.OrgMember, error) {
 	if err := s.verifyAdmin(ctx, orgID, adminUserID); err != nil {
@@ -245,8 +263,8 @@ func (s *Service) AccessUserVault(ctx context.Context, adminUserID, orgID, targe
 }
 
 // ChangeUserPassword changes a user's password via admin escrow access.
-// This re-encrypts all vault entries with a new master key derived from the new credentials.
-func (s *Service) ChangeUserPassword(ctx context.Context, adminUserID, orgID, targetUserID string, adminMasterKey [32]byte, newAuthHash, newSalt string) error {
+// This re-encrypts all vault entries with the provided new master key.
+func (s *Service) ChangeUserPassword(ctx context.Context, adminUserID, orgID, targetUserID string, adminMasterKey, newMasterKey [32]byte, newAuthHash, newSalt string) error {
 	if err := s.verifyAdmin(ctx, orgID, adminUserID); err != nil {
 		return err
 	}
@@ -275,7 +293,7 @@ func (s *Service) ChangeUserPassword(ctx context.Context, adminUserID, orgID, ta
 	}
 	defer crypto.ZeroBytes(oldMasterKey[:])
 
-	// Derive new master key from new credentials
+	// Decode new credentials
 	newSaltBytes, err := hex.DecodeString(newSalt)
 	if err != nil {
 		return fmt.Errorf("decode new salt: %w", err)
@@ -285,11 +303,7 @@ func (s *Service) ChangeUserPassword(ctx context.Context, adminUserID, orgID, ta
 		return fmt.Errorf("decode new auth hash: %w", err)
 	}
 
-	// newMasterKey = first 32 bytes of new auth hash (matching client-side KDF derivation)
-	// In a real flow the client would derive masterKey and authHash separately from the password;
-	// here the admin supplies newAuthHash which the server bcrypt-hashes for storage.
-	var newMasterKey [32]byte
-	copy(newMasterKey[:], newAuthHashBytes[:32])
+	// newMasterKey is provided directly by the caller (derived client-side via KDF)
 	defer crypto.ZeroBytes(newMasterKey[:])
 
 	// Re-encrypt all vault entries
@@ -302,7 +316,9 @@ func (s *Service) ChangeUserPassword(ctx context.Context, adminUserID, orgID, ta
 		// Decrypt with old key
 		plaintext, err := crypto.Decrypt(e.EncryptedData, e.Nonce, oldMasterKey)
 		if err != nil {
-			return fmt.Errorf("decrypt entry %s: %w", e.ID, err)
+			log.Warn().Str("entry_id", e.ID).Err(err).Msg("deleting unrecoverable vault entry during admin password reset")
+			_ = s.vaultRepo.DeleteEntry(ctx, e.ID, targetUserID)
+			continue
 		}
 
 		// Re-encrypt with new key
@@ -334,31 +350,27 @@ func (s *Service) ChangeUserPassword(ctx context.Context, adminUserID, orgID, ta
 	// Decrypt user's private key with old master key, re-encrypt with new
 	var oldKey [32]byte
 	copy(oldKey[:], oldMasterKey[:])
+	newEncPrivKey := user.EncryptedPrivateKey
 	if len(user.EncryptedPrivateKey) > crypto.NonceSize {
 		oldNonce := user.EncryptedPrivateKey[:crypto.NonceSize]
 		oldCt := user.EncryptedPrivateKey[crypto.NonceSize:]
 		privKeyPlain, err := crypto.Decrypt(oldCt, oldNonce, oldKey)
 		if err != nil {
-			return fmt.Errorf("decrypt user private key: %w", err)
-		}
+			log.Warn().Str("user_id", targetUserID).Err(err).Msg("could not decrypt private key during admin password reset, keeping existing")
+		} else {
+			newCt, newNonce, err := crypto.Encrypt(privKeyPlain, newMasterKey)
+			crypto.ZeroBytes(privKeyPlain)
+			if err != nil {
+				return fmt.Errorf("re-encrypt user private key: %w", err)
+			}
 
-		newCt, newNonce, err := crypto.Encrypt(privKeyPlain, newMasterKey)
-		crypto.ZeroBytes(privKeyPlain)
-		if err != nil {
-			return fmt.Errorf("re-encrypt user private key: %w", err)
+			newEncPrivKey = make([]byte, len(newNonce)+len(newCt))
+			copy(newEncPrivKey, newNonce)
+			copy(newEncPrivKey[len(newNonce):], newCt)
 		}
-
-		newEncPrivKey := make([]byte, len(newNonce)+len(newCt))
-		copy(newEncPrivKey, newNonce)
-		copy(newEncPrivKey[len(newNonce):], newCt)
-
-		if err := s.userRepo.UpdateUserKeys(ctx, targetUserID, bcryptHash, newSaltBytes, user.PublicKey, newEncPrivKey); err != nil {
-			return fmt.Errorf("update user keys: %w", err)
-		}
-	} else {
-		if err := s.userRepo.UpdateUserKeys(ctx, targetUserID, bcryptHash, newSaltBytes, user.PublicKey, user.EncryptedPrivateKey); err != nil {
-			return fmt.Errorf("update user keys: %w", err)
-		}
+	}
+	if err := s.userRepo.UpdateUserKeys(ctx, targetUserID, bcryptHash, newSaltBytes, user.PublicKey, newEncPrivKey); err != nil {
+		return fmt.Errorf("update user keys: %w", err)
 	}
 
 	// Update escrow blob with new master key

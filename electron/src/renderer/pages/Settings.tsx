@@ -38,14 +38,36 @@ function ChangePasswordModal({ onClose }: { onClose: () => void }) {
   const [newPw, setNewPw] = useState('');
   const [confirmPw, setConfirmPw] = useState('');
   const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
   const [showGenerator, setShowGenerator] = useState(false);
+  const { token, email, login, userId } = useAuthStore();
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (newPw !== confirmPw) { setError('Passwords do not match'); return; }
     if (newPw.length < 10) { setError('Password must be at least 10 characters'); return; }
-    // Will wire to backend
-    onClose();
+    if (!token || !email || !userId) { setError('Not logged in'); return; }
+    setError('');
+    setLoading(true);
+    try {
+      const result = await window.api.auth.changePassword(token, {
+        email,
+        currentPassword: currentPw,
+        newPassword: newPw,
+      }) as Record<string, unknown>;
+      if (result.error) {
+        setError(String(result.error));
+        return;
+      }
+      if (result.master_key_hex) {
+        login(token, userId, email, undefined, result.master_key_hex as string);
+      }
+      onClose();
+    } catch {
+      setError('Failed to change password');
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -94,8 +116,8 @@ function ChangePasswordModal({ onClose }: { onClose: () => void }) {
             <button type="button" onClick={onClose} className="flex-1 py-2 rounded-md bg-surface-700 text-surface-300 text-sm hover:bg-surface-600 transition-colors">
               Cancel
             </button>
-            <button type="submit" className="flex-1 py-2 rounded-md bg-accent-600 hover:bg-accent-500 text-white text-sm font-medium transition-colors">
-              Change Password
+            <button type="submit" disabled={loading} className="flex-1 py-2 rounded-md bg-accent-600 hover:bg-accent-500 text-white text-sm font-medium transition-colors disabled:opacity-50">
+              {loading ? 'Changing...' : 'Change Password'}
             </button>
           </div>
         </form>
@@ -397,9 +419,16 @@ export function Settings() {
                   </div>
                 </div>
                 <button
-                  onClick={() => {
-                    clearOrg();
-                    setOrgError('');
+                  onClick={async () => {
+                    if (!token || !orgId) return;
+                    try {
+                      const result = await window.api.admin.leaveOrg(token, orgId) as { error?: string };
+                      if (result.error) { setOrgError(result.error); return; }
+                      clearOrg();
+                      setOrgError('');
+                    } catch {
+                      setOrgError('Failed to leave organization');
+                    }
                   }}
                   className="w-full text-left px-4 py-3 rounded-md bg-surface-800 hover:bg-surface-700 text-sm text-red-400 transition-colors"
                 >

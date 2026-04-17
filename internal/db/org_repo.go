@@ -182,7 +182,14 @@ func (r *OrgRepo) UpdateEscrowBlob(ctx context.Context, orgID, userID string, es
 }
 
 // CreateInvitation creates an organization invitation.
+// If a pending invitation already exists for this org+email, it is replaced.
 func (r *OrgRepo) CreateInvitation(ctx context.Context, orgID, email, role, invitedBy string) (Invitation, error) {
+	// Delete any existing pending invitations for the same org+email
+	_, _ = r.pool.Exec(ctx,
+		`DELETE FROM invitations WHERE org_id = $1 AND email = $2 AND accepted = false`,
+		orgID, email,
+	)
+
 	var inv Invitation
 	err := r.pool.QueryRow(ctx,
 		`INSERT INTO invitations (org_id, email, role, invited_by)
@@ -266,14 +273,14 @@ func (r *OrgRepo) GetUserOrg(ctx context.Context, userID string) (OrgMember, Org
 	var org Organization
 	err := r.pool.QueryRow(ctx,
 		`SELECT om.org_id, om.user_id, u.email, om.role, om.joined_at,
-		        o.id, o.name, o.created_at
+		        o.id, o.name, o.org_public_key, o.created_at
 		 FROM org_members om
 		 JOIN users u ON u.id = om.user_id
 		 JOIN organizations o ON o.id = om.org_id
 		 WHERE om.user_id = $1
 		 LIMIT 1`, userID,
 	).Scan(&m.OrgID, &m.UserID, &m.Email, &m.Role, &m.JoinedAt,
-		&org.ID, &org.Name, &org.CreatedAt)
+		&org.ID, &org.Name, &org.OrgPublicKey, &org.CreatedAt)
 	if err != nil {
 		if err == pgx.ErrNoRows {
 			return OrgMember{}, Organization{}, fmt.Errorf("no org membership")

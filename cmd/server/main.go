@@ -87,7 +87,7 @@ func main() {
 		auditRepo := db.NewAuditRepo(database.Pool)
 		syncRepo := db.NewSyncRepo(database.Pool)
 		var authErr error
-		authService, authErr = auth.NewService(userRepo, nil, nil, auth.ServiceConfig{})
+		authService, authErr = auth.NewService(userRepo, nil, nil, auth.ServiceConfig{}, vaultRepo, orgRepo)
 		if authErr != nil {
 			log.Fatal().Err(authErr).Msg("failed to create auth service")
 		}

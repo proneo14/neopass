@@ -44,6 +44,9 @@ func Router(authService *auth.Service, totpService *auth.TOTPService, smsService
 	r.Group(func(r chi.Router) {
 		r.Use(AuthMiddleware(authService))
 
+		// Password change (self-service)
+		r.Post("/auth/change-password", authHandler.ChangePassword)
+
 		// 2FA management (requires full auth)
 		r.Route("/auth/2fa", func(r chi.Router) {
 			r.Post("/setup", tfaHandler.Setup)
@@ -72,6 +75,7 @@ func Router(authService *auth.Service, totpService *auth.TOTPService, smsService
 			r.Get("/my-invitations", adminHandler.GetMyInvitations)
 			r.Post("/orgs", adminHandler.CreateOrg)
 			r.Route("/orgs/{id}", func(r chi.Router) {
+				r.Post("/leave", adminHandler.LeaveOrg)
 				r.Post("/invite", adminHandler.InviteUser)
 				r.Post("/accept", adminHandler.AcceptInvite)
 				r.Get("/members", adminHandler.ListMembers)

@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -109,4 +110,52 @@ func (h *AuthHandler) Logout(w http.ResponseWriter, r *http.Request) {
 	// Client-side logout: just acknowledge.
 	// Server-side token invalidation would require a revocation list (future enhancement).
 	writeJSON(w, http.StatusOK, map[string]string{"status": "logged out"})
+}
+
+// ChangePassword handles POST /api/v1/auth/change-password
+func (h *AuthHandler) ChangePassword(w http.ResponseWriter, r *http.Request) {
+	claims := GetClaims(r.Context())
+	if claims == nil {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
+	var body struct {
+		OldMasterKey string `json:"old_master_key"`
+		NewMasterKey string `json:"new_master_key"`
+		NewAuthHash  string `json:"new_auth_hash"`
+		NewSalt      string `json:"new_salt"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	if body.OldMasterKey == "" || body.NewMasterKey == "" || body.NewAuthHash == "" || body.NewSalt == "" {
+		writeError(w, http.StatusBadRequest, "missing required fields")
+		return
+	}
+
+	oldKeyBytes, err := hex.DecodeString(body.OldMasterKey)
+	if err != nil || len(oldKeyBytes) != 32 {
+		writeError(w, http.StatusBadRequest, "invalid old_master_key")
+		return
+	}
+	newKeyBytes, err := hex.DecodeString(body.NewMasterKey)
+	if err != nil || len(newKeyBytes) != 32 {
+		writeError(w, http.StatusBadRequest, "invalid new_master_key")
+		return
+	}
+
+	var oldMasterKey, newMasterKey [32]byte
+	copy(oldMasterKey[:], oldKeyBytes)
+	copy(newMasterKey[:], newKeyBytes)
+
+	if err := h.authService.ChangeOwnPassword(r.Context(), claims.UserID, oldMasterKey, newMasterKey, body.NewAuthHash, body.NewSalt); err != nil {
+		log.Error().Err(err).Str("user_id", claims.UserID).Msg("password change failed")
+		writeError(w, http.StatusInternalServerError, "failed to change password")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{"status": "password_changed"})
 }

@@ -115,14 +115,23 @@ export function MembersPanel({ orgId }: Props) {
       {/* Invite Button */}
       <div className="flex items-center justify-between">
         <h2 className="text-xs uppercase tracking-wider text-surface-500 font-medium">
-          Organization Members ({members.length})
+          Organization Members ({members.length}{pendingInvitations.length > 0 ? ` + ${pendingInvitations.length} pending` : ''})
         </h2>
-        <button
-          onClick={() => setShowInvite(true)}
-          className="bg-accent-600 hover:bg-accent-500 text-white text-sm rounded-lg px-4 py-1.5 transition-colors"
-        >
-          Invite User
-        </button>
+        <div className="flex gap-2">
+          <button
+            onClick={() => { loadData(); }}
+            className="text-surface-400 hover:text-surface-200 text-sm px-2 py-1.5 transition-colors"
+            title="Refresh"
+          >
+            ↻
+          </button>
+          <button
+            onClick={() => setShowInvite(true)}
+            className="bg-accent-600 hover:bg-accent-500 text-white text-sm rounded-lg px-4 py-1.5 transition-colors"
+          >
+            Invite User
+          </button>
+        </div>
       </div>
 
       {/* Invite Form */}

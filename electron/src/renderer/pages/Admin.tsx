@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useAuthStore } from '../store/authStore';
 import { MembersPanel } from '../components/admin/MembersPanel';
 import { VaultAccessPanel } from '../components/admin/VaultAccessPanel';
@@ -18,7 +18,22 @@ type TabId = (typeof TABS)[number]['id'];
 
 export function Admin() {
   const [activeTab, setActiveTab] = useState<TabId>('members');
-  const { orgId, orgName } = useAuthStore();
+  const { orgId, orgName, token, setOrg, clearOrg } = useAuthStore();
+
+  // Refresh org info from backend on mount to ensure we have the correct org
+  useEffect(() => {
+    if (!token) return;
+    (async () => {
+      try {
+        const result = await window.api.admin.getMyOrg(token) as { member?: boolean; org_id?: string; org_name?: string; role?: string };
+        if (result.member && result.org_id) {
+          setOrg(result.org_id, result.org_name ?? '', result.role ?? 'member');
+        } else {
+          clearOrg();
+        }
+      } catch { /* ignore */ }
+    })();
+  }, [token]);
 
   if (!orgId) {
     return (

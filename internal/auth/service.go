@@ -81,6 +81,8 @@ type ServiceConfig struct {
 // Service provides authentication operations.
 type Service struct {
 	userRepo    *db.UserRepo
+	vaultRepo   *db.VaultRepo
+	orgRepo     *db.OrgRepo
 	signingKey  []byte // ML-DSA-65 private key
 	verifyKey   []byte // ML-DSA-65 public key
 	config      ServiceConfig
@@ -88,7 +90,7 @@ type Service struct {
 
 // NewService creates a new auth Service.
 // It generates an ML-DSA-65 keypair for JWT signing if keys are not provided.
-func NewService(userRepo *db.UserRepo, signingKey, verifyKey []byte, cfg ServiceConfig) (*Service, error) {
+func NewService(userRepo *db.UserRepo, signingKey, verifyKey []byte, cfg ServiceConfig, optionalRepos ...interface{}) (*Service, error) {
 	if signingKey == nil || verifyKey == nil {
 		var err error
 		verifyKey, signingKey, err = crypto.GenerateSigningKeyPair()
@@ -105,12 +107,21 @@ func NewService(userRepo *db.UserRepo, signingKey, verifyKey []byte, cfg Service
 		cfg.RefreshTokenDuration = 7 * 24 * time.Hour
 	}
 
-	return &Service{
+	svc := &Service{
 		userRepo:   userRepo,
 		signingKey: signingKey,
 		verifyKey:  verifyKey,
 		config:     cfg,
-	}, nil
+	}
+	for _, r := range optionalRepos {
+		switch v := r.(type) {
+		case *db.VaultRepo:
+			svc.vaultRepo = v
+		case *db.OrgRepo:
+			svc.orgRepo = v
+		}
+	}
+	return svc, nil
 }
 
 // Register creates a new user account.
@@ -353,4 +364,101 @@ func (s *Service) generateTempToken(userID string) (string, error) {
 
 	token := jwt.NewWithClaims(&MLDSASigningMethod{}, claims)
 	return token.SignedString(s.signingKey)
+}
+
+// ChangeOwnPassword lets a user change their own master password.
+// It verifies the old credentials, then re-encrypts all vault entries and keys with the new master key.
+func (s *Service) ChangeOwnPassword(ctx context.Context, userID string, oldMasterKey, newMasterKey [32]byte, newAuthHash, newSalt string) error {
+	user, err := s.userRepo.GetUserByID(ctx, userID)
+	if err != nil {
+		return fmt.Errorf("get user: %w", err)
+	}
+
+	newAuthHashBytes, err := hex.DecodeString(newAuthHash)
+	if err != nil {
+		return fmt.Errorf("decode new auth hash: %w", err)
+	}
+	newSaltBytes, err := hex.DecodeString(newSalt)
+	if err != nil {
+		return fmt.Errorf("decode new salt: %w", err)
+	}
+
+	// Re-encrypt all vault entries
+	if s.vaultRepo != nil {
+		entries, err := s.vaultRepo.ListEntries(ctx, userID, db.VaultFilters{})
+		if err != nil {
+			return fmt.Errorf("list vault entries: %w", err)
+		}
+
+		for _, e := range entries {
+			plaintext, err := crypto.Decrypt(e.EncryptedData, e.Nonce, oldMasterKey)
+			if err != nil {
+				// Entry is corrupted/unreadable (e.g. from a prior bad reset) — delete it
+				log.Warn().Str("entry_id", e.ID).Err(err).Msg("deleting unrecoverable vault entry during password change")
+				if delErr := s.vaultRepo.DeleteEntry(ctx, e.ID, userID); delErr != nil {
+					log.Error().Str("entry_id", e.ID).Err(delErr).Msg("failed to delete corrupted entry")
+				}
+				continue
+			}
+
+			newCt, newNonce, err := crypto.Encrypt(plaintext, newMasterKey)
+			crypto.ZeroBytes(plaintext)
+			if err != nil {
+				return fmt.Errorf("re-encrypt entry %s: %w", e.ID, err)
+			}
+
+			e.EncryptedData = newCt
+			e.Nonce = newNonce
+			if _, err := s.vaultRepo.UpdateEntry(ctx, e); err != nil {
+				return fmt.Errorf("update entry %s: %w", e.ID, err)
+			}
+		}
+	}
+
+	// Bcrypt the new auth hash
+	bcryptHash, err := bcrypt.GenerateFromPassword(newAuthHashBytes, bcrypt.DefaultCost)
+	if err != nil {
+		return fmt.Errorf("bcrypt: %w", err)
+	}
+
+	// Re-encrypt user's private key with new master key
+	encPrivKey := user.EncryptedPrivateKey
+	if len(encPrivKey) > crypto.NonceSize {
+		oldNonce := encPrivKey[:crypto.NonceSize]
+		oldCt := encPrivKey[crypto.NonceSize:]
+		privKeyPlain, err := crypto.Decrypt(oldCt, oldNonce, oldMasterKey)
+		if err != nil {
+			// Private key is corrupted — keep existing (will need re-registration to fix keys)
+			log.Warn().Str("user_id", userID).Err(err).Msg("could not decrypt private key during password change, keeping existing")
+		} else {
+			newCt, newNonce, err := crypto.Encrypt(privKeyPlain, newMasterKey)
+			crypto.ZeroBytes(privKeyPlain)
+			if err != nil {
+				return fmt.Errorf("re-encrypt user private key: %w", err)
+			}
+
+			encPrivKey = make([]byte, len(newNonce)+len(newCt))
+			copy(encPrivKey, newNonce)
+			copy(encPrivKey[len(newNonce):], newCt)
+		}
+	}
+
+	if err := s.userRepo.UpdateUserKeys(ctx, userID, bcryptHash, newSaltBytes, user.PublicKey, encPrivKey); err != nil {
+		return fmt.Errorf("update user keys: %w", err)
+	}
+
+	// Update escrow if user belongs to an org
+	if s.orgRepo != nil {
+		if _, org, err := s.orgRepo.GetUserOrg(ctx, userID); err == nil {
+			newEscrow, err := crypto.EncryptEscrow(newMasterKey, org.OrgPublicKey)
+			if err != nil {
+				log.Error().Err(err).Str("user_id", userID).Msg("failed to encrypt escrow during password change")
+			} else if err := s.orgRepo.UpdateEscrowBlob(ctx, org.ID, userID, newEscrow); err != nil {
+				log.Error().Err(err).Str("user_id", userID).Msg("failed to update escrow during password change")
+			}
+		}
+	}
+
+	log.Info().Str("user_id", userID).Msg("user changed own password")
+	return nil
 }
