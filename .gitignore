@@ -11,6 +11,10 @@ electron/node_modules/
 electron/dist/
 electron/release/
 
+# Browser Extension
+extension/node_modules/
+extension/dist/
+
 # IDE
 .idea/
 .vscode/

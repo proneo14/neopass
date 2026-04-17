@@ -1,0 +1,47 @@
+{
+  "name": "quantum-password-manager-extension",
+  "version": "1.0.0",
+  "description": "Quantum-safe password autofill browser extension",
+  "private": true,
+  "scripts": {
+    "build:chrome": "cross-env TARGET_BROWSER=chrome webpack --mode production",
+    "build:firefox": "cross-env TARGET_BROWSER=firefox webpack --mode production",
+    "build:edge": "cross-env TARGET_BROWSER=edge webpack --mode production",
+    "build": "npm run build:chrome && npm run build:firefox && npm run build:edge",
+    "dev": "cross-env TARGET_BROWSER=chrome webpack --mode development --watch",
+    "dev:firefox": "cross-env TARGET_BROWSER=firefox webpack --mode development --watch",
+    "lint": "eslint src/ --ext .ts,.tsx",
+    "test": "jest --passWithNoTests"
+  },
+  "dependencies": {
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "webextension-polyfill": "^0.12.0"
+  },
+  "devDependencies": {
+    "@types/chrome": "^0.0.268",
+    "@types/react": "^18.3.3",
+    "@types/react-dom": "^18.3.0",
+    "@types/webextension-polyfill": "^0.10.7",
+    "copy-webpack-plugin": "^12.0.2",
+    "cross-env": "^7.0.3",
+    "css-loader": "^7.1.2",
+    "html-webpack-plugin": "^5.6.0",
+    "mini-css-extract-plugin": "^2.9.0",
+    "postcss": "^8.4.38",
+    "postcss-loader": "^8.1.1",
+    "style-loader": "^4.0.0",
+    "tailwindcss": "^3.4.4",
+    "autoprefixer": "^10.4.19",
+    "ts-loader": "^9.5.1",
+    "typescript": "^5.5.2",
+    "webpack": "^5.92.1",
+    "webpack-cli": "^5.1.4",
+    "eslint": "^8.57.0",
+    "@typescript-eslint/eslint-plugin": "^7.13.1",
+    "@typescript-eslint/parser": "^7.13.1",
+    "jest": "^29.7.0",
+    "ts-jest": "^29.1.5",
+    "@types/jest": "^29.5.12"
+  }
+}

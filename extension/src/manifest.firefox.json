@@ -1,0 +1,43 @@
+{
+  "manifest_version": 2,
+  "name": "Quantum Password Manager",
+  "version": "1.0.0",
+  "description": "Quantum-safe password autofill",
+  "permissions": [
+    "storage",
+    "nativeMessaging",
+    "activeTab",
+    "tabs",
+    "https://*/*",
+    "http://*/*"
+  ],
+  "background": {
+    "scripts": ["background.js"]
+  },
+  "browser_action": {
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icons/icon-16.png",
+      "48": "icons/icon-48.png",
+      "128": "icons/icon-128.png"
+    }
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://*/*", "http://*/*"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "icons": {
+    "16": "icons/icon-16.png",
+    "48": "icons/icon-48.png",
+    "128": "icons/icon-128.png"
+  },
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "qpm@quantum-password-manager.com",
+      "strict_min_version": "55.0"
+    }
+  }
+}
