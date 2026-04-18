@@ -8,6 +8,8 @@ import (
 type Config struct {
 	Port          int
 	DatabaseURL   string
+	SidecarMode   bool
+	ExtensionSecret string
 	MigrationsDir string
 	TLSCert       string
 	TLSKey        string
@@ -33,14 +35,16 @@ func Load() *Config {
 	}
 
 	return &Config{
-		Port:          port,
-		DatabaseURL:   os.Getenv("DATABASE_URL"),
-		MigrationsDir: os.Getenv("MIGRATIONS_DIR"),
-		TLSCert:       os.Getenv("TLS_CERT"),
-		TLSKey:        os.Getenv("TLS_KEY"),
-		LogLevel:      logLevel,
-		EnableSMS2FA:  os.Getenv("ENABLE_SMS_2FA") == "true",
-		TelnyxAPIKey:  os.Getenv("TELNYX_API_KEY"),
-		TelnyxFromNum: os.Getenv("TELNYX_FROM_NUMBER"),
+		Port:            port,
+		DatabaseURL:     os.Getenv("DATABASE_URL"),
+		MigrationsDir:   os.Getenv("MIGRATIONS_DIR"),
+		TLSCert:         os.Getenv("TLS_CERT"),
+		TLSKey:          os.Getenv("TLS_KEY"),
+		LogLevel:        logLevel,
+		SidecarMode:     os.Getenv("SIDECAR_MODE") == "1",
+		ExtensionSecret: os.Getenv("EXTENSION_SECRET"),
+		EnableSMS2FA:    os.Getenv("ENABLE_SMS_2FA") == "true",
+		TelnyxAPIKey:    os.Getenv("TELNYX_API_KEY"),
+		TelnyxFromNum:   os.Getenv("TELNYX_FROM_NUMBER"),
 	}
 }

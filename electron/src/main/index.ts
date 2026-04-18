@@ -94,6 +94,74 @@ function stopSidecar(): void {
     sidecarProcess = null;
     sidecarPort = null;
   }
+  // Clean up lockfile when not using sidecar mode (BACKEND_URL mode)
+  cleanupExtensionLockfile();
+}
+
+function getAppDataDir(): string {
+  const appName = 'QuantumPasswordManager';
+  switch (process.platform) {
+    case 'win32':
+      return path.join(process.env.APPDATA || path.join(process.env.USERPROFILE || '', 'AppData', 'Roaming'), appName);
+    case 'darwin':
+      return path.join(app.getPath('home'), 'Library', 'Application Support', appName);
+    default:
+      return path.join(app.getPath('home'), '.config', appName);
+  }
+}
+
+/**
+ * Push session state to the sidecar so the extension can fetch credentials.
+ */
+async function pushSessionToSidecar(token: string, masterKeyHex: string, userId: string): Promise<void> {
+  const api = getApiBase();
+  if (!api) return;
+  try {
+    await fetch(`${api}/extension/session`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        token,
+        master_key_hex: masterKeyHex,
+        user_id: userId,
+      }),
+    });
+    console.log('[extension] session pushed to sidecar');
+  } catch (err) {
+    console.error('[extension] failed to push session:', err);
+  }
+}
+
+/**
+ * Write a lockfile for non-sidecar mode (BACKEND_URL / Docker).
+ * The Go sidecar writes its own lockfile in sidecar mode.
+ */
+function writeExtensionLockfile(): void {
+  if (!backendUrl) return; // sidecar mode — Go server writes its own lockfile
+  try {
+    const dir = getAppDataDir();
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true });
+    }
+    // Extract port from BACKEND_URL
+    const url = new URL(backendUrl);
+    const port = url.port || (url.protocol === 'https:' ? '443' : '80');
+    const lockPath = path.join(dir, 'sidecar.lock');
+    // No secret in BACKEND_URL mode — extension endpoints on Docker server aren't secret-protected
+    fs.writeFileSync(lockPath, `${port}\n`, { mode: 0o600 });
+    console.log(`[extension] wrote lockfile: ${lockPath} (port ${port})`);
+  } catch (err) {
+    console.error('[extension] failed to write lockfile:', err);
+  }
+}
+
+function cleanupExtensionLockfile(): void {
+  try {
+    const lockPath = path.join(getAppDataDir(), 'sidecar.lock');
+    if (fs.existsSync(lockPath)) {
+      fs.unlinkSync(lockPath);
+    }
+  } catch { /* ignore */ }
 }
 
 function createWindow(): void {
@@ -193,6 +261,12 @@ function registerIpcHandlers(): void {
       console.log('[ipc] auth:login result keys:', Object.keys(result));
       if (result.access_token || result.token) {
         result.master_key_hex = masterKeyHex;
+        // Push session to sidecar for browser extension bridge
+        const jwt = (result.access_token || result.token) as string;
+        const userId = result.user_id as string;
+        if (jwt && userId) {
+          pushSessionToSidecar(jwt, masterKeyHex, userId);
+        }
       }
       return result;
     } catch {
@@ -784,6 +858,12 @@ public class SecureClip {
         return { error: result.error as string };
       }
       // Return the login result with email and master key included
+      // Push session to sidecar for browser extension bridge
+      const jwt = (result.access_token || result.token) as string;
+      const userId = result.user_id as string;
+      if (jwt && userId && creds.masterKeyHex) {
+        pushSessionToSidecar(jwt, creds.masterKeyHex, userId);
+      }
       return { ...result, email: creds.email, master_key_hex: creds.masterKeyHex ?? '' };
     } catch (err) {
       return { error: (err as Error).message };
@@ -812,6 +892,7 @@ public class SecureClip {
 // App lifecycle
 app.whenReady().then(async () => {
   await startSidecar();
+  writeExtensionLockfile(); // For BACKEND_URL mode — sidecar writes its own in sidecar mode
   registerIpcHandlers();
   createWindow();
 

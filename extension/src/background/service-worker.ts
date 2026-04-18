@@ -166,6 +166,12 @@ browserAPI.runtime.onMessage.addListener(
           status: 'locked',
         }));
 
+      case 'openApp':
+        // Ask native host to focus/launch the desktop app
+        return sendNativeMessage({ action: 'openApp' }).then(() => ({
+          status: 'ok',
+        }));
+
       case 'formDetected':
         if (sender.tab?.id) {
           updateBadgeForTab(sender.tab.id, sender.tab.url);

@@ -9,6 +9,7 @@ import (
 
 	"github.com/password-manager/password-manager/internal/admin"
 	"github.com/password-manager/password-manager/internal/auth"
+	"github.com/password-manager/password-manager/internal/db"
 	syncsvc "github.com/password-manager/password-manager/internal/sync"
 	"github.com/password-manager/password-manager/internal/vault"
 )
@@ -96,6 +97,21 @@ func Router(authService *auth.Service, totpService *auth.TOTPService, smsService
 			r.Post("/resolve", syncHandler.Resolve)
 		})
 	})
+
+	return r
+}
+
+// ExtensionRouter sets up routes for the browser extension native messaging bridge.
+// These endpoints are localhost-only and protected by a shared secret.
+func ExtensionRouter(vaultRepo *db.VaultRepo, secret string) chi.Router {
+	r := chi.NewRouter()
+	h := NewExtensionHandler(vaultRepo, secret)
+
+	r.Post("/session", h.PushSession)
+	r.Get("/status", h.GetStatus)
+	r.Get("/credentials", h.GetCredentials)
+	r.Post("/credentials", h.SaveCredential)
+	r.Post("/lock", h.Lock)
 
 	return r
 }

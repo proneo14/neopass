@@ -54,6 +54,10 @@ export interface UnlockMessage {
   type: 'unlock';
 }
 
+export interface OpenAppMessage {
+  type: 'openApp';
+}
+
 export type ExtensionMessage =
   | FormDetectedMessage
   | RequestCredentialsMessage
@@ -64,7 +68,8 @@ export type ExtensionMessage =
   | GetStatusMessage
   | StatusResponseMessage
   | LockMessage
-  | UnlockMessage;
+  | UnlockMessage
+  | OpenAppMessage;
 
 export interface Credential {
   id: string;

@@ -2,10 +2,14 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
+	"runtime"
 	"syscall"
 	"time"
 
@@ -79,10 +83,11 @@ func main() {
 	var vaultService *vault.Service
 	var adminService *admin.Service
 	var syncService *syncsvc.Service
+	var vaultRepo *db.VaultRepo
 	if database != nil {
 		userRepo := db.NewUserRepo(database.Pool)
 		totpRepo := db.NewTOTPRepo(database.Pool)
-		vaultRepo := db.NewVaultRepo(database.Pool)
+		vaultRepo = db.NewVaultRepo(database.Pool)
 		orgRepo := db.NewOrgRepo(database.Pool)
 		auditRepo := db.NewAuditRepo(database.Pool)
 		syncRepo := db.NewSyncRepo(database.Pool)
@@ -116,6 +121,24 @@ func main() {
 		}
 	})
 
+	// Extension bridge routes (for native messaging host)
+	if database != nil {
+		extSecret := cfg.ExtensionSecret
+		if extSecret == "" && cfg.SidecarMode {
+			// Generate a random secret if not provided in sidecar mode
+			b := make([]byte, 32)
+			if _, err := rand.Read(b); err == nil {
+				extSecret = hex.EncodeToString(b)
+			}
+		}
+		r.Mount("/extension", api.ExtensionRouter(vaultRepo, extSecret))
+
+		// Write sidecar lockfile in sidecar mode
+		if cfg.SidecarMode {
+			writeSidecarLockfile(cfg.Port, extSecret)
+		}
+	}
+
 	// Create server
 	addr := fmt.Sprintf(":%d", cfg.Port)
 	srv := &http.Server{
@@ -147,6 +170,10 @@ func main() {
 	<-ctx.Done()
 	log.Info().Msg("shutting down server")
 
+	if cfg.SidecarMode {
+		removeSidecarLockfile()
+	}
+
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
@@ -163,4 +190,48 @@ func jsonContentType(next http.Handler) http.Handler {
 		w.Header().Set("Content-Type", "application/json")
 		next.ServeHTTP(w, r)
 	})
+}
+
+// getAppDataDir returns the platform-specific app data directory.
+func getAppDataDir() string {
+	const appName = "QuantumPasswordManager"
+	switch runtime.GOOS {
+	case "windows":
+		appData := os.Getenv("APPDATA")
+		if appData == "" {
+			appData = filepath.Join(os.Getenv("USERPROFILE"), "AppData", "Roaming")
+		}
+		return filepath.Join(appData, appName)
+	case "darwin":
+		home, _ := os.UserHomeDir()
+		return filepath.Join(home, "Library", "Application Support", appName)
+	default:
+		home, _ := os.UserHomeDir()
+		return filepath.Join(home, ".config", appName)
+	}
+}
+
+// writeSidecarLockfile writes the sidecar port and extension secret to a lockfile
+// so the native messaging host can discover and authenticate with the sidecar.
+func writeSidecarLockfile(port int, secret string) {
+	dir := getAppDataDir()
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		log.Error().Err(err).Msg("failed to create app data directory")
+		return
+	}
+
+	lockPath := filepath.Join(dir, "sidecar.lock")
+	content := fmt.Sprintf("%d\n%s", port, secret)
+	if err := os.WriteFile(lockPath, []byte(content), 0600); err != nil {
+		log.Error().Err(err).Msg("failed to write sidecar lockfile")
+		return
+	}
+
+	log.Info().Str("path", lockPath).Int("port", port).Msg("wrote sidecar lockfile")
+}
+
+// removeSidecarLockfile cleans up the lockfile on shutdown.
+func removeSidecarLockfile() {
+	lockPath := filepath.Join(getAppDataDir(), "sidecar.lock")
+	os.Remove(lockPath)
 }

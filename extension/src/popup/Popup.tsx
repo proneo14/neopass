@@ -24,7 +24,9 @@ export function Popup() {
       currentWindow: true,
     });
     const url = tabs[0]?.url ?? '';
-    const domain = extractDomain(url) ?? '';
+    // Don't try to match credentials for browser internal pages
+    const isInternalPage = url.startsWith('chrome://') || url.startsWith('edge://') || url.startsWith('about:') || url.startsWith('chrome-extension://');
+    const domain = isInternalPage ? '' : (extractDomain(url) ?? '');
     setCurrentDomain(domain);
 
     // Check connection status
@@ -76,13 +78,24 @@ export function Popup() {
   }
 
   async function handleLock() {
+    // Lock via server — clears session; user must unlock from desktop app
     await browserAPI.runtime.sendMessage({ type: 'lock' });
     setStatus('locked');
+    setCredentials([]);
   }
 
-  async function handleUnlock() {
-    await browserAPI.runtime.sendMessage({ type: 'unlock' });
-    init();
+  async function handleCheckStatus() {
+    // Re-check server status — if desktop app has been unlocked, session is back
+    setStatus('loading');
+    await init();
+  }
+
+  async function handleOpenApp() {
+    try {
+      await browserAPI.runtime.sendMessage({ type: 'openApp' });
+    } catch {
+      // Best effort
+    }
   }
 
   if (status === 'loading') {
@@ -114,12 +127,23 @@ export function Popup() {
       <div className="flex flex-col items-center justify-center h-96 bg-surface-950 text-surface-100 p-6">
         <div className="text-4xl mb-4">🔒</div>
         <h2 className="text-lg font-semibold mb-3">Vault Locked</h2>
-        <button
-          onClick={handleUnlock}
-          className="px-6 py-2 bg-accent-500 hover:bg-accent-600 text-white rounded-lg transition-colors font-medium"
-        >
-          Unlock
-        </button>
+        <p className="text-sm text-surface-400 text-center mb-5">
+          Open the desktop app and log in to unlock.
+        </p>
+        <div className="flex flex-col gap-2 w-full max-w-[200px]">
+          <button
+            onClick={handleOpenApp}
+            className="px-6 py-2 bg-accent-500 hover:bg-accent-600 text-white rounded-lg transition-colors font-medium"
+          >
+            Open App
+          </button>
+          <button
+            onClick={handleCheckStatus}
+            className="px-4 py-1.5 text-sm text-surface-400 hover:text-surface-200 transition-colors"
+          >
+            Check Again
+          </button>
+        </div>
       </div>
     );
   }
@@ -186,6 +210,7 @@ export function Popup() {
       {/* Bottom toolbar */}
       <div className="px-4 py-3 border-t border-surface-800 flex items-center justify-between">
         <button
+          onClick={handleOpenApp}
           className="text-xs text-surface-400 hover:text-surface-200 transition-colors"
           title="Open desktop app"
         >
