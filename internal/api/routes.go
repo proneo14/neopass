@@ -111,6 +111,7 @@ func ExtensionRouter(vaultRepo *db.VaultRepo, secret string) chi.Router {
 	r.Get("/status", h.GetStatus)
 	r.Get("/credentials", h.GetCredentials)
 	r.Post("/credentials", h.SaveCredential)
+	r.Put("/credentials/{id}", h.UpdateCredential)
 	r.Post("/lock", h.Lock)
 
 	return r

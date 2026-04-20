@@ -8,71 +8,24 @@ import type {
 
 const NATIVE_HOST_ID = 'com.quantum.passwordmanager';
 
-let nativePort: ReturnType<typeof browserAPI.runtime.connectNative> | null =
-  null;
-
-/**
- * Connect to the native messaging host. Returns null if connection fails.
- */
-function connectNativeHost() {
-  try {
-    const port = browserAPI.runtime.connectNative(NATIVE_HOST_ID);
-    port.onDisconnect.addListener(() => {
-      nativePort = null;
-    });
-    return port;
-  } catch {
-    return null;
-  }
-}
-
 /**
  * Send a message to the native host and wait for a response.
+ * Uses one-shot sendNativeMessage to avoid response correlation issues.
  */
 function sendNativeMessage(
   message: Record<string, unknown>
 ): Promise<NativeHostResponse> {
   return new Promise((resolve) => {
-    if (!nativePort) {
-      nativePort = connectNativeHost();
-    }
-
-    if (!nativePort) {
-      resolve({ error: 'Desktop app not running' });
-      return;
-    }
-
-    const cleanup = () => {
-      clearTimeout(timeout);
-      nativePort?.onMessage.removeListener(listener);
-      nativePort?.onDisconnect.removeListener(disconnectListener);
-    };
-
-    const timeout = setTimeout(() => {
-      cleanup();
-      nativePort = null;
-      resolve({ error: 'Native host timeout' });
-    }, 5000);
-
-    const disconnectListener = () => {
-      cleanup();
-      nativePort = null;
-      resolve({ error: 'Desktop app not running' });
-    };
-
-    const listener = (response: NativeHostResponse) => {
-      cleanup();
-      resolve(response);
-    };
-
-    nativePort.onMessage.addListener(listener);
-    nativePort.onDisconnect.addListener(disconnectListener);
-
     try {
-      nativePort.postMessage(message);
+      browserAPI.runtime.sendNativeMessage(
+        NATIVE_HOST_ID,
+        message
+      ).then((response: NativeHostResponse) => {
+        resolve(response ?? { error: 'No response' });
+      }).catch(() => {
+        resolve({ error: 'Desktop app not running' });
+      });
     } catch {
-      cleanup();
-      nativePort = null;
       resolve({ error: 'Desktop app not running' });
     }
   });
@@ -170,6 +123,15 @@ browserAPI.runtime.onMessage.addListener(
         // Ask native host to focus/launch the desktop app
         return sendNativeMessage({ action: 'openApp' }).then(() => ({
           status: 'ok',
+        }));
+
+      case 'secureCopy':
+        return sendNativeMessage({
+          action: 'secureCopy',
+          text: message.text,
+        }).then((response) => ({
+          status: response.status ?? 'error',
+          error: response.error,
         }));
 
       case 'formDetected':

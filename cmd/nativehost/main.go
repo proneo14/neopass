@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/base64"
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
@@ -28,6 +29,14 @@ type Request struct {
 	Domain            string `json:"domain,omitempty"`
 	Username          string `json:"username,omitempty"`
 	EncryptedPassword string `json:"encryptedPassword,omitempty"`
+	// For updateCredential
+	ID       string `json:"id,omitempty"`
+	Name     string `json:"name,omitempty"`
+	Password string `json:"password,omitempty"`
+	URI      string `json:"uri,omitempty"`
+	Notes    string `json:"notes,omitempty"`
+	// For secureCopy
+	Text string `json:"text,omitempty"`
 }
 
 // Response represents a native messaging response to the browser extension.
@@ -47,6 +56,9 @@ type Credential struct {
 	Password string `json:"password"`
 	Domain   string `json:"domain"`
 	Name     string `json:"name"`
+	URI      string `json:"uri"`
+	Notes    string `json:"notes"`
+	Matched  bool   `json:"matched"`
 }
 
 // SidecarClient communicates with the Electron Go sidecar via local HTTP.
@@ -167,6 +179,18 @@ func handleMessage(client *SidecarClient, msg *Request) *Response {
 	case "lock":
 		return client.lock()
 
+	case "updateCredential":
+		if msg.ID == "" {
+			return &Response{Error: "id is required"}
+		}
+		return client.updateCredential(msg.ID, msg.Name, msg.Username, msg.Password, msg.URI, msg.Notes)
+
+	case "secureCopy":
+		if msg.Text == "" {
+			return &Response{Error: "text is required"}
+		}
+		return secureCopyToClipboard(msg.Text)
+
 	case "openApp":
 		return openDesktopApp()
 
@@ -285,6 +309,29 @@ func (c *SidecarClient) saveCredential(domain, username, encryptedPassword strin
 	return &Response{Status: "saved"}
 }
 
+func (c *SidecarClient) updateCredential(id, name, username, password, uri, notes string) *Response {
+	payload, _ := json.Marshal(map[string]string{
+		"name":     name,
+		"username": username,
+		"password": password,
+		"uri":      uri,
+		"notes":    notes,
+	})
+
+	resp, err := c.doRequest("PUT", "/extension/credentials/"+id, strings.NewReader(string(payload)))
+	if err != nil {
+		c.baseURL = ""
+		return &Response{Error: "Desktop app not running"}
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return &Response{Error: fmt.Sprintf("sidecar returned %d", resp.StatusCode)}
+	}
+
+	return &Response{Status: "updated"}
+}
+
 func (c *SidecarClient) getStatus() *Response {
 	resp, err := c.sidecarGet("/extension/status")
 	if err != nil {
@@ -322,6 +369,95 @@ func (c *SidecarClient) lock() *Response {
 	return &Response{Status: "locked"}
 }
 
+// --- Secure clipboard ---
+
+func secureCopyToClipboard(text string) *Response {
+	if runtime.GOOS == "windows" {
+		return secureCopyWindows(text)
+	}
+	// Fallback: use exec to copy (less secure — no history exclusion)
+	return fallbackCopy(text)
+}
+
+func secureCopyWindows(text string) *Response {
+	// Base64-encode to safely pass arbitrary text through the command line
+	b64 := base64.StdEncoding.EncodeToString([]byte(text))
+
+	// Use PowerShell with P/Invoke to set ExcludeClipboardContentFromMonitorProcessing
+	// so the password doesn't appear in Windows Clipboard History (Win+V)
+	script := `$b64 = '` + b64 + `'
+$text = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String($b64))
+Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+public class SecureClip {
+  [DllImport("user32.dll")] static extern bool OpenClipboard(IntPtr w);
+  [DllImport("user32.dll")] static extern bool EmptyClipboard();
+  [DllImport("user32.dll")] static extern bool CloseClipboard();
+  [DllImport("user32.dll")] static extern IntPtr SetClipboardData(uint f, IntPtr h);
+  [DllImport("user32.dll")] static extern uint RegisterClipboardFormatW([MarshalAs(UnmanagedType.LPWStr)] string n);
+  [DllImport("kernel32.dll")] static extern IntPtr GlobalAlloc(uint f, UIntPtr sz);
+  [DllImport("kernel32.dll")] static extern IntPtr GlobalLock(IntPtr h);
+  [DllImport("kernel32.dll")] static extern bool GlobalUnlock(IntPtr h);
+  public static void Copy(string t) {
+    OpenClipboard(IntPtr.Zero);
+    EmptyClipboard();
+    byte[] b = System.Text.Encoding.Unicode.GetBytes(t + "\0");
+    IntPtr h = GlobalAlloc(0x0002, (UIntPtr)b.Length);
+    IntPtr p = GlobalLock(h);
+    Marshal.Copy(b, 0, p, b.Length);
+    GlobalUnlock(h);
+    SetClipboardData(13, h);
+    uint ex = RegisterClipboardFormatW("ExcludeClipboardContentFromMonitorProcessing");
+    IntPtr eh = GlobalAlloc(0x0002, (UIntPtr)4);
+    IntPtr ep = GlobalLock(eh);
+    Marshal.WriteInt32(ep, 1);
+    GlobalUnlock(eh);
+    SetClipboardData(ex, eh);
+    CloseClipboard();
+  }
+}
+'@
+[SecureClip]::Copy($text)`
+
+	cmd := exec.Command("powershell.exe", "-NoProfile", "-NonInteractive", "-Command", script)
+	if err := cmd.Run(); err != nil {
+		return fallbackCopy(text)
+	}
+
+	scheduleClipboardClear()
+
+	return &Response{Status: "copied"}
+}
+
+func fallbackCopy(text string) *Response {
+	switch runtime.GOOS {
+	case "windows":
+		cmd := exec.Command("powershell.exe", "-NoProfile", "-NonInteractive", "-Command",
+			"Set-Clipboard -Value $input")
+		cmd.Stdin = strings.NewReader(text)
+		if err := cmd.Run(); err != nil {
+			return &Response{Error: "clipboard copy failed"}
+		}
+	case "darwin":
+		cmd := exec.Command("pbcopy")
+		cmd.Stdin = strings.NewReader(text)
+		if err := cmd.Run(); err != nil {
+			return &Response{Error: "clipboard copy failed"}
+		}
+	default:
+		cmd := exec.Command("xclip", "-selection", "clipboard")
+		cmd.Stdin = strings.NewReader(text)
+		if err := cmd.Run(); err != nil {
+			return &Response{Error: "clipboard copy failed"}
+		}
+	}
+
+	scheduleClipboardClear()
+
+	return &Response{Status: "copied"}
+}
+
 // --- Open desktop app ---
 
 func openDesktopApp() *Response {
@@ -340,6 +476,21 @@ func openDesktopApp() *Response {
 	go func() { _ = cmd.Wait() }()
 
 	return &Response{Status: "ok"}
+}
+
+// scheduleClipboardClear spawns a detached process to clear the clipboard after 30 seconds.
+// Must be a separate process because the native host exits immediately after responding.
+func scheduleClipboardClear() {
+	switch runtime.GOOS {
+	case "windows":
+		scheduleClipboardClearWindows()
+	case "darwin":
+		cmd := exec.Command("bash", "-c", "sleep 30 && echo -n '' | pbcopy")
+		_ = cmd.Start()
+	default:
+		cmd := exec.Command("bash", "-c", "sleep 30 && echo -n '' | xclip -selection clipboard")
+		_ = cmd.Start()
+	}
 }
 
 func findDesktopApp() string {

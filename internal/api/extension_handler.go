@@ -7,6 +7,9 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/go-chi/chi/v5"
+	"github.com/rs/zerolog/log"
+
 	"github.com/password-manager/password-manager/internal/crypto"
 	"github.com/password-manager/password-manager/internal/db"
 )
@@ -34,6 +37,9 @@ type extensionCredential struct {
 	Password string `json:"password"`
 	Domain   string `json:"domain"`
 	Name     string `json:"name"`
+	URI      string `json:"uri"`
+	Notes    string `json:"notes"`
+	Matched  bool   `json:"matched"`
 }
 
 func NewExtensionHandler(vaultRepo *db.VaultRepo, secret string) *ExtensionHandler {
@@ -138,10 +144,6 @@ func (h *ExtensionHandler) GetCredentials(w http.ResponseWriter, r *http.Request
 	}
 
 	domain := r.URL.Query().Get("domain")
-	if domain == "" {
-		writeJSON(w, http.StatusOK, []extensionCredential{})
-		return
-	}
 
 	// Parse master key
 	masterKeyBytes, err := hex.DecodeString(sess.MasterKeyHex)
@@ -158,9 +160,12 @@ func (h *ExtensionHandler) GetCredentials(w http.ResponseWriter, r *http.Request
 		EntryType: "login",
 	})
 	if err != nil {
+		log.Error().Err(err).Str("user_id", sess.UserID).Msg("[extension] failed to list entries")
 		writeJSON(w, http.StatusOK, []extensionCredential{})
 		return
 	}
+
+	log.Debug().Str("user_id", sess.UserID).Str("domain", domain).Int("total_entries", len(entries)).Msg("[extension] fetching credentials")
 
 	var results []extensionCredential
 
@@ -168,6 +173,7 @@ func (h *ExtensionHandler) GetCredentials(w http.ResponseWriter, r *http.Request
 		// Decrypt
 		plaintext, err := crypto.Decrypt(entry.EncryptedData, entry.Nonce, masterKey)
 		if err != nil {
+			log.Debug().Err(err).Str("entry_id", entry.ID).Msg("[extension] decrypt failed")
 			continue
 		}
 
@@ -180,21 +186,23 @@ func (h *ExtensionHandler) GetCredentials(w http.ResponseWriter, r *http.Request
 			Notes    string `json:"notes"`
 		}
 		if err := json.Unmarshal(plaintext, &loginData); err != nil {
+			log.Debug().Err(err).Str("entry_id", entry.ID).Msg("[extension] unmarshal failed")
 			continue
 		}
 		crypto.ZeroBytes(plaintext)
 
-		// Match domain against URI
-		if !domainMatches(loginData.URI, domain) {
-			continue
-		}
+		matched := domain != "" && domainMatches(loginData.URI, domain)
+		entryDomain := extractDomainFromURI(loginData.URI)
 
 		results = append(results, extensionCredential{
 			ID:       entry.ID,
 			Username: loginData.Username,
 			Password: loginData.Password,
-			Domain:   domain,
+			Domain:   entryDomain,
 			Name:     loginData.Name,
+			URI:      loginData.URI,
+			Notes:    loginData.Notes,
+			Matched:  matched,
 		})
 	}
 
@@ -277,6 +285,86 @@ func (h *ExtensionHandler) SaveCredential(w http.ResponseWriter, r *http.Request
 	writeJSON(w, http.StatusCreated, map[string]string{"status": "saved"})
 }
 
+// UpdateCredential updates an existing login credential.
+// PUT /extension/credentials/{id}
+// Body: { "name": "...", "username": "...", "password": "...", "uri": "...", "notes": "..." }
+func (h *ExtensionHandler) UpdateCredential(w http.ResponseWriter, r *http.Request) {
+	if !h.verifySecret(r) {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
+	h.mu.RLock()
+	sess := h.session
+	h.mu.RUnlock()
+
+	if sess == nil {
+		writeError(w, http.StatusUnauthorized, "vault is locked")
+		return
+	}
+
+	entryID := chi.URLParam(r, "id")
+	if entryID == "" {
+		writeError(w, http.StatusBadRequest, "missing entry id")
+		return
+	}
+
+	var body struct {
+		Name     string `json:"name"`
+		Username string `json:"username"`
+		Password string `json:"password"`
+		URI      string `json:"uri"`
+		Notes    string `json:"notes"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	// Parse master key
+	masterKeyBytes, err := hex.DecodeString(sess.MasterKeyHex)
+	if err != nil || len(masterKeyBytes) != 32 {
+		writeError(w, http.StatusInternalServerError, "invalid session")
+		return
+	}
+	var masterKey [32]byte
+	copy(masterKey[:], masterKeyBytes)
+	defer crypto.ZeroBytes(masterKey[:])
+
+	// Build login entry JSON
+	loginData, _ := json.Marshal(map[string]string{
+		"name":     body.Name,
+		"username": body.Username,
+		"password": body.Password,
+		"uri":      body.URI,
+		"notes":    body.Notes,
+	})
+
+	// Encrypt
+	ciphertext, nonce, err := crypto.Encrypt(loginData, masterKey)
+	crypto.ZeroBytes(loginData)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "encryption failed")
+		return
+	}
+
+	entry := db.VaultEntry{
+		ID:            entryID,
+		UserID:        sess.UserID,
+		EntryType:     "login",
+		EncryptedData: ciphertext,
+		Nonce:         nonce,
+	}
+
+	_, err = h.vaultRepo.UpdateEntry(r.Context(), entry)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to update credential")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{"status": "updated"})
+}
+
 // Lock clears the session state.
 // POST /extension/lock
 func (h *ExtensionHandler) Lock(w http.ResponseWriter, r *http.Request) {
@@ -323,6 +411,24 @@ func domainMatches(uri, domain string) bool {
 
 	// Exact match or subdomain match
 	return uri == domain || strings.HasSuffix(uri, "."+domain)
+}
+
+// extractDomainFromURI pulls the hostname from a URI string.
+func extractDomainFromURI(uri string) string {
+	if uri == "" {
+		return ""
+	}
+	u := strings.ToLower(uri)
+	if idx := strings.Index(u, "://"); idx >= 0 {
+		u = u[idx+3:]
+	}
+	if idx := strings.Index(u, "/"); idx >= 0 {
+		u = u[:idx]
+	}
+	if idx := strings.Index(u, ":"); idx >= 0 {
+		u = u[:idx]
+	}
+	return u
 }
 
 

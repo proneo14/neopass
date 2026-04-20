@@ -58,6 +58,11 @@ export interface OpenAppMessage {
   type: 'openApp';
 }
 
+export interface SecureCopyMessage {
+  type: 'secureCopy';
+  text: string;
+}
+
 export type ExtensionMessage =
   | FormDetectedMessage
   | RequestCredentialsMessage
@@ -69,7 +74,8 @@ export type ExtensionMessage =
   | StatusResponseMessage
   | LockMessage
   | UnlockMessage
-  | OpenAppMessage;
+  | OpenAppMessage
+  | SecureCopyMessage;
 
 export interface Credential {
   id: string;
@@ -77,6 +83,9 @@ export interface Credential {
   password: string;
   domain: string;
   name: string;
+  uri: string;
+  notes: string;
+  matched: boolean;
 }
 
 /**

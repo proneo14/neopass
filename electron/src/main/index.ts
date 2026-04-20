@@ -274,6 +274,18 @@ function registerIpcHandlers(): void {
     }
   });
 
+  ipcMain.handle('auth:logout', async () => {
+    // Clear extension session on the server so browser extension mirrors lock state
+    const api = getApiBase();
+    if (!api) return;
+    try {
+      await fetch(`${api}/extension/lock`, { method: 'POST' });
+      console.log('[extension] session cleared on logout');
+    } catch {
+      // Best effort
+    }
+  });
+
   ipcMain.handle('auth:register', async (_event, data: { email: string; password: string }) => {
     const api = getApiBase();
     if (!api) return { error: 'Backend not available' };
@@ -319,7 +331,12 @@ function registerIpcHandlers(): void {
   });
 
   ipcMain.handle('auth:changePassword', async (_event, token: string, data: { email: string; currentPassword: string; newPassword: string }) => {
+    // Clear extension session on the server so browser extension mirrors lock state
     const api = getApiBase();
+    if (api) {
+      fetch(`${api}/extension/lock`, { method: 'POST' }).catch(() => {});
+    }
+    // Proceed with password change
     if (!api) return { error: 'Backend not available' };
     try {
       const salt = nodeCrypto.createHash('sha256').update(data.email).digest();
@@ -893,6 +910,13 @@ public class SecureClip {
 app.whenReady().then(async () => {
   await startSidecar();
   writeExtensionLockfile(); // For BACKEND_URL mode — sidecar writes its own in sidecar mode
+
+  // Clear any stale extension session from a previous run
+  const api = getApiBase();
+  if (api) {
+    fetch(`${api}/extension/lock`, { method: 'POST' }).catch(() => {});
+  }
+
   registerIpcHandlers();
   createWindow();
 

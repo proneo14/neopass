@@ -69,6 +69,8 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   logout: () => {
     const { userId } = get();
     saveOrgToStorage(userId, null, null, null);
+    // Notify server to clear extension session
+    window.api?.auth?.logout?.().catch(() => {});
     set({ token: null, userId: null, email: null, role: null, masterKeyHex: null, orgId: null, orgName: null, isAuthenticated: false });
   },
   setAutoLockMinutes: (autoLockMinutes) => set({ autoLockMinutes }),

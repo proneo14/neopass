@@ -6,6 +6,8 @@ const api = {
   auth: {
     login: (credentials: { email: string; authHash: string }): Promise<unknown> =>
       ipcRenderer.invoke('auth:login', credentials),
+    logout: (): Promise<void> =>
+      ipcRenderer.invoke('auth:logout'),
     register: (data: { email: string; password: string }): Promise<unknown> =>
       ipcRenderer.invoke('auth:register', data),
     changePassword: (token: string, data: { email: string; currentPassword: string; newPassword: string }): Promise<unknown> =>

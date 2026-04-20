@@ -14,6 +14,9 @@ export const browserAPI = {
       browser.runtime.connectNative(application),
 
     getURL: (path: string) => browser.runtime.getURL(path),
+
+    sendNativeMessage: (application: string, message: object) =>
+      browser.runtime.sendNativeMessage(application, message),
   },
 
   storage: {

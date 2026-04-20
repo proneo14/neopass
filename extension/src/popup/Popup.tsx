@@ -7,14 +7,47 @@ import type {
 } from '../lib/messages';
 
 type AppStatus = 'loading' | 'locked' | 'unlocked' | 'no-desktop-app';
+type View = 'list' | 'detail';
 
 export function Popup() {
   const [status, setStatus] = useState<AppStatus>('loading');
   const [credentials, setCredentials] = useState<Credential[]>([]);
   const [currentDomain, setCurrentDomain] = useState<string>('');
+  const [view, setView] = useState<View>('list');
+  const [selectedCred, setSelectedCred] = useState<Credential | null>(null);
+  const [showPassword, setShowPassword] = useState(false);
 
   useEffect(() => {
     init();
+
+    // Poll server status every 3s so extension mirrors app lock/unlock in real time
+    const interval = setInterval(async () => {
+      try {
+        const resp = (await browserAPI.runtime.sendMessage({
+          type: 'getStatus',
+        })) as StatusResponseMessage | null;
+
+        if (!resp || resp.status === 'no-desktop-app') {
+          setStatus('no-desktop-app');
+          setCredentials([]);
+        } else if (resp.status === 'locked') {
+          setStatus('locked');
+          setCredentials([]);
+        } else if (resp.status === 'unlocked') {
+          // If we were locked and now unlocked, re-init to fetch credentials
+          setStatus((prev) => {
+            if (prev !== 'unlocked') {
+              init();
+            }
+            return 'unlocked';
+          });
+        }
+      } catch {
+        // ignore polling errors
+      }
+    }, 3000);
+
+    return () => clearInterval(interval);
   }, []);
 
   async function init() {
@@ -51,15 +84,13 @@ export function Popup() {
 
     setStatus('unlocked');
 
-    // Fetch credentials for current domain
-    if (domain) {
-      const credResponse = (await browserAPI.runtime.sendMessage({
-        type: 'requestCredentials',
-        domain,
-      })) as CredentialsResponseMessage;
+    // Fetch all credentials (server returns all with matched flag)
+    const credResponse = (await browserAPI.runtime.sendMessage({
+      type: 'requestCredentials',
+      domain: domain || '_all_',
+    })) as CredentialsResponseMessage;
 
-      setCredentials(credResponse?.credentials ?? []);
-    }
+    setCredentials(credResponse?.credentials ?? []);
   }
 
   async function handleFill(credential: Credential) {
@@ -77,13 +108,6 @@ export function Popup() {
     }
   }
 
-  async function handleLock() {
-    // Lock via server — clears session; user must unlock from desktop app
-    await browserAPI.runtime.sendMessage({ type: 'lock' });
-    setStatus('locked');
-    setCredentials([]);
-  }
-
   async function handleCheckStatus() {
     // Re-check server status — if desktop app has been unlocked, session is back
     setStatus('loading');
@@ -96,6 +120,30 @@ export function Popup() {
     } catch {
       // Best effort
     }
+  }
+
+  function handleSelectCred(cred: Credential) {
+    setSelectedCred(cred);
+    setShowPassword(false);
+    setView('detail');
+  }
+
+  function handleBackToList() {
+    setView('list');
+    setSelectedCred(null);
+    setShowPassword(false);
+  }
+
+  const [copiedField, setCopiedField] = useState<string | null>(null);
+
+  async function handleCopy(text: string, field: string) {
+    try {
+      await browserAPI.runtime.sendMessage({ type: 'secureCopy', text });
+    } catch {
+      await navigator.clipboard.writeText(text);
+    }
+    setCopiedField(field);
+    setTimeout(() => setCopiedField(null), 1500);
   }
 
   if (status === 'loading') {
@@ -148,6 +196,88 @@ export function Popup() {
     );
   }
 
+  // Detail view
+  if (view === 'detail' && selectedCred) {
+    return (
+      <div className="flex flex-col h-full bg-surface-950 text-surface-100">
+        {/* Header */}
+        <div className="px-4 py-3 border-b border-surface-800 flex items-center gap-3">
+          <button onClick={handleBackToList} className="text-surface-400 hover:text-surface-200 text-sm">
+            ← Back
+          </button>
+          <span className="text-sm font-medium text-surface-100 truncate flex-1">
+            {selectedCred.name || selectedCred.domain}
+          </span>
+        </div>
+
+        {/* Fields */}
+        <div className="flex-1 overflow-y-auto px-4 py-3 space-y-3">
+          {/* Name */}
+          <div>
+            <label className="text-[10px] uppercase tracking-wider text-surface-500 block mb-1">Name</label>
+            <div className="flex items-center justify-between">
+              <span className="text-sm text-surface-100">{selectedCred.name || '—'}</span>
+              {selectedCred.name && <button onClick={() => handleCopy(selectedCred.name, 'name')} className={`text-[10px] transition-colors ${copiedField === 'name' ? 'text-green-400' : 'text-surface-500 hover:text-accent-400'}`}>{copiedField === 'name' ? 'Copied!' : 'Copy'}</button>}
+            </div>
+          </div>
+
+          {/* Username */}
+          <div>
+            <label className="text-[10px] uppercase tracking-wider text-surface-500 block mb-1">Username</label>
+            <div className="flex items-center justify-between">
+              <span className="text-sm text-surface-100">{selectedCred.username || '—'}</span>
+              {selectedCred.username && <button onClick={() => handleCopy(selectedCred.username, 'username')} className={`text-[10px] transition-colors ${copiedField === 'username' ? 'text-green-400' : 'text-surface-500 hover:text-accent-400'}`}>{copiedField === 'username' ? 'Copied!' : 'Copy'}</button>}
+            </div>
+          </div>
+
+          {/* Password */}
+          <div>
+            <label className="text-[10px] uppercase tracking-wider text-surface-500 block mb-1">Password</label>
+            <div className="flex items-center justify-between">
+              <span className="text-sm text-surface-100 font-mono">
+                {showPassword ? selectedCred.password : '••••••••••••'}
+              </span>
+              <div className="flex gap-2">
+                <button onClick={() => setShowPassword(!showPassword)} className="text-[10px] text-surface-500 hover:text-accent-400">
+                  {showPassword ? 'Hide' : 'Show'}
+                </button>
+                <button onClick={() => handleCopy(selectedCred.password, 'password')} className={`text-[10px] transition-colors ${copiedField === 'password' ? 'text-green-400' : 'text-surface-500 hover:text-accent-400'}`}>{copiedField === 'password' ? 'Copied!' : 'Copy'}</button>
+              </div>
+            </div>
+          </div>
+
+          {/* Website */}
+          <div>
+            <label className="text-[10px] uppercase tracking-wider text-surface-500 block mb-1">Website</label>
+            <div className="flex items-center justify-between">
+              <span className="text-sm text-accent-400">{selectedCred.uri || '—'}</span>
+              {selectedCred.uri && <button onClick={() => handleCopy(selectedCred.uri, 'uri')} className={`text-[10px] transition-colors ${copiedField === 'uri' ? 'text-green-400' : 'text-surface-500 hover:text-accent-400'}`}>{copiedField === 'uri' ? 'Copied!' : 'Copy'}</button>}
+            </div>
+          </div>
+
+          {/* Notes */}
+          <div>
+            <label className="text-[10px] uppercase tracking-wider text-surface-500 block mb-1">Notes</label>
+            <span className="text-sm text-surface-300">{selectedCred.notes || '—'}</span>
+          </div>
+        </div>
+
+        {/* Fill button */}
+        <div className="px-4 py-3 border-t border-surface-800">
+          <button
+            onClick={() => handleFill(selectedCred)}
+            className="w-full py-2 bg-accent-500 hover:bg-accent-600 text-white rounded-lg transition-colors text-sm font-medium"
+          >
+            Fill on Page
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  const matchedCreds = credentials.filter((c) => c.matched);
+  const otherCreds = credentials.filter((c) => !c.matched);
+
   // Unlocked state
   return (
     <div className="flex flex-col h-full bg-surface-950 text-surface-100">
@@ -162,11 +292,11 @@ export function Popup() {
             </span>
           </div>
           <button
-            onClick={handleLock}
-            className="text-surface-400 hover:text-surface-200 transition-colors text-sm"
-            title="Lock vault"
+            onClick={handleOpenApp}
+            className="text-xs text-surface-400 hover:text-surface-200 transition-colors"
+            title="Open desktop app"
           >
-            🔒
+            Open App
           </button>
         </div>
       </div>
@@ -177,45 +307,74 @@ export function Popup() {
           <div className="flex flex-col items-center justify-center py-12 px-4">
             <div className="text-3xl mb-3">🔑</div>
             <p className="text-sm text-surface-400 text-center">
-              No saved logins for {currentDomain || 'this site'}
+              No saved logins
             </p>
           </div>
         ) : (
-          <div className="py-2">
-            {credentials.map((cred) => (
-              <div
-                key={cred.id}
-                className="flex items-center justify-between px-4 py-2.5 hover:bg-surface-900 transition-colors cursor-pointer group"
-              >
-                <div className="flex-1 min-w-0 mr-3">
-                  <p className="text-sm font-medium text-surface-100 truncate">
-                    {cred.name || cred.domain}
-                  </p>
-                  <p className="text-xs text-surface-400 truncate">
-                    {cred.username}
-                  </p>
+          <div>
+            {/* Matched credentials for current site */}
+            {matchedCreds.length > 0 && (
+              <div>
+                <div className="px-4 py-1.5 text-[10px] uppercase tracking-wider text-accent-400 font-semibold bg-surface-900/50">
+                  For this site
                 </div>
-                <button
-                  onClick={() => handleFill(cred)}
-                  className="px-3 py-1 text-xs bg-accent-500 hover:bg-accent-600 text-white rounded transition-colors opacity-0 group-hover:opacity-100"
-                >
-                  Fill
-                </button>
+                {matchedCreds.map((cred) => (
+                  <div
+                    key={cred.id}
+                    onClick={() => handleSelectCred(cred)}
+                    className="flex items-center justify-between px-4 py-2.5 hover:bg-surface-900 transition-colors cursor-pointer group"
+                  >
+                    <div className="flex-1 min-w-0 mr-3">
+                      <p className="text-sm font-medium text-surface-100 truncate">
+                        {cred.name || cred.domain}
+                      </p>
+                      <p className="text-xs text-surface-400 truncate">
+                        {cred.username}
+                      </p>
+                    </div>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); handleFill(cred); }}
+                      className="px-3 py-1 text-xs bg-accent-500 hover:bg-accent-600 text-white rounded transition-colors opacity-0 group-hover:opacity-100"
+                    >
+                      Fill
+                    </button>
+                  </div>
+                ))}
               </div>
-            ))}
+            )}
+
+            {/* All other credentials */}
+            {otherCreds.length > 0 && (
+              <div>
+                <div className="px-4 py-1.5 text-[10px] uppercase tracking-wider text-surface-500 font-semibold bg-surface-900/50">
+                  {matchedCreds.length > 0 ? 'Other logins' : 'All logins'}
+                </div>
+                {otherCreds.map((cred) => (
+                  <div
+                    key={cred.id}
+                    onClick={() => handleSelectCred(cred)}
+                    className="flex items-center justify-between px-4 py-2.5 hover:bg-surface-900 transition-colors cursor-pointer group"
+                  >
+                    <div className="flex-1 min-w-0 mr-3">
+                      <p className="text-sm font-medium text-surface-100 truncate">
+                        {cred.name || cred.domain}
+                      </p>
+                      <p className="text-xs text-surface-400 truncate">
+                        {cred.username}{cred.domain ? ` · ${cred.domain}` : ''}
+                      </p>
+                    </div>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); handleFill(cred); }}
+                      className="px-3 py-1 text-xs bg-surface-700 hover:bg-surface-600 text-white rounded transition-colors opacity-0 group-hover:opacity-100"
+                    >
+                      Fill
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         )}
-      </div>
-
-      {/* Bottom toolbar */}
-      <div className="px-4 py-3 border-t border-surface-800 flex items-center justify-between">
-        <button
-          onClick={handleOpenApp}
-          className="text-xs text-surface-400 hover:text-surface-200 transition-colors"
-          title="Open desktop app"
-        >
-          Open App
-        </button>
       </div>
     </div>
   );
