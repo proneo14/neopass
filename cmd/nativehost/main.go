@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/base64"
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
@@ -380,63 +379,20 @@ func secureCopyToClipboard(text string) *Response {
 }
 
 func secureCopyWindows(text string) *Response {
-	// Base64-encode to safely pass arbitrary text through the command line
-	b64 := base64.StdEncoding.EncodeToString([]byte(text))
-
-	// Use PowerShell with P/Invoke to set ExcludeClipboardContentFromMonitorProcessing
-	// so the password doesn't appear in Windows Clipboard History (Win+V)
-	script := `$b64 = '` + b64 + `'
-$text = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String($b64))
-Add-Type -TypeDefinition @'
-using System;
-using System.Runtime.InteropServices;
-public class SecureClip {
-  [DllImport("user32.dll")] static extern bool OpenClipboard(IntPtr w);
-  [DllImport("user32.dll")] static extern bool EmptyClipboard();
-  [DllImport("user32.dll")] static extern bool CloseClipboard();
-  [DllImport("user32.dll")] static extern IntPtr SetClipboardData(uint f, IntPtr h);
-  [DllImport("user32.dll")] static extern uint RegisterClipboardFormatW([MarshalAs(UnmanagedType.LPWStr)] string n);
-  [DllImport("kernel32.dll")] static extern IntPtr GlobalAlloc(uint f, UIntPtr sz);
-  [DllImport("kernel32.dll")] static extern IntPtr GlobalLock(IntPtr h);
-  [DllImport("kernel32.dll")] static extern bool GlobalUnlock(IntPtr h);
-  public static void Copy(string t) {
-    OpenClipboard(IntPtr.Zero);
-    EmptyClipboard();
-    byte[] b = System.Text.Encoding.Unicode.GetBytes(t + "\0");
-    IntPtr h = GlobalAlloc(0x0002, (UIntPtr)b.Length);
-    IntPtr p = GlobalLock(h);
-    Marshal.Copy(b, 0, p, b.Length);
-    GlobalUnlock(h);
-    SetClipboardData(13, h);
-    uint ex = RegisterClipboardFormatW("ExcludeClipboardContentFromMonitorProcessing");
-    IntPtr eh = GlobalAlloc(0x0002, (UIntPtr)4);
-    IntPtr ep = GlobalLock(eh);
-    Marshal.WriteInt32(ep, 1);
-    GlobalUnlock(eh);
-    SetClipboardData(ex, eh);
-    CloseClipboard();
-  }
-}
-'@
-[SecureClip]::Copy($text)`
-
-	cmd := exec.Command("powershell.exe", "-NoProfile", "-NonInteractive", "-Command", script)
-	if err := cmd.Run(); err != nil {
+	if err := secureCopyClipboardWindows(text); err != nil {
+		log.Error().Err(err).Msg("Win32 clipboard copy failed, trying fallback")
 		return fallbackCopy(text)
 	}
 
 	scheduleClipboardClear()
-
 	return &Response{Status: "copied"}
 }
 
 func fallbackCopy(text string) *Response {
 	switch runtime.GOOS {
 	case "windows":
-		cmd := exec.Command("powershell.exe", "-NoProfile", "-NonInteractive", "-Command",
-			"Set-Clipboard -Value $input")
-		cmd.Stdin = strings.NewReader(text)
-		if err := cmd.Run(); err != nil {
+		// Use the same Win32 API path but without the exclude flag
+		if err := secureCopyClipboardWindows(text); err != nil {
 			return &Response{Error: "clipboard copy failed"}
 		}
 	case "darwin":

@@ -32,8 +32,23 @@ export const browserAPI = {
     sendMessage: (tabId: number, message: unknown) =>
       browser.tabs.sendMessage(tabId, message),
 
-    onActivated: browser.tabs.onActivated,
-    onUpdated: browser.tabs.onUpdated,
+    get onActivated() { return browser.tabs.onActivated; },
+    get onUpdated() { return browser.tabs.onUpdated; },
+  },
+
+  scripting: {
+    executeScript: (tabId: number, files: string[]) => {
+      // MV3 only — chrome.scripting API
+      const chromeGlobal = globalThis as any;
+      if (chromeGlobal.chrome?.scripting?.executeScript) {
+        return chromeGlobal.chrome.scripting.executeScript({
+          target: { tabId },
+          files,
+        });
+      }
+      // Firefox MV2 fallback
+      return browser.tabs.executeScript(tabId, { file: files[0] });
+    },
   },
 
   action: {

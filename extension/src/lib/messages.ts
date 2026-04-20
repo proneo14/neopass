@@ -63,6 +63,26 @@ export interface SecureCopyMessage {
   text: string;
 }
 
+export interface FillCredentialMessage {
+  type: 'fillCredential';
+  username: string;
+  password: string;
+}
+
+export interface SavePromptMessage {
+  type: 'savePrompt';
+  domain: string;
+  username: string;
+  password: string;
+}
+
+export interface ShowSavePromptMessage {
+  type: 'showSavePrompt';
+  domain: string;
+  username: string;
+  password: string;
+}
+
 export type ExtensionMessage =
   | FormDetectedMessage
   | RequestCredentialsMessage
@@ -75,7 +95,10 @@ export type ExtensionMessage =
   | LockMessage
   | UnlockMessage
   | OpenAppMessage
-  | SecureCopyMessage;
+  | SecureCopyMessage
+  | FillCredentialMessage
+  | SavePromptMessage
+  | ShowSavePromptMessage;
 
 export interface Credential {
   id: string;

@@ -94,18 +94,14 @@ export function Popup() {
   }
 
   async function handleFill(credential: Credential) {
-    const tabs = await browserAPI.tabs.query({
-      active: true,
-      currentWindow: true,
+    // Fire-and-forget: background handles the fill after popup closes.
+    // Don't await — close immediately so the page regains focus.
+    browserAPI.runtime.sendMessage({
+      type: 'fillCredential',
+      username: credential.username,
+      password: credential.password,
     });
-    if (tabs[0]?.id !== undefined) {
-      await browserAPI.tabs.sendMessage(tabs[0].id, {
-        type: 'autofill',
-        username: credential.username,
-        password: credential.password,
-      });
-      window.close();
-    }
+    window.close();
   }
 
   async function handleCheckStatus() {

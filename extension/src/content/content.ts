@@ -1,103 +1,188 @@
 import { browserAPI, extractDomain } from '../lib/browser-api';
+import type { AutofillMessage, ShowSavePromptMessage, Credential } from '../lib/messages';
+import {
+  detectLoginForms,
+  autofill,
+  simulateInput,
+  findVisibleLoginField,
+  attachFieldListeners,
+  attachGlobalFocusListener,
+  showSidePanel,
+  resetPanelDismissed,
+  watchFormSubmissions,
+  handleShowSavePrompt,
+  type FormInfo,
+} from './autofill';
 
 /**
- * Content script — detects login forms on the page and communicates
- * with the background service worker for autofill operations.
- * Full autofill logic will be implemented in Prompt 15.
+ * Content script — detects login forms on the page, shows autofill
+ * overlays, handles credential filling, and prompts to save new logins.
  */
 
-interface FormInfo {
-  form: HTMLFormElement | null;
-  usernameField: HTMLInputElement | null;
-  passwordField: HTMLInputElement | null;
-  domain: string;
-}
+let currentForms: FormInfo[] = [];
+let currentCredentials: Credential[] = [];
 
 /**
- * Detect login forms on the current page.
+ * Fetch credentials for the current domain from the background script.
  */
-function detectLoginForms(): FormInfo[] {
-  const domain = extractDomain(window.location.href) ?? '';
-  const passwordFields = document.querySelectorAll<HTMLInputElement>(
-    'input[type="password"]'
-  );
-
-  const forms: FormInfo[] = [];
-
-  for (const pwField of passwordFields) {
-    const form = pwField.closest('form');
-    const usernameField = findUsernameField(pwField, form);
-
-    forms.push({
-      form,
-      usernameField,
-      passwordField: pwField,
+async function fetchCredentials(domain: string): Promise<Credential[]> {
+  try {
+    const response = await browserAPI.runtime.sendMessage({
+      type: 'requestCredentials' as const,
       domain,
     });
+    return (response as { credentials?: Credential[] })?.credentials ?? [];
+  } catch {
+    return [];
   }
-
-  return forms;
 }
 
 /**
- * Find the most likely username field near a password field.
+ * Run form detection, fetch credentials, and wire everything up.
  */
-function findUsernameField(
-  passwordField: HTMLInputElement,
-  form: HTMLFormElement | null
-): HTMLInputElement | null {
-  const container = form ?? document;
-  const candidates = container.querySelectorAll<HTMLInputElement>(
-    'input[type="text"], input[type="email"], input[type="tel"], input:not([type])'
-  );
+async function scanAndAttach() {
+  const forms = detectLoginForms();
+  console.debug('[QPM] scanAndAttach: detected', forms.length, 'forms');
+  if (forms.length === 0) return;
 
-  const usernameHints =
-    /user|email|login|username|account|identifier|handle|phone/i;
-
-  // Prefer fields with username-like attributes
-  for (const candidate of candidates) {
-    const attrs = [
-      candidate.name,
-      candidate.id,
-      candidate.autocomplete,
-      candidate.placeholder,
-    ].join(' ');
-
-    if (usernameHints.test(attrs)) {
-      return candidate;
+  // Merge with existing forms (avoid duplicates)
+  for (const f of forms) {
+    const key = f.usernameField ?? f.passwordField;
+    if (key && !currentForms.some((cf) => cf.usernameField === key || cf.passwordField === key)) {
+      currentForms.push(f);
     }
   }
+  if (currentForms.length === 0) currentForms = forms;
 
-  // Fallback: nearest preceding text/email input
-  const allInputs = Array.from(
-    container.querySelectorAll<HTMLInputElement>('input')
+  const domain = forms[0].domain;
+
+  // Notify background about detected forms
+  browserAPI.runtime.sendMessage({
+    type: 'formDetected' as const,
+    domain,
+    fieldCount: forms.length,
+  });
+
+  // Fetch matching credentials
+  const credentials = await fetchCredentials(domain);
+  currentCredentials = credentials;
+  console.debug('[QPM] fetched', credentials.length, 'credentials for', domain);
+
+  // Attach focus listeners for overlay — pass getters so listeners
+  // always read the latest credentials, not stale snapshots.
+  attachFieldListeners(
+    currentForms,
+    currentCredentials,
+    () => currentCredentials,
+    () => currentForms
   );
-  const pwIndex = allInputs.indexOf(passwordField);
 
-  for (let i = pwIndex - 1; i >= 0; i--) {
-    const input = allInputs[i];
-    const type = input.type.toLowerCase();
-    if (type === 'text' || type === 'email' || type === '' || type === 'tel') {
-      return input;
-    }
-  }
-
-  return null;
+  // Watch for form submissions to prompt save
+  watchFormSubmissions(currentForms);
 }
 
 /**
- * Run initial form detection and notify the background script.
+ * Handle messages from background / popup (e.g. "autofill this credential").
+ */
+browserAPI.runtime.onMessage.addListener(
+  (message: AutofillMessage | ShowSavePromptMessage) => {
+    if (message.type === 'autofill') {
+      // Always re-scan the DOM to get current state
+      const freshForms = detectLoginForms();
+      if (freshForms.length > 0) {
+        currentForms = freshForms;
+      }
+
+      let filled = false;
+
+      if (currentForms.length > 0) {
+        const info = currentForms[0];
+        autofill(info.usernameField, info.passwordField, message.username, message.password);
+        filled = true;
+      }
+
+      if (!filled) {
+        // Fallback: find any visible login-like input on the page
+        const field = findVisibleLoginField();
+        if (field) {
+          const isPassword = field.type === 'password';
+          simulateInput(field, isPassword ? message.password : message.username);
+          filled = true;
+        }
+      }
+
+      if (filled) {
+        browserAPI.runtime.sendMessage({
+          type: 'autofillComplete' as const,
+          domain: extractDomain(window.location.href) ?? '',
+        });
+      }
+      return;
+    }
+
+    if (message.type === 'showSavePrompt') {
+      handleShowSavePrompt(message.domain, message.username, message.password);
+      return;
+    }
+  }
+);
+
+/**
+ * Initialize: detect forms, attach listeners, observe DOM mutations.
+ * Guard against double-init from scripting.executeScript re-injection.
  */
 function init() {
-  const forms = detectLoginForms();
+  if ((window as any).__qpmContentInit) return;
+  (window as any).__qpmContentInit = true;
+  console.debug('[QPM] content script initializing');
 
-  if (forms.length > 0) {
-    browserAPI.runtime.sendMessage({
-      type: 'formDetected',
-      domain: forms[0].domain,
-      fieldCount: forms.length,
+  // Pre-fetch credentials so they're ready when forms are detected.
+  // Don't show the pill yet — wait for scanAndAttach to find login forms.
+  const domain = extractDomain(window.location.href) ?? '';
+  console.debug('[QPM] domain:', domain);
+  if (domain) {
+    fetchCredentials(domain).then((creds) => {
+      console.debug('[QPM] pre-fetch got', creds.length, 'credentials');
+      if (creds.length > 0) {
+        currentCredentials = creds;
+      }
     });
   }
+
+  // Global focusin listener catches fields focused before per-field
+  // listeners are attached (e.g. user clicked the field before our
+  // script finished loading). Also fetches credentials on-demand.
+  attachGlobalFocusListener(
+    () => currentCredentials,
+    () => currentForms,
+    async (field: HTMLInputElement) => {
+      // Fetch credentials on-demand when user focuses a login field
+      // before scanAndAttach has completed
+      const domain = extractDomain(window.location.href) ?? '';
+      console.debug('[QPM] fetchAndShow: domain =', domain, 'field =', field.id || field.name);
+      if (!domain) return;
+      const creds = await fetchCredentials(domain);
+      console.debug('[QPM] fetchAndShow: got', creds.length, 'credentials');
+      if (creds.length === 0) return;
+      currentCredentials = creds;
+
+      // Build a form entry for this field if we don't have one
+      if (!currentForms.some((f) => f.usernameField === field || f.passwordField === field)) {
+        const isPassword = field.type === 'password';
+        currentForms.push({
+          form: field.closest('form'),
+          usernameField: isPassword ? null : field,
+          passwordField: isPassword ? field : null,
+          domain,
+        });
+      }
+
+      // Show side panel now that we have credentials
+      showSidePanel(currentCredentials, currentForms, () => currentCredentials, () => currentForms);
+    }
+  );
+
+  scanAndAttach();
 
   // Watch for dynamically added forms (SPAs)
   let debounceTimer: ReturnType<typeof setTimeout> | null = null;
@@ -105,14 +190,7 @@ function init() {
   const observer = new MutationObserver(() => {
     if (debounceTimer) clearTimeout(debounceTimer);
     debounceTimer = setTimeout(() => {
-      const newForms = detectLoginForms();
-      if (newForms.length > 0) {
-        browserAPI.runtime.sendMessage({
-          type: 'formDetected',
-          domain: newForms[0].domain,
-          fieldCount: newForms.length,
-        });
-      }
+      scanAndAttach();
     }, 300);
   });
 
