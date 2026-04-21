@@ -10,14 +10,10 @@ body {
 }
 
 ::-webkit-scrollbar {
-  width: 6px;
+  display: none;
 }
 
-::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-::-webkit-scrollbar-thumb {
-  background: #334155;
-  border-radius: 3px;
+* {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
 }

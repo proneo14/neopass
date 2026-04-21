@@ -390,6 +390,11 @@ export function showSidePanel(
       flex: 1;
       overflow-y: auto;
       padding: 2px 0;
+      scrollbar-width: none;
+      -ms-overflow-style: none;
+    }
+    .qpm-dd-list::-webkit-scrollbar {
+      display: none;
     }
     .qpm-dd-item {
       display: flex;

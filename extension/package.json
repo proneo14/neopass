@@ -1,5 +1,5 @@
 {
-  "name": "quantum-password-manager-extension",
+  "name": "lgi-pass-extension",
   "version": "1.0.0",
   "description": "Quantum-safe password autofill browser extension",
   "private": true,

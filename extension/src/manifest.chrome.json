@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "Quantum Password Manager",
+  "name": "LGI Pass",
   "version": "1.0.0",
-  "description": "Quantum-safe password autofill",
+  "description": "LGI Pass - secure password autofill",
   "permissions": ["storage", "nativeMessaging", "activeTab", "scripting"],
   "host_permissions": ["https://*/*", "http://*/*"],
   "background": {
