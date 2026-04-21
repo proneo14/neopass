@@ -7,12 +7,20 @@
 
 param(
     [string]$BinaryPath = "",
+    [string]$ChromeExtensionID = "",
+    [string]$EdgeExtensionID = "",
+    # Legacy parameter — treated as ChromeExtensionID if ChromeExtensionID is empty
     [string]$ExtensionID = ""
 )
 
 $ErrorActionPreference = "Stop"
 $AppName = "com.quantum.passwordmanager"
 $DisplayName = "Quantum Password Manager Native Host"
+
+# Support legacy -ExtensionID parameter
+if (-not $ChromeExtensionID -and $ExtensionID) {
+    $ChromeExtensionID = $ExtensionID
+}
 
 # Determine binary path
 if (-not $BinaryPath) {
@@ -37,27 +45,38 @@ Copy-Item -Path $BinaryPath -Destination $InstalledBinary -Force
 Write-Host "Installed binary to: $InstalledBinary"
 
 # Chrome manifest
+$chromeOrigins = @()
+if ($ChromeExtensionID) {
+    $chromeOrigins += "chrome-extension://$ChromeExtensionID/"
+}
 $ChromeManifest = @{
     name = $AppName
     description = $DisplayName
     path = $InstalledBinary
     type = "stdio"
-    allowed_origins = @()
+    allowed_origins = $chromeOrigins
 } | ConvertTo-Json -Depth 3
-
-if ($ExtensionID) {
-    $ChromeManifest = @{
-        name = $AppName
-        description = $DisplayName
-        path = $InstalledBinary
-        type = "stdio"
-        allowed_origins = @("chrome-extension://$ExtensionID/")
-    } | ConvertTo-Json -Depth 3
-}
 
 $ChromeManifestPath = Join-Path $InstallDir "$AppName.chrome.json"
 $ChromeManifest | Set-Content -Path $ChromeManifestPath -Encoding UTF8
 Write-Host "Created Chrome manifest: $ChromeManifestPath"
+
+# Edge manifest (separate file so Edge can have its own extension ID)
+$edgeOrigins = @()
+if ($EdgeExtensionID) {
+    $edgeOrigins += "chrome-extension://$EdgeExtensionID/"
+}
+$EdgeManifest = @{
+    name = $AppName
+    description = $DisplayName
+    path = $InstalledBinary
+    type = "stdio"
+    allowed_origins = $edgeOrigins
+} | ConvertTo-Json -Depth 3
+
+$EdgeManifestPath = Join-Path $InstallDir "$AppName.edge.json"
+$EdgeManifest | Set-Content -Path $EdgeManifestPath -Encoding UTF8
+Write-Host "Created Edge manifest: $EdgeManifestPath"
 
 # Firefox manifest
 $FirefoxManifest = @{
@@ -65,7 +84,7 @@ $FirefoxManifest = @{
     description = $DisplayName
     path = $InstalledBinary
     type = "stdio"
-    allowed_extensions = @("qpm@quantum-password-manager.com")
+    allowed_extensions = @("lgipass@lancastergroup.com")
 } | ConvertTo-Json -Depth 3
 
 $FirefoxManifestPath = Join-Path $InstallDir "$AppName.firefox.json"
@@ -85,7 +104,7 @@ $EdgeRegPath = "HKCU:\Software\Microsoft\Edge\NativeMessagingHosts\$AppName"
 if (-not (Test-Path $EdgeRegPath)) {
     New-Item -Path $EdgeRegPath -Force | Out-Null
 }
-Set-ItemProperty -Path $EdgeRegPath -Name "(Default)" -Value $ChromeManifestPath
+Set-ItemProperty -Path $EdgeRegPath -Name "(Default)" -Value $EdgeManifestPath
 Write-Host "Registered Edge native messaging host"
 
 # Register in Windows Registry — Firefox
@@ -98,5 +117,7 @@ Write-Host "Registered Firefox native messaging host"
 
 Write-Host ""
 Write-Host "Native messaging host installed successfully." -ForegroundColor Green
-Write-Host "If you provided an extension ID, Chrome/Edge will only allow that extension."
-Write-Host "Restart your browser for changes to take effect."
+Write-Host "Chrome Extension ID: $(if ($ChromeExtensionID) { $ChromeExtensionID } else { '(any)' })" -ForegroundColor Cyan
+Write-Host "Edge Extension ID:   $(if ($EdgeExtensionID) { $EdgeExtensionID } else { '(any)' })" -ForegroundColor Cyan
+Write-Host "Firefox Extension ID: lgipass@lancastergroup.com" -ForegroundColor Cyan
+Write-Host "Restart your browsers for changes to take effect."

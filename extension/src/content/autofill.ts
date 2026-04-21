@@ -374,17 +374,27 @@ export function showSidePanel(
     }
 
     .qpm-dd-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
       padding: 8px 12px;
       font-size: 11px;
       color: #818cf8;
       font-weight: 600;
       border-bottom: 1px solid #1e293b;
     }
-    .qpm-dd-domain {
+    .qpm-dd-header-domain {
       font-size: 10px;
       color: #64748b;
-      padding: 4px 12px;
-      border-bottom: 1px solid #1e293b;
+      font-weight: 400;
+    }
+    .qpm-dd-section {
+      padding: 6px 12px 2px;
+      font-size: 9px;
+      font-weight: 700;
+      color: #818cf8;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
     }
     .qpm-dd-list {
       flex: 1;
@@ -480,23 +490,32 @@ export function showSidePanel(
   const ddInner = document.createElement('div');
   ddInner.className = 'qpm-dropdown-inner';
 
+  const domain = detectedForms[0]?.domain ?? '';
   const ddHeader = document.createElement('div');
   ddHeader.className = 'qpm-dd-header';
-  ddHeader.textContent = 'LGI Pass';
+  const headerLabel = document.createElement('span');
+  headerLabel.textContent = 'LGI Pass';
+  ddHeader.appendChild(headerLabel);
+  if (domain) {
+    const headerDomain = document.createElement('span');
+    headerDomain.className = 'qpm-dd-header-domain';
+    headerDomain.textContent = domain;
+    ddHeader.appendChild(headerDomain);
+  }
   ddInner.appendChild(ddHeader);
 
-  const domain = detectedForms[0]?.domain ?? '';
-  if (domain) {
-    const ddDomain = document.createElement('div');
-    ddDomain.className = 'qpm-dd-domain';
-    ddDomain.textContent = domain;
-    ddInner.appendChild(ddDomain);
-  }
+  const sectionLabel = document.createElement('div');
+  sectionLabel.className = 'qpm-dd-section';
+  sectionLabel.textContent = 'For this site';
+  ddInner.appendChild(sectionLabel);
 
   const ddList = document.createElement('div');
   ddList.className = 'qpm-dd-list';
 
-  credentials.forEach((cred) => {
+  const matchedCreds = credentials.filter((c) => c.matched);
+  const otherCreds = credentials.filter((c) => !c.matched);
+
+  function addCredItem(cred: Credential, container: HTMLElement) {
     const item = document.createElement('div');
     item.className = 'qpm-dd-item';
 
@@ -528,8 +547,18 @@ export function showSidePanel(
     item.appendChild(avatar);
     item.appendChild(info);
     item.appendChild(fillBtn);
-    ddList.appendChild(item);
-  });
+    container.appendChild(item);
+  }
+
+  matchedCreds.forEach((cred) => addCredItem(cred, ddList));
+
+  if (otherCreds.length > 0) {
+    const otherLabel = document.createElement('div');
+    otherLabel.className = 'qpm-dd-section';
+    otherLabel.textContent = 'Other logins';
+    ddList.appendChild(otherLabel);
+    otherCreds.forEach((cred) => addCredItem(cred, ddList));
+  }
 
   ddInner.appendChild(ddList);
   dropdown.appendChild(ddInner);
