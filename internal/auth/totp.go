@@ -253,6 +253,7 @@ func (s *TOTPService) ClaimSharedTOTP(ctx context.Context, userID string, shareI
 	if err != nil {
 		return "", fmt.Errorf("decrypt shared totp: %w", err)
 	}
+	defer pmcrypto.ZeroBytes(plainSecret)
 
 	// Mark as claimed
 	if err := s.totpRepo.MarkSharedTOTPClaimed(ctx, shareID); err != nil {
@@ -291,6 +292,7 @@ func (s *TOTPService) decryptTOTPSecret(ctx context.Context, userID string, encr
 	if err != nil {
 		return "", fmt.Errorf("decrypt totp secret: %w", err)
 	}
+	defer pmcrypto.ZeroBytes(plaintext)
 
 	return string(plaintext), nil
 }

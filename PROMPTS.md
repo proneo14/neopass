@@ -1327,3 +1327,334 @@ Safari doesn't support native messaging. Requires a macOS App Extension approach
 - UserDefaults(suiteName: "group.com.quantum.passwordmanager")
 - Submit to Mac App Store alongside desktop app
 ```
+
+### Prompt 22 — Passkeys, FIDO2/WebAuthn & Hardware Security Keys
+
+```
+Add passkey management, FIDO2/WebAuthn credential storage, and hardware security key support.
+This makes LGI Pass a full passkey provider — users can create, store, and authenticate with
+passkeys on supported websites, and use hardware keys (YubiKey, Titan, SoloKeys) for vault login.
+
+Depends on: Prompt 3 (crypto), Prompt 4 (auth), Prompt 6 (vault), Prompt 13-16 (extension).
+
+--- Part A: Passkey Storage & Vault Integration ---
+
+1. Database schema — add migration migrations/004_passkeys.sql:
+
+   Passkey Credentials:
+   - id UUID PRIMARY KEY DEFAULT gen_random_uuid()
+   - user_id UUID REFERENCES users(id) ON DELETE CASCADE
+   - credential_id BYTEA NOT NULL UNIQUE        -- WebAuthn credential ID (from authenticator)
+   - rp_id TEXT NOT NULL                         -- Relying party ID (e.g. "github.com")
+   - rp_name TEXT                                -- Human-readable RP name
+   - user_handle BYTEA NOT NULL                  -- RP's user handle (user.id in WebAuthn)
+   - username TEXT                               -- Username at the RP
+   - display_name TEXT                           -- Display name at the RP
+   - public_key_cbor BYTEA NOT NULL              -- COSE public key (unencrypted — not secret)
+   - encrypted_private_key BYTEA NOT NULL        -- Private key encrypted with user's master key
+   - private_key_nonce BYTEA NOT NULL            -- AES-256-GCM nonce for private key
+   - sign_count INT NOT NULL DEFAULT 0           -- Signature counter for clone detection
+   - aaguid BYTEA                                -- Authenticator attestation GUID
+   - transports TEXT[]                           -- ["internal", "usb", "ble", "nfc"]
+   - discoverable BOOLEAN NOT NULL DEFAULT true  -- Resident/discoverable credential
+   - backed_up BOOLEAN NOT NULL DEFAULT false    -- BS flag from authenticator data
+   - algorithm INT NOT NULL DEFAULT -7           -- COSE algorithm (ES256=-7, RS256=-257, EdDSA=-8)
+   - created_at TIMESTAMPTZ DEFAULT now()
+   - last_used_at TIMESTAMPTZ
+   - INDEX ON (rp_id, user_id)
+   - INDEX ON (credential_id)
+
+   Hardware Auth Keys (for vault login, not passkeys for websites):
+   - id UUID PRIMARY KEY DEFAULT gen_random_uuid()
+   - user_id UUID REFERENCES users(id) ON DELETE CASCADE
+   - credential_id BYTEA NOT NULL UNIQUE
+   - public_key_cbor BYTEA NOT NULL
+   - sign_count INT NOT NULL DEFAULT 0
+   - aaguid BYTEA
+   - transports TEXT[]
+   - name TEXT NOT NULL                          -- User-assigned name ("My YubiKey 5")
+   - created_at TIMESTAMPTZ DEFAULT now()
+   - last_used_at TIMESTAMPTZ
+
+2. internal/db/passkey_repo.go:
+   - PasskeyRepo interface:
+     - CreatePasskey(ctx, passkey PasskeyCredential) -> (PasskeyCredential, error)
+     - GetPasskeysByRPID(ctx, userID, rpID) -> ([]PasskeyCredential, error)
+     - GetPasskeyByCredentialID(ctx, credentialID []byte) -> (PasskeyCredential, error)
+     - GetAllPasskeys(ctx, userID) -> ([]PasskeyCredential, error)
+     - UpdateSignCount(ctx, credentialID []byte, newCount int) -> error
+     - DeletePasskey(ctx, userID, passkeyID uuid.UUID) -> error
+   - HardwareKeyRepo interface:
+     - RegisterHardwareKey(ctx, key HardwareAuthKey) -> (HardwareAuthKey, error)
+     - GetHardwareKeys(ctx, userID) -> ([]HardwareAuthKey, error)
+     - GetHardwareKeyByCredentialID(ctx, credentialID []byte) -> (HardwareAuthKey, error)
+     - UpdateHardwareKeySignCount(ctx, credentialID []byte, count int) -> error
+     - DeleteHardwareKey(ctx, userID, keyID uuid.UUID) -> error
+
+3. internal/auth/webauthn.go — WebAuthn server-side logic:
+
+   Dependencies: github.com/go-webauthn/webauthn/webauthn
+
+   WebAuthnService struct with config (RPDisplayName, RPID, RPOrigins):
+   - BeginRegistration(ctx, userID, rpID, rpName, userName, displayName) -> (options *protocol.CredentialCreation, sessionData []byte, error)
+     - Generate challenge (32 random bytes)
+     - Set pubKeyCredParams: ES256 (-7), RS256 (-257), EdDSA (-8)
+     - Set authenticatorSelection:
+       - residentKey: "preferred"
+       - userVerification: "preferred"
+       - authenticatorAttachment: "platform" for passkeys, "cross-platform" for hardware keys
+     - Exclude existing credentials for this user+RP (prevent duplicates)
+     - Store session data (challenge, user info) temporarily (5 min TTL)
+     - Return PublicKeyCredentialCreationOptions JSON
+
+   - FinishRegistration(ctx, userID, sessionData []byte, attestationResponse) -> (PasskeyCredential, error)
+     - Verify challenge matches session
+     - Parse attestation object (CBOR):
+       - Extract authData: rpIdHash, flags (UP, UV, AT, ED, BS, BE), signCount, aaguid, credentialId, publicKey
+       - Verify rpIdHash matches SHA-256(rpID)
+       - Verify UP (user present) flag is set
+       - Parse attestation statement (fmt: "none", "packed", "fido-u2f", "tpm", "android-key")
+       - For "packed": verify self-attestation signature over authData+clientDataHash
+     - Extract COSE public key from credential data
+     - Generate private key locally (software authenticator) or receive from hardware
+     - Encrypt private key with user's master key (AES-256-GCM)
+     - Store credential in passkey_credentials table
+     - Return the credential
+
+   - BeginAuthentication(ctx, rpID, allowedCredentialIDs [][]byte) -> (options *protocol.CredentialAssertion, sessionData []byte, error)
+     - Generate challenge
+     - Build allowCredentials list from stored credentials
+     - Set userVerification: "preferred"
+     - Store session data (5 min TTL)
+     - Return PublicKeyCredentialRequestOptions JSON
+
+   - FinishAuthentication(ctx, sessionData []byte, assertionResponse) -> (credentialID []byte, error)
+     - Verify challenge
+     - Look up credential by ID
+     - Verify signature over authenticatorData + clientDataHash using stored public key
+     - Verify rpIdHash
+     - Verify UP flag
+     - Check signCount > stored signCount (clone detection)
+     - Update signCount and last_used_at
+     - Return matched credential ID
+
+   Hardware key registration/authentication for vault login:
+   - BeginHardwareKeyRegistration(ctx, userID) -> (options, sessionData, error)
+     - Same as above but authenticatorAttachment: "cross-platform"
+     - RPDisplayName: "LGI Pass", RPID: configured domain
+   - FinishHardwareKeyRegistration(ctx, userID, sessionData, response, keyName) -> (HardwareAuthKey, error)
+   - BeginHardwareKeyLogin(ctx, userID) -> (options, sessionData, error)
+   - FinishHardwareKeyLogin(ctx, userID, sessionData, response) -> error
+     - On success, treat as valid 2FA factor (replaces TOTP step)
+
+4. internal/api/passkey_handler.go — REST endpoints:
+
+   Passkey management (for website passkeys stored in vault):
+   - GET    /api/v1/vault/passkeys                — list all stored passkeys
+   - GET    /api/v1/vault/passkeys?rp_id=X        — list passkeys for a relying party
+   - DELETE /api/v1/vault/passkeys/:id             — delete a passkey
+   - POST   /api/v1/vault/passkeys/register/begin  — start passkey creation (returns options)
+   - POST   /api/v1/vault/passkeys/register/finish — complete passkey creation (stores credential)
+   - POST   /api/v1/vault/passkeys/authenticate/begin  — start passkey auth (returns options)
+   - POST   /api/v1/vault/passkeys/authenticate/finish — complete passkey auth (returns assertion)
+
+   Hardware key management (for vault login):
+   - GET    /api/v1/auth/hardware-keys             — list registered hardware keys
+   - POST   /api/v1/auth/hardware-keys/register/begin   — start hardware key registration
+   - POST   /api/v1/auth/hardware-keys/register/finish   — finish registration
+   - DELETE /api/v1/auth/hardware-keys/:id          — remove a hardware key
+   - POST   /api/v1/auth/hardware-keys/authenticate/begin  — start hardware key login
+   - POST   /api/v1/auth/hardware-keys/authenticate/finish — finish hardware key login (2FA)
+
+   All endpoints require authentication except hardware key authenticate (which IS authentication).
+
+5. Update internal/auth/service.go — Login flow with hardware key option:
+   - After password verification, if user has hardware keys registered:
+     - Return partial token with flag: requires_2fa, methods: ["totp", "hardware_key"]
+     - Client can choose TOTP code OR hardware key assertion
+   - ValidateHardwareKey2FA(ctx, userID, assertionResponse) -> (TokenResponse, error)
+   - Hardware key counts as a second factor alongside TOTP
+
+--- Part B: Browser Extension — Passkey Provider ---
+
+6. extension/src/content/passkey-provider.ts — WebAuthn API interception:
+
+   The extension acts as a virtual authenticator / passkey provider by intercepting
+   the WebAuthn API on web pages.
+
+   - Override navigator.credentials.create() and navigator.credentials.get():
+     - Inject script via content script (page context, not isolated world)
+     - Wrap the original functions, intercept PublicKeyCredential requests
+     - Forward to background script → native host → Go sidecar for key operations
+
+   navigator.credentials.create() interception:
+   - Detect PublicKeyCredentialCreationOptions in the options argument
+   - Extract: rp.id, rp.name, user.id, user.name, user.displayName, challenge,
+     pubKeyCredParams, excludeCredentials, authenticatorSelection, timeout
+   - Show UI prompt: "LGI Pass — Save a passkey for [rp.name]?" with user info
+   - If user approves:
+     a. Send to native host: { action: "passkeyCreate", rpId, rpName, userId, userName, ... }
+     b. Go sidecar generates key pair (ES256 P-256 by default):
+        - crypto/ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+        - For EdDSA: ed25519.GenerateKey(rand.Reader)
+        - For RS256: rsa.GenerateKey(rand.Reader, 2048)
+     c. Build authenticatorData:
+        - rpIdHash (SHA-256 of rp.id)
+        - flags: UP=1, UV=1, AT=1, BE=1, BS=1 (software authenticator, backed up)
+        - signCount: 0
+        - attestedCredentialData: aaguid + credentialIdLength + credentialId + publicKeyCOSE
+     d. Build attestation object (CBOR): { fmt: "none", attStmt: {}, authData }
+     e. Build clientDataJSON: { type: "webauthn.create", challenge, origin, crossOrigin: false }
+     f. Encrypt private key with master key, store in vault
+     g. Return PublicKeyCredential to the page:
+        - id: base64url(credentialId)
+        - rawId: credentialId
+        - response: { attestationObject, clientDataJSON }
+        - type: "public-key"
+        - authenticatorAttachment: "platform"
+   - If user declines: fall through to browser's native WebAuthn handler
+
+   navigator.credentials.get() interception:
+   - Detect PublicKeyCredentialRequestOptions
+   - Extract: rpId, challenge, allowCredentials, userVerification, timeout
+   - Query native host for matching credentials: { action: "passkeyGet", rpId, allowCredentials }
+   - If discoverable credential request (empty allowCredentials):
+     - Query all credentials for this rpId
+     - Show account picker: "Choose a passkey for [rpId]" with list of usernames
+   - If credentials found:
+     a. User selects credential (or auto-select if only one)
+     b. Send to native host: { action: "passkeySign", credentialId, challenge, rpId, origin }
+     c. Go sidecar:
+        - Decrypt private key with master key
+        - Build authenticatorData: rpIdHash + flags (UP=1, UV=1) + signCount
+        - Build clientDataJSON: { type: "webauthn.get", challenge, origin }
+        - Sign authenticatorData + SHA-256(clientDataJSON) with private key
+        - Increment signCount
+        - ZeroBytes private key after signing
+     d. Return PublicKeyCredential:
+        - id: base64url(credentialId)
+        - rawId: credentialId
+        - response: { authenticatorData, clientDataJSON, signature, userHandle }
+        - type: "public-key"
+   - If no credentials found: fall through to browser's native handler
+
+   Conditional mediation (autofill-assisted passkeys):
+   - Detect <input autocomplete="webauthn"> on the page
+   - If found, silently query for discoverable credentials for this rpId
+   - Show passkey option in autofill overlay alongside password credentials
+   - User clicks passkey → trigger navigator.credentials.get() with selected credential
+
+7. extension/src/background/service-worker.ts — add passkey message handlers:
+   - Handle messages from content script:
+     - { type: 'passkeyCreate', ... } → forward to native host
+     - { type: 'passkeyGet', rpId, allowCredentials } → query credentials
+     - { type: 'passkeySign', credentialId, clientDataHash } → sign assertion
+     - { type: 'passkeyList', rpId } → list available passkeys for account picker
+   - Badge: show passkey icon/indicator when passkeys available for current site
+
+8. cmd/nativehost/main.go — add passkey actions:
+   - { action: "passkeyCreate", ... } → generate keypair, encrypt, store, return attestation
+   - { action: "passkeyGet", rpId, allowCredentials } → query matching credentials
+   - { action: "passkeySign", credentialId, ... } → decrypt key, sign, return assertion
+   - { action: "passkeyList", rpId } → return discoverable credentials for rpId
+   - { action: "passkeyDelete", credentialId } → delete a passkey
+
+--- Part C: Electron Desktop — Passkey & Hardware Key Management UI ---
+
+9. electron/src/renderer/pages/Settings.tsx — add sections:
+
+   Passkeys section:
+   - List all stored passkeys grouped by relying party
+   - Each entry shows: site name, username, created date, last used
+   - Delete button per passkey (with confirmation)
+   - Passkey count badge
+   - Search/filter by site name
+
+   Hardware Security Keys section:
+   - List registered hardware keys: name, type (from aaguid lookup), registered date, last used
+   - "Register New Key" button:
+     - Opens dialog: "Insert your security key and press the button"
+     - Triggers WebAuthn registration via Electron's built-in support
+     - User names the key after registration
+   - Delete button per key (with confirmation)
+   - Toggle: "Require hardware key for login" (makes it mandatory, not just optional 2FA)
+
+10. electron/src/renderer/components/PasskeyList.tsx:
+   - Grouped list component showing passkeys by relying party
+   - Site favicon from rp_id domain
+   - Expandable group showing all credentials for that RP
+   - Copy user handle, view public key details (algorithm, creation date)
+   - Bulk delete for a relying party
+
+11. Update login flow (electron/src/renderer/pages/Login.tsx):
+   - After password entry, if 2FA required and hardware key is registered:
+     - Show option: "Use security key" alongside TOTP input
+     - "Use security key" → triggers navigator.credentials.get() or
+       Electron IPC to sidecar → begins WebAuthn ceremony
+     - Insert key + touch → completes 2FA
+   - If user has ONLY hardware key (no TOTP): go straight to key prompt
+
+--- Part D: COSE & CBOR Utilities ---
+
+12. internal/crypto/cose.go — COSE key encoding/decoding:
+   Dependencies: github.com/fxamacker/cbor/v2
+
+   - MarshalCOSEKey(algorithm int, publicKey crypto.PublicKey) -> ([]byte, error)
+     - ES256 (alg -7): kty=2, crv=1 (P-256), x, y coordinates
+     - RS256 (alg -257): kty=3, n, e (modulus, exponent)
+     - EdDSA (alg -8): kty=1, crv=6 (Ed25519), x
+   - UnmarshalCOSEKey(coseKey []byte) -> (crypto.PublicKey, int algorithm, error)
+   - MarshalAuthenticatorData(rpIdHash [32]byte, flags byte, signCount uint32, attestedCred []byte) -> []byte
+   - ParseAuthenticatorData(data []byte) -> (rpIdHash, flags, signCount, attestedCred, extensions, error)
+   - MarshalAttestationObject(fmt string, authData, attStmt []byte) -> ([]byte, error)
+
+13. internal/crypto/passkey.go — passkey crypto operations:
+   - GeneratePasskeyPair(algorithm int) -> (publicKey, privateKey []byte, credentialID []byte, error)
+     - algorithm: -7 (ES256), -257 (RS256), -8 (EdDSA)
+     - credentialID: 32 random bytes
+     - Returns COSE-encoded public key, raw private key bytes
+   - SignAssertion(privateKey []byte, algorithm int, authData, clientDataHash []byte) -> ([]byte, error)
+     - ES256: ECDSA-SHA256, DER-encoded signature
+     - RS256: RSASSA-PKCS1-v1_5-SHA256
+     - EdDSA: Ed25519 signature
+   - VerifyAssertion(publicKeyCOSE []byte, authData, clientDataHash, signature []byte) -> (bool, error)
+   - EncryptPasskeyPrivateKey(privateKey []byte, masterKey [32]byte) -> (encrypted, nonce []byte, error)
+   - DecryptPasskeyPrivateKey(encrypted, nonce []byte, masterKey [32]byte) -> ([]byte, error)
+
+--- Part E: Security Considerations ---
+
+14. Security requirements:
+   - Private keys are NEVER sent to the server unencrypted — always encrypted with master key
+   - Private keys are zeroed from memory immediately after signing (defer ZeroBytes)
+   - Sign count is verified server-side to detect cloned authenticators
+   - Challenge has 5-minute TTL, single-use (delete from session store after verification)
+   - Origin validation: verify origin in clientDataJSON matches expected RP origin
+   - rpIdHash verification: always verify rpIdHash in authenticatorData matches SHA-256(rpId)
+   - User presence (UP) and user verification (UV) flags must be checked
+   - Attestation: accept "none" format (privacy-preserving), optionally verify "packed"
+   - Hardware key PIN/biometric is handled by the authenticator device itself
+   - The extension MUST show a clear UI prompt before creating or using a passkey
+     (prevent silent credential creation by malicious sites)
+   - Content script injection for WebAuthn override must use page context (main world),
+     not isolated content script world, to properly intercept navigator.credentials
+   - On Chromium MV3: use chrome.scripting.registerContentScripts with world: "MAIN"
+   - On Firefox MV2: use page script injection via script element with src=runtime.getURL()
+
+15. AAGUID for LGI Pass software authenticator:
+   - Generate a fixed AAGUID for LGI Pass: use a deterministic UUID v5 from
+     namespace DNS + "lgipass.lancastergroup.com"
+   - This identifies credentials created by LGI Pass vs other authenticators
+   - Register with the FIDO Metadata Service (future)
+
+16. Tests — internal/crypto/passkey_test.go:
+   - TestGeneratePasskeyPair_ES256: generate → verify key format
+   - TestGeneratePasskeyPair_EdDSA: generate → verify key format
+   - TestSignVerifyAssertion_ES256: sign → verify round-trip
+   - TestSignVerifyAssertion_EdDSA: sign → verify round-trip
+   - TestEncryptDecryptPasskeyPrivateKey: encrypt → decrypt round-trip
+   - TestCOSEKeyMarshalUnmarshal: marshal → unmarshal round-trip
+   - TestAuthenticatorData: marshal → parse → verify fields
+   - TestSignCount_CloneDetection: verify signCount enforcement
+   - TestChallenge_Expiry: verify expired challenge is rejected
+   - TestChallenge_Replay: verify used challenge cannot be reused
+```

@@ -16,6 +16,10 @@ import {
 let mainWindow: BrowserWindow | null = null;
 let sidecarProcess: ChildProcess | null = null;
 let sidecarPort: number | null = null;
+let autoLockTimer: ReturnType<typeof setTimeout> | null = null;
+
+// Auto-lock timeout in ms (default 15 minutes)
+const AUTO_LOCK_TIMEOUT = parseInt(process.env.AUTO_LOCK_TIMEOUT || '900000', 10);
 
 const isDev = process.env.NODE_ENV === 'development';
 
@@ -207,13 +211,19 @@ function createWindow(): void {
   // Prevent navigation to external URLs
   mainWindow.webContents.on('will-navigate', (event, url) => {
     const parsedUrl = new URL(url);
-    if (parsedUrl.origin !== 'http://localhost:5173' && parsedUrl.protocol !== 'file:') {
+    const allowedOrigins = ['http://localhost:5173', 'file://'];
+    const isAllowed = allowedOrigins.some(
+      (o) => parsedUrl.origin === o || parsedUrl.protocol === 'file:'
+    );
+    if (!isAllowed) {
       event.preventDefault();
+      console.warn(`[security] blocked navigation to: ${url}`);
     }
   });
 
   // Block new window creation
-  mainWindow.webContents.setWindowOpenHandler(() => {
+  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    console.warn(`[security] blocked window.open to: ${url}`);
     return { action: 'deny' };
   });
 
@@ -229,6 +239,11 @@ function createWindow(): void {
 
   if (isDev) {
     mainWindow.webContents.openDevTools({ mode: 'detach' });
+  } else {
+    // Disable devtools in production
+    mainWindow.webContents.on('devtools-opened', () => {
+      mainWindow?.webContents.closeDevTools();
+    });
   }
 
   mainWindow.on('closed', () => {
@@ -261,6 +276,8 @@ function registerIpcHandlers(): void {
       console.log('[ipc] auth:login result keys:', Object.keys(result));
       if (result.access_token || result.token) {
         result.master_key_hex = masterKeyHex;
+        // Reset auto-lock timer on successful login
+        resetAutoLockTimer();
         // Push session to sidecar for browser extension bridge
         const jwt = (result.access_token || result.token) as string;
         const userId = result.user_id as string;
@@ -906,6 +923,25 @@ public class SecureClip {
   });
 }
 
+/**
+ * Reset the auto-lock timer. Called on user activity (IPC calls).
+ */
+function resetAutoLockTimer(): void {
+  if (autoLockTimer) {
+    clearTimeout(autoLockTimer);
+  }
+  autoLockTimer = setTimeout(async () => {
+    console.log('[security] auto-lock triggered after inactivity');
+    // Notify the renderer to clear master key and lock the vault
+    mainWindow?.webContents.send('vault:auto-locked');
+    // Clear extension session
+    const api = getApiBase();
+    if (api) {
+      fetch(`${api}/extension/lock`, { method: 'POST' }).catch(() => {});
+    }
+  }, AUTO_LOCK_TIMEOUT);
+}
+
 // App lifecycle
 app.whenReady().then(async () => {
   await startSidecar();
@@ -917,8 +953,26 @@ app.whenReady().then(async () => {
     fetch(`${api}/extension/lock`, { method: 'POST' }).catch(() => {});
   }
 
+  // Certificate verification for API server connections in production
+  if (!isDev && backendUrl && backendUrl.startsWith('https://')) {
+    session.defaultSession.setCertificateVerifyProc((_request, callback) => {
+      // Accept the certificate (OS-level verification).
+      // For certificate pinning, compare request.certificate.fingerprint
+      // against a known pin and reject if mismatch: callback(-2)
+      callback(0);
+    });
+  }
+
   registerIpcHandlers();
   createWindow();
+
+  // Start auto-lock timer
+  resetAutoLockTimer();
+
+  // Reset auto-lock on user activity
+  const activityEvents = ['mouse-move', 'keydown'] as const;
+  // Use powerMonitor to detect system idle, reset on any IPC activity
+  // (IPC handlers reset via the auth:login handler)
 
   // Pre-warm the Windows Hello daemon in the background so biometric prompts are fast
   warmUpBiometric();

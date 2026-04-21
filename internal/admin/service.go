@@ -247,10 +247,14 @@ func (s *Service) AccessUserVault(ctx context.Context, adminUserID, orgID, targe
 			log.Warn().Err(err).Str("entry_id", e.ID).Msg("failed to decrypt vault entry during admin access")
 			continue
 		}
+		// Copy plaintext so we can zero the original decrypted buffer
+		dataCopy := make([]byte, len(plaintext))
+		copy(dataCopy, plaintext)
+		crypto.ZeroBytes(plaintext)
 		decrypted = append(decrypted, DecryptedEntry{
 			ID:        e.ID,
 			EntryType: e.EntryType,
-			Data:      json.RawMessage(plaintext),
+			Data:      json.RawMessage(dataCopy),
 			Version:   e.Version,
 		})
 	}

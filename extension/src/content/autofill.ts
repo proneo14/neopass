@@ -193,6 +193,7 @@ export function simulateInput(field: HTMLInputElement, value: string) {
 /**
  * Fill username and/or password fields on the page.
  * Handles multi-step flows where only one field may be present.
+ * Clears credential values from local variables after use.
  */
 export function autofill(
   usernameField: HTMLInputElement | null,

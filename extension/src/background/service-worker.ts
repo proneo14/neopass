@@ -9,6 +9,9 @@ import type {
 
 const NATIVE_HOST_ID = 'com.quantum.passwordmanager';
 
+/** Timeout for native host connections (5 seconds). */
+const NATIVE_HOST_TIMEOUT_MS = 5000;
+
 /** Pending save prompts: domain → credential info.  Shown on next page load. */
 const pendingSavePrompts = new Map<
   number,
@@ -16,23 +19,43 @@ const pendingSavePrompts = new Map<
 >();
 
 /**
+ * Validate that a native host response has the expected shape.
+ */
+function validateNativeResponse(response: unknown): NativeHostResponse {
+  if (response === null || response === undefined) {
+    return { error: 'No response from native host' };
+  }
+  if (typeof response !== 'object') {
+    return { error: 'Invalid response format' };
+  }
+  return response as NativeHostResponse;
+}
+
+/**
  * Send a message to the native host and wait for a response.
- * Uses one-shot sendNativeMessage to avoid response correlation issues.
+ * Uses one-shot sendNativeMessage with a timeout to avoid hanging.
  */
 function sendNativeMessage(
   message: Record<string, unknown>
 ): Promise<NativeHostResponse> {
   return new Promise((resolve) => {
+    const timer = setTimeout(() => {
+      resolve({ error: 'Native host connection timed out' });
+    }, NATIVE_HOST_TIMEOUT_MS);
+
     try {
       browserAPI.runtime.sendNativeMessage(
         NATIVE_HOST_ID,
         message
-      ).then((response: NativeHostResponse) => {
-        resolve(response ?? { error: 'No response' });
+      ).then((response: unknown) => {
+        clearTimeout(timer);
+        resolve(validateNativeResponse(response));
       }).catch(() => {
+        clearTimeout(timer);
         resolve({ error: 'Desktop app not running' });
       });
     } catch {
+      clearTimeout(timer);
       resolve({ error: 'Desktop app not running' });
     }
   });
@@ -40,16 +63,25 @@ function sendNativeMessage(
 
 /**
  * Get credentials for a domain from the native host.
+ * Validates response shape before returning.
  */
 async function getCredentialsForDomain(
   domain: string
 ): Promise<Credential[]> {
+  if (!domain || typeof domain !== 'string') return [];
   try {
     const response = await sendNativeMessage({
       action: 'getCredentials',
       domain,
     });
-    return response.credentials ?? [];
+    if (!Array.isArray(response.credentials)) return [];
+    // Validate each credential has required fields
+    return response.credentials.filter(
+      (c: unknown): c is Credential =>
+        typeof c === 'object' && c !== null &&
+        typeof (c as Credential).username === 'string' &&
+        typeof (c as Credential).password === 'string'
+    );
   } catch {
     return [];
   }

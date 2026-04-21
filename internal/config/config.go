@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"strconv"
+	"strings"
 )
 
 type Config struct {
@@ -14,6 +15,7 @@ type Config struct {
 	TLSCert       string
 	TLSKey        string
 	LogLevel      string
+	CORSOrigins   []string
 
 	// SMS 2FA (Telnyx)
 	EnableSMS2FA   bool
@@ -34,6 +36,15 @@ func Load() *Config {
 		logLevel = "info"
 	}
 
+	var corsOrigins []string
+	if co := os.Getenv("CORS_ORIGINS"); co != "" {
+		for _, o := range strings.Split(co, ",") {
+			if trimmed := strings.TrimSpace(o); trimmed != "" {
+				corsOrigins = append(corsOrigins, trimmed)
+			}
+		}
+	}
+
 	return &Config{
 		Port:            port,
 		DatabaseURL:     os.Getenv("DATABASE_URL"),
@@ -41,6 +52,7 @@ func Load() *Config {
 		TLSCert:         os.Getenv("TLS_CERT"),
 		TLSKey:          os.Getenv("TLS_KEY"),
 		LogLevel:        logLevel,
+		CORSOrigins:     corsOrigins,
 		SidecarMode:     os.Getenv("SIDECAR_MODE") == "1",
 		ExtensionSecret: os.Getenv("EXTENSION_SECRET"),
 		EnableSMS2FA:    os.Getenv("ENABLE_SMS_2FA") == "true",

@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"crypto/rand"
+	"crypto/tls"
 	"encoding/hex"
 	"fmt"
 	"net/http"
@@ -64,11 +65,25 @@ func main() {
 	r := chi.NewRouter()
 
 	// Middleware stack
+	r.Use(api.PanicRecovery)
 	r.Use(middleware.RequestID)
 	r.Use(middleware.RealIP)
-	r.Use(middleware.Recoverer)
 	r.Use(middleware.Timeout(30 * time.Second))
+	r.Use(api.SecurityHeaders)
+	r.Use(api.RequestSizeLimit)
 	r.Use(jsonContentType)
+
+	// CORS — configurable via CORS_ORIGINS env var; no wildcard allowed
+	if len(cfg.CORSOrigins) > 0 {
+		r.Use(api.CORSMiddleware(cfg.CORSOrigins))
+	}
+
+	// CSRF protection for browser clients
+	r.Use(api.CSRFMiddleware)
+
+	// General rate limiter: 100 requests per minute per IP
+	generalLimiter := api.NewRateLimiter(100, 1*time.Minute)
+	r.Use(generalLimiter.RateLimit)
 
 	// Health check
 	r.Get("/health", func(w http.ResponseWriter, r *http.Request) {
@@ -148,6 +163,15 @@ func main() {
 		ReadTimeout:       30 * time.Second,
 		WriteTimeout:      30 * time.Second,
 		IdleTimeout:       120 * time.Second,
+	}
+
+	// Enforce TLS 1.3 minimum when TLS is configured
+	if cfg.TLSCert != "" && cfg.TLSKey != "" {
+		srv.TLSConfig = &tls.Config{
+			MinVersion: tls.VersionTLS13,
+			// TLS 1.3 cipher suites are not configurable in Go — all secure suites are used.
+			// Go 1.23+ enables X25519Kyber768 hybrid PQ key exchange by default.
+		}
 	}
 
 	// Graceful shutdown

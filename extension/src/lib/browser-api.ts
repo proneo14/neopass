@@ -80,3 +80,17 @@ export function extractDomain(url: string): string | null {
     return null;
   }
 }
+
+/**
+ * Strictly validate that two domains match (exact or subdomain).
+ * Prevents subdomain spoofing: "evil-example.com" must NOT match "example.com".
+ * Only "sub.example.com" matches "example.com".
+ */
+export function domainsMatch(credentialDomain: string, pageDomain: string): boolean {
+  if (!credentialDomain || !pageDomain) return false;
+  const cred = credentialDomain.toLowerCase();
+  const page = pageDomain.toLowerCase();
+  if (cred === page) return true;
+  // Subdomain match: page must end with ".cred"
+  return page.endsWith('.' + cred);
+}
