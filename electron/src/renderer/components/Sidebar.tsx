@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../store/authStore';
 
@@ -13,6 +13,11 @@ const adminItems = [
 export function Sidebar() {
   const { email, role, logout } = useAuthStore();
   const navigate = useNavigate();
+  const [storageBackend, setStorageBackend] = useState<'sqlite' | 'postgres'>('sqlite');
+
+  useEffect(() => {
+    window.api.storage.getBackend().then(setStorageBackend).catch(() => {});
+  }, []);
 
   const handleLogout = () => {
     logout();
@@ -48,7 +53,7 @@ export function Sidebar() {
           </NavLink>
         ))}
 
-        {role === 'admin' && (
+        {role === 'admin' && storageBackend === 'postgres' && (
           <>
             <div className="mx-3 mb-2" style={{ marginTop: 75 }}>
               <span className="text-[10px] font-semibold text-surface-500 uppercase tracking-widest">Organization</span>

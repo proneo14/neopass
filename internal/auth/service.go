@@ -80,9 +80,9 @@ type ServiceConfig struct {
 
 // Service provides authentication operations.
 type Service struct {
-	userRepo    *db.UserRepo
-	vaultRepo   *db.VaultRepo
-	orgRepo     *db.OrgRepo
+	userRepo    db.UserRepository
+	vaultRepo   db.VaultRepository
+	orgRepo     db.OrgRepository
 	signingKey  []byte // ML-DSA-65 private key
 	verifyKey   []byte // ML-DSA-65 public key
 	config      ServiceConfig
@@ -90,7 +90,7 @@ type Service struct {
 
 // NewService creates a new auth Service.
 // It generates an ML-DSA-65 keypair for JWT signing if keys are not provided.
-func NewService(userRepo *db.UserRepo, signingKey, verifyKey []byte, cfg ServiceConfig, optionalRepos ...interface{}) (*Service, error) {
+func NewService(userRepo db.UserRepository, signingKey, verifyKey []byte, cfg ServiceConfig, optionalRepos ...interface{}) (*Service, error) {
 	if signingKey == nil || verifyKey == nil {
 		var err error
 		verifyKey, signingKey, err = crypto.GenerateSigningKeyPair()
@@ -115,9 +115,9 @@ func NewService(userRepo *db.UserRepo, signingKey, verifyKey []byte, cfg Service
 	}
 	for _, r := range optionalRepos {
 		switch v := r.(type) {
-		case *db.VaultRepo:
+		case db.VaultRepository:
 			svc.vaultRepo = v
-		case *db.OrgRepo:
+		case db.OrgRepository:
 			svc.orgRepo = v
 		}
 	}

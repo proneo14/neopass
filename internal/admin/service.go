@@ -37,14 +37,14 @@ type DecryptedEntry struct {
 
 // Service provides admin operations.
 type Service struct {
-	orgRepo   *db.OrgRepo
-	userRepo  *db.UserRepo
-	vaultRepo *db.VaultRepo
-	auditRepo *db.AuditRepo
+	orgRepo   db.OrgRepository
+	userRepo  db.UserRepository
+	vaultRepo db.VaultRepository
+	auditRepo db.AuditRepository
 }
 
 // NewService creates a new admin Service.
-func NewService(orgRepo *db.OrgRepo, userRepo *db.UserRepo, vaultRepo *db.VaultRepo, auditRepo *db.AuditRepo) *Service {
+func NewService(orgRepo db.OrgRepository, userRepo db.UserRepository, vaultRepo db.VaultRepository, auditRepo db.AuditRepository) *Service {
 	return &Service{
 		orgRepo:   orgRepo,
 		userRepo:  userRepo,

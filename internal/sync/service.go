@@ -65,12 +65,12 @@ type PushResponse struct {
 
 // Service provides sync operations.
 type Service struct {
-	vaultRepo *db.VaultRepo
-	syncRepo  *db.SyncRepo
+	vaultRepo db.VaultRepository
+	syncRepo  db.SyncRepository
 }
 
 // NewService creates a new sync Service.
-func NewService(vaultRepo *db.VaultRepo, syncRepo *db.SyncRepo) *Service {
+func NewService(vaultRepo db.VaultRepository, syncRepo db.SyncRepository) *Service {
 	return &Service{
 		vaultRepo: vaultRepo,
 		syncRepo:  syncRepo,

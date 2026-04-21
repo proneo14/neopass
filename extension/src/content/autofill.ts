@@ -831,8 +831,11 @@ function fillFromOverlay(cred: Credential, detectedForms: FormInfo[]) {
 
 const SAVE_PROMPT_ID = 'qpm-save-prompt';
 
+/** Inline SVG for the LGI Pass shield logo */
+const LGI_LOGO_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#818cf8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="M9 12l2 2 4-4" stroke="#818cf8" stroke-width="2"/></svg>`;
+
 /**
- * Show a "Save this password?" banner at the top of the page.
+ * Show a compact "Save this password?" popup on the right side of the page.
  */
 function showSavePrompt(domain: string, username: string, password: string) {
   // Don't show if one is already visible
@@ -850,47 +853,87 @@ function showSavePrompt(domain: string, username: string, password: string) {
       all: initial;
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
     }
-    .qpm-save-banner {
+    .qpm-save-popup {
       position: fixed;
-      top: 0;
-      left: 0;
-      right: 0;
-      background: #1e293b;
-      border-bottom: 2px solid #818cf8;
-      padding: 12px 20px;
+      top: 12px;
+      right: 12px;
+      width: 280px;
+      background: #0f172a;
+      border: 1px solid #334155;
+      border-radius: 10px;
+      padding: 12px;
+      z-index: 2147483647;
+      box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+      animation: qpm-slide-in 0.2s ease-out;
+    }
+    @keyframes qpm-slide-in {
+      from { transform: translateX(100%); opacity: 0; }
+      to { transform: translateX(0); opacity: 1; }
+    }
+    .qpm-save-header {
       display: flex;
       align-items: center;
-      gap: 12px;
-      z-index: 2147483647;
-      box-shadow: 0 4px 12px rgba(0,0,0,0.3);
-      animation: qpm-slide-down 0.2s ease-out;
+      gap: 8px;
+      margin-bottom: 10px;
     }
-    @keyframes qpm-slide-down {
-      from { transform: translateY(-100%); }
-      to { transform: translateY(0); }
+    .qpm-save-logo {
+      display: flex;
+      align-items: center;
+      flex-shrink: 0;
     }
-    .qpm-save-icon { font-size: 20px; }
-    .qpm-save-text {
-      flex: 1;
-      color: #f1f5f9;
+    .qpm-save-title {
+      font-size: 11px;
+      font-weight: 600;
+      color: #818cf8;
+      letter-spacing: 0.02em;
+    }
+    .qpm-save-close {
+      margin-left: auto;
+      background: none;
+      border: none;
+      color: #64748b;
       font-size: 14px;
+      cursor: pointer;
+      padding: 0;
+      line-height: 1;
+      transition: color 0.15s;
+    }
+    .qpm-save-close:hover { color: #f1f5f9; }
+    .qpm-save-info {
+      margin-bottom: 10px;
+    }
+    .qpm-save-label {
+      color: #94a3b8;
+      font-size: 11px;
+      margin-bottom: 2px;
     }
     .qpm-save-user {
-      color: #818cf8;
-      font-weight: 600;
+      color: #f1f5f9;
+      font-size: 13px;
+      font-weight: 500;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
     }
     .qpm-save-domain {
-      color: #94a3b8;
-      font-size: 12px;
+      color: #64748b;
+      font-size: 10px;
+      margin-top: 2px;
+    }
+    .qpm-save-actions {
+      display: flex;
+      gap: 8px;
     }
     .qpm-btn {
-      padding: 6px 16px;
+      flex: 1;
+      padding: 6px 0;
       border-radius: 6px;
       border: none;
-      font-size: 13px;
+      font-size: 12px;
       font-weight: 500;
       cursor: pointer;
       transition: background 0.15s;
+      text-align: center;
     }
     .qpm-btn-save {
       background: #818cf8;
@@ -898,22 +941,44 @@ function showSavePrompt(domain: string, username: string, password: string) {
     }
     .qpm-btn-save:hover { background: #6366f1; }
     .qpm-btn-dismiss {
-      background: transparent;
+      background: #1e293b;
       color: #94a3b8;
+      border: 1px solid #334155;
     }
-    .qpm-btn-dismiss:hover { color: #f1f5f9; }
+    .qpm-btn-dismiss:hover { color: #f1f5f9; border-color: #475569; }
   `;
   shadow.appendChild(style);
 
   const container = document.createElement('div');
-  container.className = 'qpm-save-banner';
-  container.innerHTML = `
-    <span class="qpm-save-icon">🔐</span>
-    <div class="qpm-save-text">
-      Save password for <span class="qpm-save-user">${escapeHtml(username)}</span>?
-      <div class="qpm-save-domain">${escapeHtml(domain)}</div>
-    </div>
+  container.className = 'qpm-save-popup';
+
+  // Header with logo
+  const header = document.createElement('div');
+  header.className = 'qpm-save-header';
+  header.innerHTML = `
+    <span class="qpm-save-logo">${LGI_LOGO_SVG}</span>
+    <span class="qpm-save-title">LGI Pass</span>
   `;
+  const closeBtn = document.createElement('button');
+  closeBtn.className = 'qpm-save-close';
+  closeBtn.textContent = '\u00D7';
+  closeBtn.addEventListener('click', () => banner.remove());
+  header.appendChild(closeBtn);
+  container.appendChild(header);
+
+  // Credential info
+  const info = document.createElement('div');
+  info.className = 'qpm-save-info';
+  info.innerHTML = `
+    <div class="qpm-save-label">Save password for</div>
+    <div class="qpm-save-user">${escapeHtml(username)}</div>
+    <div class="qpm-save-domain">${escapeHtml(domain)}</div>
+  `;
+  container.appendChild(info);
+
+  // Action buttons
+  const actions = document.createElement('div');
+  actions.className = 'qpm-save-actions';
 
   const saveBtn = document.createElement('button');
   saveBtn.className = 'qpm-btn qpm-btn-save';
@@ -935,13 +1000,13 @@ function showSavePrompt(domain: string, username: string, password: string) {
     banner.remove();
   });
 
-  container.appendChild(saveBtn);
-  container.appendChild(dismissBtn);
+  actions.appendChild(saveBtn);
+  actions.appendChild(dismissBtn);
+  container.appendChild(actions);
   shadow.appendChild(container);
 
-  // Styling to push page content down isn't needed since we use fixed positioning
   banner.style.cssText =
-    'position:fixed;top:0;left:0;right:0;z-index:2147483647;';
+    'position:fixed;top:0;right:0;z-index:2147483647;pointer-events:auto;';
 
   document.body.appendChild(banner);
 
@@ -1134,6 +1199,23 @@ document.addEventListener(
   },
   true
 );
+
+/**
+ * Remove all LGI Pass UI from the page (panel, overlay, save prompt).
+ * Called when the vault is locked.
+ */
+export function clearAllUI() {
+  removePanel();
+  // Remove overlay
+  if (activeOverlay) {
+    activeOverlay.remove();
+    activeOverlay = null;
+    activeField = null;
+  }
+  // Remove save prompt
+  const savePrompt = document.getElementById(SAVE_PROMPT_ID);
+  if (savePrompt) savePrompt.remove();
+}
 
 /* ------------------------------------------------------------------ */
 /*  Helpers                                                            */

@@ -189,6 +189,19 @@ const api = {
       return ipcRenderer.invoke('admin:getAuditLog', token, orgId, filters);
     },
   },
+
+  storage: {
+    getBackend: (): Promise<'sqlite' | 'postgres'> =>
+      ipcRenderer.invoke('storage:getBackend'),
+    testPgConnection: (connectionString: string): Promise<{ success?: boolean; error?: string }> => {
+      validateString(connectionString, 'connectionString');
+      return ipcRenderer.invoke('storage:testPgConnection', connectionString);
+    },
+    migrateToPostgres: (databaseUrl: string): Promise<{ error?: string; users?: number; vault_entries?: number }> => {
+      validateString(databaseUrl, 'databaseUrl');
+      return ipcRenderer.invoke('storage:migrateToPostgres', databaseUrl);
+    },
+  },
 } as const;
 
 contextBridge.exposeInMainWorld('api', api);

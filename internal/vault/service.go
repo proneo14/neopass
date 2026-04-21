@@ -70,11 +70,11 @@ type ListFilters struct {
 // Service provides vault operations.
 // The server never decrypts vault entries — it stores and serves encrypted blobs.
 type Service struct {
-	vaultRepo *db.VaultRepo
+	vaultRepo db.VaultRepository
 }
 
 // NewService creates a new vault Service.
-func NewService(vaultRepo *db.VaultRepo) *Service {
+func NewService(vaultRepo db.VaultRepository) *Service {
 	return &Service{vaultRepo: vaultRepo}
 }
 

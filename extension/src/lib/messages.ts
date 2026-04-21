@@ -83,6 +83,10 @@ export interface ShowSavePromptMessage {
   password: string;
 }
 
+export interface VaultLockedMessage {
+  type: 'vaultLocked';
+}
+
 export type ExtensionMessage =
   | FormDetectedMessage
   | RequestCredentialsMessage
@@ -98,7 +102,8 @@ export type ExtensionMessage =
   | SecureCopyMessage
   | FillCredentialMessage
   | SavePromptMessage
-  | ShowSavePromptMessage;
+  | ShowSavePromptMessage
+  | VaultLockedMessage;
 
 export interface Credential {
   id: string;

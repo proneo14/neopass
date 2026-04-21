@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/tls"
+	"database/sql"
 	"encoding/hex"
 	"fmt"
 	"net/http"
@@ -39,9 +40,9 @@ func main() {
 	zerolog.SetGlobalLevel(level)
 	log.Logger = zerolog.New(os.Stdout).With().Timestamp().Caller().Logger()
 
-	// Database connection
+	// Database connection (PostgreSQL)
 	var database *db.DB
-	if cfg.DatabaseURL != "" {
+	if cfg.StorageBackend == "postgres" && cfg.DatabaseURL != "" {
 		var dbErr error
 		database, dbErr = db.New(context.Background(), cfg.DatabaseURL)
 		if dbErr != nil {
@@ -57,8 +58,8 @@ func main() {
 		if dbErr = database.RunMigrations(context.Background(), migrationsDir); dbErr != nil {
 			log.Fatal().Err(dbErr).Msg("failed to run migrations")
 		}
-	} else {
-		log.Warn().Msg("DATABASE_URL not set — running without database")
+	} else if cfg.StorageBackend == "postgres" {
+		log.Warn().Msg("DATABASE_URL not set — running without PostgreSQL database")
 	}
 
 	// Build router
@@ -98,8 +99,46 @@ func main() {
 	var vaultService *vault.Service
 	var adminService *admin.Service
 	var syncService *syncsvc.Service
-	var vaultRepo *db.VaultRepo
-	if database != nil {
+	var vaultRepo db.VaultRepository
+	var rawSQLiteDB *sql.DB // raw *sql.DB for migration support
+
+	if cfg.StorageBackend == "sqlite" {
+		// SQLite standalone mode
+		sqliteDB, sqlErr := db.NewSQLiteDB(cfg.SQLiteDBPath)
+		if sqlErr != nil {
+			log.Fatal().Err(sqlErr).Msg("failed to open sqlite database")
+		}
+		defer sqliteDB.Close()
+		rawSQLiteDB = sqliteDB.DB
+
+		sqliteMigrationsDir := cfg.MigrationsDir
+		if sqliteMigrationsDir == "" {
+			sqliteMigrationsDir = "migrations/sqlite"
+		}
+		if sqlErr = sqliteDB.RunMigrations(context.Background(), sqliteMigrationsDir); sqlErr != nil {
+			log.Fatal().Err(sqlErr).Msg("failed to run sqlite migrations")
+		}
+
+		userRepo := db.NewSQLiteUserRepo(sqliteDB.DB)
+		totpRepo := db.NewSQLiteTOTPRepo(sqliteDB.DB)
+		sqlVaultRepo := db.NewSQLiteVaultRepo(sqliteDB.DB)
+		vaultRepo = sqlVaultRepo
+		orgRepo := db.NewSQLiteOrgRepo(sqliteDB.DB)
+		auditRepo := db.NewSQLiteAuditRepo(sqliteDB.DB)
+		syncRepo := db.NewSQLiteSyncRepo(sqliteDB.DB)
+
+		var authErr error
+		authService, authErr = auth.NewService(userRepo, nil, nil, auth.ServiceConfig{}, vaultRepo, orgRepo)
+		if authErr != nil {
+			log.Fatal().Err(authErr).Msg("failed to create auth service")
+		}
+		totpService = auth.NewTOTPService(totpRepo, userRepo)
+		vaultService = vault.NewService(sqlVaultRepo)
+		adminService = admin.NewService(orgRepo, userRepo, sqlVaultRepo, auditRepo)
+		syncService = syncsvc.NewService(sqlVaultRepo, syncRepo)
+
+		log.Info().Str("path", cfg.SQLiteDBPath).Msg("running with SQLite backend")
+	} else if database != nil {
 		userRepo := db.NewUserRepo(database.Pool)
 		totpRepo := db.NewTOTPRepo(database.Pool)
 		vaultRepo = db.NewVaultRepo(database.Pool)
@@ -115,14 +154,15 @@ func main() {
 		vaultService = vault.NewService(vaultRepo)
 		adminService = admin.NewService(orgRepo, userRepo, vaultRepo, auditRepo)
 		syncService = syncsvc.NewService(vaultRepo, syncRepo)
+	}
 
-		if cfg.EnableSMS2FA {
-			smsService = auth.NewSMSService(auth.SMSConfig{
-				Enabled:    true,
-				APIKey:     cfg.TelnyxAPIKey,
-				FromNumber: cfg.TelnyxFromNum,
-			})
-		}
+	// SMS 2FA (works with any backend)
+	if cfg.EnableSMS2FA {
+		smsService = auth.NewSMSService(auth.SMSConfig{
+			Enabled:    true,
+			APIKey:     cfg.TelnyxAPIKey,
+			FromNumber: cfg.TelnyxFromNum,
+		})
 	}
 
 	// API v1 route group
@@ -132,12 +172,12 @@ func main() {
 		})
 
 		if authService != nil {
-			r.Mount("/", api.Router(authService, totpService, smsService, vaultService, adminService, syncService))
+			r.Mount("/", api.Router(authService, totpService, smsService, vaultService, adminService, syncService, cfg.StorageBackend, rawSQLiteDB))
 		}
 	})
 
 	// Extension bridge routes (for native messaging host)
-	if database != nil {
+	if vaultRepo != nil {
 		extSecret := cfg.ExtensionSecret
 		if extSecret == "" && cfg.SidecarMode {
 			// Generate a random secret if not provided in sidecar mode

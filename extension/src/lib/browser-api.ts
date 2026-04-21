@@ -67,6 +67,12 @@ export const browserAPI = {
       return (browser as any).browserAction.setBadgeBackgroundColor(details);
     },
   },
+
+  alarms: {
+    create: (name: string, alarmInfo: { periodInMinutes?: number; delayInMinutes?: number }) =>
+      browser.alarms.create(name, alarmInfo),
+    get onAlarm() { return browser.alarms.onAlarm; },
+  },
 };
 
 /**

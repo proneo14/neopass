@@ -1,5 +1,5 @@
 import { browserAPI, extractDomain } from '../lib/browser-api';
-import type { AutofillMessage, ShowSavePromptMessage, Credential } from '../lib/messages';
+import type { AutofillMessage, ShowSavePromptMessage, VaultLockedMessage, Credential } from '../lib/messages';
 import {
   detectLoginForms,
   autofill,
@@ -9,6 +9,7 @@ import {
   attachGlobalFocusListener,
   showSidePanel,
   resetPanelDismissed,
+  clearAllUI,
   watchFormSubmissions,
   handleShowSavePrompt,
   type FormInfo,
@@ -85,7 +86,15 @@ async function scanAndAttach() {
  * Handle messages from background / popup (e.g. "autofill this credential").
  */
 browserAPI.runtime.onMessage.addListener(
-  (message: AutofillMessage | ShowSavePromptMessage) => {
+  (message: AutofillMessage | ShowSavePromptMessage | VaultLockedMessage) => {
+    if (message.type === 'vaultLocked') {
+      // Vault was locked — clear all UI and cached credentials
+      currentCredentials = [];
+      clearAllUI();
+      console.debug('[QPM] vault locked — cleared UI and credentials');
+      return;
+    }
+
     if (message.type === 'autofill') {
       // Always re-scan the DOM to get current state
       const freshForms = detectLoginForms();

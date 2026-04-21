@@ -4,6 +4,9 @@
 build-server:
 	go build -trimpath -ldflags="-s -w" -o bin/server ./cmd/server/main.go
 
+build-standalone:
+	go build -trimpath -ldflags="-s -w" -o bin/server-standalone ./cmd/server/main.go
+
 build-nativehost:
 	go build -trimpath -ldflags="-s -w" -o bin/qpm-native-host ./cmd/nativehost/main.go
 
@@ -24,7 +27,7 @@ build-extension-edge:
 build-extensions: build-extension-chrome build-extension-firefox build-extension-edge
 
 # All targets
-build-all: build-server build-nativehost build-electron build-extensions
+build-all: build-server build-standalone build-nativehost build-electron build-extensions
 
 # Testing
 test:

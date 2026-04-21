@@ -40,12 +40,12 @@ type TOTPSetupResponse struct {
 
 // TOTPService provides 2FA operations.
 type TOTPService struct {
-	totpRepo *db.TOTPRepo
-	userRepo *db.UserRepo
+	totpRepo db.TOTPRepository
+	userRepo db.UserRepository
 }
 
 // NewTOTPService creates a new TOTPService.
-func NewTOTPService(totpRepo *db.TOTPRepo, userRepo *db.UserRepo) *TOTPService {
+func NewTOTPService(totpRepo db.TOTPRepository, userRepo db.UserRepository) *TOTPService {
 	return &TOTPService{
 		totpRepo: totpRepo,
 		userRepo: userRepo,

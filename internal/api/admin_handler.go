@@ -1,6 +1,8 @@
 package api
 
 import (
+	"context"
+	"database/sql"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -9,6 +11,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/rs/zerolog/log"
 
 	"github.com/password-manager/password-manager/internal/admin"
@@ -18,11 +21,17 @@ import (
 // AdminHandler handles admin HTTP endpoints.
 type AdminHandler struct {
 	adminService *admin.Service
+	sqliteDB     *sql.DB // nil when not using SQLite backend
 }
 
 // NewAdminHandler creates a new AdminHandler.
 func NewAdminHandler(adminService *admin.Service) *AdminHandler {
 	return &AdminHandler{adminService: adminService}
+}
+
+// SetSQLiteDB sets the SQLite database reference for migration support.
+func (h *AdminHandler) SetSQLiteDB(sqliteDB *sql.DB) {
+	h.sqliteDB = sqliteDB
 }
 
 // CreateOrg handles POST /api/v1/admin/orgs
@@ -530,4 +539,80 @@ func (h *AdminHandler) GetMyInvitations(w http.ResponseWriter, r *http.Request) 
 	}
 
 	writeJSON(w, http.StatusOK, results)
+}
+
+// TestPgConnection handles POST /api/v1/admin/test-pg-connection
+func (h *AdminHandler) TestPgConnection(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		DatabaseURL string `json:"database_url"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.DatabaseURL == "" {
+		writeError(w, http.StatusBadRequest, "database_url required")
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	defer cancel()
+
+	pool, err := pgxpool.New(ctx, req.DatabaseURL)
+	if err != nil {
+		writeJSON(w, http.StatusOK, map[string]string{"error": "Failed to connect: " + err.Error()})
+		return
+	}
+	defer pool.Close()
+
+	if err := pool.Ping(ctx); err != nil {
+		writeJSON(w, http.StatusOK, map[string]string{"error": "Ping failed: " + err.Error()})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]bool{"success": true})
+}
+
+// MigrateToPostgres handles POST /api/v1/admin/migrate-to-postgres
+func (h *AdminHandler) MigrateToPostgres(w http.ResponseWriter, r *http.Request) {
+	if h.sqliteDB == nil {
+		writeError(w, http.StatusBadRequest, "not running in SQLite mode")
+		return
+	}
+
+	var req struct {
+		DatabaseURL string `json:"database_url"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.DatabaseURL == "" {
+		writeError(w, http.StatusBadRequest, "database_url required")
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 120*time.Second)
+	defer cancel()
+
+	pool, err := pgxpool.New(ctx, req.DatabaseURL)
+	if err != nil {
+		writeJSON(w, http.StatusOK, map[string]string{"error": "Failed to connect: " + err.Error()})
+		return
+	}
+	defer pool.Close()
+
+	// Connect to PG and run migrations
+	pgDB, err := db.New(ctx, req.DatabaseURL)
+	if err != nil {
+		writeJSON(w, http.StatusOK, map[string]string{"error": "PG connection failed: " + err.Error()})
+		return
+	}
+	defer pgDB.Close()
+
+	if err := pgDB.RunMigrations(ctx, "migrations"); err != nil {
+		writeJSON(w, http.StatusOK, map[string]string{"error": "PG migrations failed: " + err.Error()})
+		return
+	}
+
+	// Migrate data
+	result, err := db.MigrateSQLiteToPg(ctx, h.sqliteDB, pgDB.Pool)
+	if err != nil {
+		writeJSON(w, http.StatusOK, map[string]string{"error": "Migration failed: " + err.Error()})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, result)
 }

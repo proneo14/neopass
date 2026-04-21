@@ -2,6 +2,8 @@ package config
 
 import (
 	"os"
+	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 )
@@ -16,6 +18,10 @@ type Config struct {
 	TLSKey        string
 	LogLevel      string
 	CORSOrigins   []string
+
+	// Storage backend: "postgres" or "sqlite"
+	StorageBackend string
+	SQLiteDBPath   string
 
 	// SMS 2FA (Telnyx)
 	EnableSMS2FA   bool
@@ -45,6 +51,16 @@ func Load() *Config {
 		}
 	}
 
+	storageBackend := os.Getenv("STORAGE_BACKEND")
+	if storageBackend == "" {
+		storageBackend = "postgres"
+	}
+
+	sqliteDBPath := os.Getenv("SQLITE_DB_PATH")
+	if sqliteDBPath == "" {
+		sqliteDBPath = filepath.Join(defaultAppDataDir(), "vault.db")
+	}
+
 	return &Config{
 		Port:            port,
 		DatabaseURL:     os.Getenv("DATABASE_URL"),
@@ -55,8 +71,29 @@ func Load() *Config {
 		CORSOrigins:     corsOrigins,
 		SidecarMode:     os.Getenv("SIDECAR_MODE") == "1",
 		ExtensionSecret: os.Getenv("EXTENSION_SECRET"),
+		StorageBackend:  storageBackend,
+		SQLiteDBPath:    sqliteDBPath,
 		EnableSMS2FA:    os.Getenv("ENABLE_SMS_2FA") == "true",
 		TelnyxAPIKey:    os.Getenv("TELNYX_API_KEY"),
 		TelnyxFromNum:   os.Getenv("TELNYX_FROM_NUMBER"),
+	}
+}
+
+// defaultAppDataDir returns the platform-specific default app data directory.
+func defaultAppDataDir() string {
+	const appName = "QuantumPasswordManager"
+	switch runtime.GOOS {
+	case "windows":
+		appData := os.Getenv("APPDATA")
+		if appData == "" {
+			appData = filepath.Join(os.Getenv("USERPROFILE"), "AppData", "Roaming")
+		}
+		return filepath.Join(appData, appName)
+	case "darwin":
+		home, _ := os.UserHomeDir()
+		return filepath.Join(home, "Library", "Application Support", appName)
+	default:
+		home, _ := os.UserHomeDir()
+		return filepath.Join(home, ".config", appName)
 	}
 }

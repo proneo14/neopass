@@ -58,12 +58,34 @@ async function startSidecar(): Promise<void> {
   sidecarPort = getRandomPort();
 
   try {
+    // Check for saved config (e.g. after SQLite→PostgreSQL migration)
+    const configPath = path.join(getAppDataDir(), 'config.json');
+    let savedBackend = 'sqlite';
+    let savedDbUrl = '';
+    if (fs.existsSync(configPath)) {
+      try {
+        const cfg = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+        if (cfg.storage_backend === 'postgres' && cfg.database_url) {
+          savedBackend = 'postgres';
+          savedDbUrl = cfg.database_url;
+        }
+      } catch { /* ignore corrupt config */ }
+    }
+
+    const sidecarEnv: Record<string, string> = {
+      ...process.env as Record<string, string>,
+      PORT: String(sidecarPort),
+      SIDECAR_MODE: '1',
+      STORAGE_BACKEND: savedBackend,
+    };
+    if (savedBackend === 'sqlite') {
+      sidecarEnv.SQLITE_DB_PATH = path.join(getAppDataDir(), 'vault.db');
+    } else {
+      sidecarEnv.DATABASE_URL = savedDbUrl;
+    }
+
     sidecarProcess = spawn(sidecarPath, [], {
-      env: {
-        ...process.env,
-        PORT: String(sidecarPort),
-        SIDECAR_MODE: '1',
-      },
+      env: sidecarEnv,
       stdio: ['pipe', 'pipe', 'pipe'],
     });
 
@@ -920,6 +942,82 @@ public class SecureClip {
     } catch (err) {
       return { success: false, error: (err as Error).message };
     }
+  });
+
+  // Storage backend IPC handlers
+  ipcMain.handle('storage:getBackend', () => {
+    if (backendUrl) return 'postgres';
+    // Check saved config
+    try {
+      const configPath = path.join(getAppDataDir(), 'config.json');
+      if (fs.existsSync(configPath)) {
+        const cfg = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+        if (cfg.storage_backend === 'postgres') return 'postgres';
+      }
+    } catch { /* ignore */ }
+    return 'sqlite';
+  });
+
+  ipcMain.handle('storage:testPgConnection', async (_event, connectionString: string) => {
+    const api = getApiBase();
+    if (!api) return { error: 'Backend not available' };
+    try {
+      const res = await fetch(`${api}/api/v1/admin/test-pg-connection`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ database_url: connectionString }),
+      });
+      return await res.json();
+    } catch { return { error: 'Failed to connect to backend' }; }
+  });
+
+  ipcMain.handle('storage:migrateToPostgres', async (_event, databaseUrl: string) => {
+    const api = getApiBase();
+    if (!api) return { error: 'Backend not available' };
+    try {
+      const res = await fetch(`${api}/api/v1/admin/migrate-to-postgres`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ database_url: databaseUrl }),
+      });
+      const result = await res.json();
+      if (!result.error) {
+        // Save config and restart sidecar with postgres backend
+        const configDir = getAppDataDir();
+        const configPath = path.join(configDir, 'config.json');
+        if (!fs.existsSync(configDir)) fs.mkdirSync(configDir, { recursive: true });
+        fs.writeFileSync(configPath, JSON.stringify({ storage_backend: 'postgres', database_url: databaseUrl }, null, 2), { mode: 0o600 });
+
+        // Rename SQLite file as backup
+        const sqlitePath = path.join(configDir, 'vault.db');
+        if (fs.existsSync(sqlitePath)) {
+          try { fs.renameSync(sqlitePath, sqlitePath + '.bak'); } catch { /* ignore */ }
+        }
+
+        // Restart sidecar with postgres config
+        stopSidecar();
+        sidecarPort = getRandomPort();
+        const sidecarPath = getSidecarPath();
+        if (fs.existsSync(sidecarPath)) {
+          sidecarProcess = spawn(sidecarPath, [], {
+            env: {
+              ...process.env,
+              PORT: String(sidecarPort),
+              SIDECAR_MODE: '1',
+              STORAGE_BACKEND: 'postgres',
+              DATABASE_URL: databaseUrl,
+            },
+            stdio: ['pipe', 'pipe', 'pipe'],
+          });
+          sidecarProcess.on('error', (err) => { console.error('[sidecar] restart error:', err.message); sidecarProcess = null; });
+          sidecarProcess.stdout?.on('data', (data: Buffer) => console.log(`[sidecar] ${data.toString().trim()}`));
+          sidecarProcess.stderr?.on('data', (data: Buffer) => console.error(`[sidecar] ${data.toString().trim()}`));
+          sidecarProcess.on('exit', (code) => { console.log(`[sidecar] exited with code ${code}`); sidecarProcess = null; });
+          await new Promise<void>((resolve) => setTimeout(resolve, 1500));
+        }
+      }
+      return result;
+    } catch { return { error: 'Migration failed' }; }
   });
 }
 

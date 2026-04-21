@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useAuthStore } from '../store/authStore';
 import { useVaultStore } from '../store/vaultStore';
 import { PasswordGenerator } from '../components/PasswordGenerator';
+import { OrgSetupWizard } from '../components/OrgSetupWizard';
 
 type AutoLockOption = '1' | '5' | '15' | '30' | '60' | 'never';
 
@@ -258,7 +259,8 @@ export function Settings() {
   const [newOrgName, setNewOrgName] = useState('');
   const [orgLoading, setOrgLoading] = useState(false);
   const [orgError, setOrgError] = useState('');
-
+  const [storageBackend, setStorageBackend] = useState<'sqlite' | 'postgres'>('sqlite');
+  const [showOrgSetup, setShowOrgSetup] = useState(false);
   useEffect(() => {
     (async () => {
       const available = await window.api.biometric.isAvailable();
@@ -269,6 +271,8 @@ export function Settings() {
       }
       setBiometricChecking(false);
     })();
+    // Fetch storage backend
+    window.api.storage.getBackend().then(setStorageBackend).catch(() => {});
   }, []);
 
   const handleBiometricToggle = async (enabled: boolean) => {
@@ -407,7 +411,33 @@ export function Settings() {
         <section>
           <h2 className="text-xs font-semibold text-surface-500 uppercase tracking-wider mb-3">Organization</h2>
           <div className="space-y-2">
-            {orgId ? (
+            {/* Storage mode indicator */}
+            <div className="px-4 py-3 rounded-md bg-surface-800">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm text-surface-200">Storage Mode</p>
+                  <p className="text-xs text-surface-500">{storageBackend === 'sqlite' ? 'Local (SQLite)' : 'Server (PostgreSQL)'}</p>
+                </div>
+                <span className={`text-xs px-2 py-0.5 rounded-full ${storageBackend === 'sqlite' ? 'bg-yellow-600/20 text-yellow-400' : 'bg-green-600/20 text-green-400'}`}>
+                  {storageBackend === 'sqlite' ? 'Standalone' : 'Connected'}
+                </span>
+              </div>
+            </div>
+
+            {storageBackend === 'sqlite' && !orgId ? (
+              <>
+                <p className="text-xs text-surface-500 px-1 mb-2">
+                  Organization features require PostgreSQL. Upgrade to enable admin panel, member management, and escrow recovery.
+                </p>
+                <button
+                  onClick={() => setShowOrgSetup(true)}
+                  className="w-full text-left px-4 py-3 rounded-md bg-surface-800 hover:bg-surface-700 text-sm text-accent-400 transition-colors flex items-center justify-between"
+                >
+                  Enable Organization Features
+                  <span className="text-surface-600">→</span>
+                </button>
+              </>
+            ) : orgId ? (
               <>
                 <div className="px-4 py-3 rounded-md bg-surface-800">
                   <div className="flex items-center justify-between">
@@ -586,6 +616,12 @@ export function Settings() {
 
       {showChangePw && <ChangePasswordModal onClose={() => setShowChangePw(false)} />}
       {show2fa && <TwoFactorModal onClose={() => setShow2fa(false)} />}
+      {showOrgSetup && (
+        <OrgSetupWizard
+          onClose={() => setShowOrgSetup(false)}
+          onComplete={() => setStorageBackend('postgres')}
+        />
+      )}
       {showBiometricEnroll && (
         <BiometricEnrollModal
           onClose={() => setShowBiometricEnroll(false)}

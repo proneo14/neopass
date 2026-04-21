@@ -18,7 +18,7 @@ import (
 // via the native messaging host. Session state (JWT + master key) is pushed
 // from the Electron app after login.
 type ExtensionHandler struct {
-	vaultRepo *db.VaultRepo
+	vaultRepo db.VaultRepository
 	secret    string // shared secret for authenticating requests from native host
 
 	mu       sync.RWMutex
@@ -42,7 +42,7 @@ type extensionCredential struct {
 	Matched  bool   `json:"matched"`
 }
 
-func NewExtensionHandler(vaultRepo *db.VaultRepo, secret string) *ExtensionHandler {
+func NewExtensionHandler(vaultRepo db.VaultRepository, secret string) *ExtensionHandler {
 	return &ExtensionHandler{
 		vaultRepo: vaultRepo,
 		secret:    secret,
@@ -250,6 +250,34 @@ func (h *ExtensionHandler) SaveCredential(w http.ResponseWriter, r *http.Request
 	var masterKey [32]byte
 	copy(masterKey[:], masterKeyBytes)
 	defer crypto.ZeroBytes(masterKey[:])
+
+	// Check for duplicate: same domain + username
+	existingEntries, listErr := h.vaultRepo.ListEntries(r.Context(), sess.UserID, db.VaultFilters{
+		EntryType: "login",
+	})
+	if listErr == nil {
+		for _, existing := range existingEntries {
+			plaintext, decErr := crypto.Decrypt(existing.EncryptedData, existing.Nonce, masterKey)
+			if decErr != nil {
+				continue
+			}
+			var loginEntry struct {
+				Username string `json:"username"`
+				URI      string `json:"uri"`
+			}
+			if json.Unmarshal(plaintext, &loginEntry) == nil {
+				if loginEntry.Username == body.Username && domainMatches(loginEntry.URI, body.Domain) {
+					crypto.ZeroBytes(plaintext)
+					writeJSON(w, http.StatusConflict, map[string]string{
+						"status": "duplicate",
+						"error":  "credential already exists for this user and domain",
+					})
+					return
+				}
+			}
+			crypto.ZeroBytes(plaintext)
+		}
+	}
 
 	// Build login entry JSON
 	loginData, _ := json.Marshal(map[string]string{

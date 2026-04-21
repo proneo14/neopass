@@ -1,6 +1,7 @@
 package api
 
 import (
+	"database/sql"
 	"encoding/json"
 	"net/http"
 	"time"
@@ -15,13 +16,18 @@ import (
 )
 
 // Router sets up all API v1 routes.
-func Router(authService *auth.Service, totpService *auth.TOTPService, smsService *auth.SMSService, vaultService *vault.Service, adminService *admin.Service, syncService *syncsvc.Service) chi.Router {
+// storageBackend should be "sqlite" or "postgres".
+// sqliteDB is the raw SQLite *sql.DB for migration support (nil when using postgres).
+func Router(authService *auth.Service, totpService *auth.TOTPService, smsService *auth.SMSService, vaultService *vault.Service, adminService *admin.Service, syncService *syncsvc.Service, storageBackend string, sqliteDB *sql.DB) chi.Router {
 	r := chi.NewRouter()
 
 	authHandler := NewAuthHandler(authService)
 	tfaHandler := NewTwoFactorHandler(totpService, smsService, authService)
 	vaultHandler := NewVaultHandler(vaultService)
 	adminHandler := NewAdminHandler(adminService)
+	if sqliteDB != nil {
+		adminHandler.SetSQLiteDB(sqliteDB)
+	}
 	syncHandler := NewSyncHandler(syncService)
 
 	// Rate limiter for auth endpoints: 5 requests per minute per IP
@@ -72,6 +78,18 @@ func Router(authService *auth.Service, totpService *auth.TOTPService, smsService
 
 		// Admin routes
 		r.Route("/admin", func(r chi.Router) {
+			// Storage migration endpoints (available on any backend)
+			r.Post("/test-pg-connection", adminHandler.TestPgConnection)
+			r.Post("/migrate-to-postgres", adminHandler.MigrateToPostgres)
+
+			if storageBackend == "sqlite" {
+				r.HandleFunc("/*", func(w http.ResponseWriter, r *http.Request) {
+					writeJSON(w, http.StatusNotImplemented, map[string]string{
+						"error": "Organization features require PostgreSQL. Go to Settings to upgrade.",
+					})
+				})
+				return
+			}
 			r.Get("/my-org", adminHandler.GetMyOrg)
 			r.Get("/my-invitations", adminHandler.GetMyInvitations)
 			r.Post("/orgs", adminHandler.CreateOrg)
@@ -103,7 +121,7 @@ func Router(authService *auth.Service, totpService *auth.TOTPService, smsService
 
 // ExtensionRouter sets up routes for the browser extension native messaging bridge.
 // These endpoints are localhost-only and protected by a shared secret.
-func ExtensionRouter(vaultRepo *db.VaultRepo, secret string) chi.Router {
+func ExtensionRouter(vaultRepo db.VaultRepository, secret string) chi.Router {
 	r := chi.NewRouter()
 	h := NewExtensionHandler(vaultRepo, secret)
 

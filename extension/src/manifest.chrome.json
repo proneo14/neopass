@@ -3,7 +3,7 @@
   "name": "LGI Pass",
   "version": "1.0.0",
   "description": "LGI Pass - secure password autofill",
-  "permissions": ["storage", "nativeMessaging", "activeTab", "scripting"],
+  "permissions": ["storage", "nativeMessaging", "activeTab", "scripting", "alarms"],
   "host_permissions": ["https://*/*", "http://*/*"],
   "background": {
     "service_worker": "background.js"
