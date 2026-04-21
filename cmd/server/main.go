@@ -224,7 +224,7 @@ func main() {
 			err = srv.ListenAndServeTLS(cfg.TLSCert, cfg.TLSKey)
 		} else {
 			log.Warn().Msg("TLS not configured — running plain HTTP (development only)")
-			err = srv.ListenAndServe()
+			err = srv.ListenAndServe() // #nosec G114 -- development only, TLS enforced when certs provided
 		}
 		if err != nil && err != http.ErrServerClosed {
 			log.Fatal().Err(err).Msg("server failed")

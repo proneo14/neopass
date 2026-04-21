@@ -2,7 +2,7 @@ import { app, BrowserWindow, ipcMain, Menu, session, dialog, clipboard } from 'e
 import path from 'path';
 import fs from 'fs';
 import nodeCrypto from 'crypto';
-import { spawn, ChildProcess } from 'child_process';
+import { spawn, execFileSync, ChildProcess } from 'child_process';
 import {
   isBiometricAvailable,
   isBiometricConfigured,
@@ -552,9 +552,8 @@ function registerIpcHandlers(): void {
         // Use native clipboard API via PowerShell to set the ExcludeClipboardContentFromMonitorProcessing flag.
         // This prevents Windows Clipboard History (Win+V) and cloud sync from capturing the password.
         // We pass the text via stdin (piped) to avoid shell injection.
-        const cp = require('child_process') as typeof import('child_process');
         try {
-          cp.execFileSync('powershell.exe', [
+          execFileSync('powershell.exe', [
             '-NoProfile', '-NonInteractive', '-Command',
             `$text = [Console]::In.ReadToEnd()
 Add-Type -TypeDefinition @'
@@ -598,9 +597,8 @@ public class SecureClip {
         // On macOS, set org.nspasteboard.ConcealedType to exclude from clipboard history
         // (Spotlight clipboard history in macOS Tahoe+, and third-party clipboard managers).
         // Uses ObjC bridge via osascript; password is piped via stdin to prevent injection.
-        const cp = require('child_process') as typeof import('child_process');
         try {
-          cp.execFileSync('osascript', ['-l', 'ObjC', '-e', [
+          execFileSync('osascript', ['-l', 'ObjC', '-e', [
             'ObjC.import("AppKit");',
             'var data = $.NSFileHandle.fileHandleWithStandardInput.readDataToEndOfFile;',
             'var text = $.NSString.alloc.initWithDataEncoding(data, $.NSUTF8StringEncoding);',

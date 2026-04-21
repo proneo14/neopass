@@ -13,7 +13,9 @@ const timeFormat = "2006-01-02T15:04:05.000Z"
 
 func newUUID() string {
 	b := make([]byte, 16)
-	_, _ = rand.Read(b)
+	if _, err := rand.Read(b); err != nil {
+		panic("crypto/rand failed: " + err.Error())
+	}
 	b[6] = (b[6] & 0x0f) | 0x40 // version 4
 	b[8] = (b[8] & 0x3f) | 0x80 // variant 10
 	return fmt.Sprintf("%08x-%04x-%04x-%04x-%012x",

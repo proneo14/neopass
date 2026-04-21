@@ -56,7 +56,8 @@ export function OrgSetupWizard({ onClose, onComplete }: { onClose: () => void; o
         setError(result.error);
         setStep('error');
       } else {
-        setMigrationResult(result);
+        const { error: _err, ...counts } = result;
+        setMigrationResult(counts as Record<string, number>);
         setStep('success');
       }
     } catch {
