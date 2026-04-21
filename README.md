@@ -283,6 +283,7 @@ Wire format uses hex-encoded encrypted data and nonces. Soft-deleted entries are
 | `TLS_CERT` | — | TLS certificate file path |
 | `TLS_KEY` | — | TLS private key file path |
 | `LOG_LEVEL` | `"info"` | Log level (`debug`, `info`, `warn`, `error`) |
+| `CORS_ORIGINS` | — | Comma-separated allowed CORS origins (no wildcard in production) |
 | `SIDECAR_MODE` | — | Set to `"1"` to enable sidecar mode (Electron-managed server) |
 | `EXTENSION_SECRET` | — | Shared secret for extension bridge auth (auto-generated in sidecar mode) |
 | `ENABLE_SMS_2FA` | `"false"` | Set to `"true"` to enable SMS 2FA via Telnyx |
@@ -383,15 +384,104 @@ The installer:
 ### Dockerfile
 
 Multi-stage build:
-1. **Builder**: `golang:1.24-alpine` — downloads dependencies, compiles Go binary with `CGO_ENABLED=0`
+1. **Builder**: `golang:1.24-alpine` — downloads dependencies, compiles server + native host binaries with `CGO_ENABLED=0`, `-trimpath`, `-ldflags="-s -w"`
 2. **Runtime**: `alpine:3.20` — minimal image with `ca-certificates` and `tzdata`, runs as non-root `appuser` (UID 1000)
 
 ### docker-compose.yml
 
 | Service | Image | Ports | Notes |
 |---------|-------|-------|-------|
-| `postgres` | `postgres:16-alpine` | internal only | Health-checked, persistent volume `pgdata` |
-| `server` | custom (Dockerfile) | `8444:8443` | Auto-runs migrations, depends on healthy postgres |
+| `postgres` | `postgres:16-alpine` | internal only | Health-checked, persistent volume `pgdata`, internal network |
+| `server` | custom (Dockerfile) | `8444:8443` | Auto-runs migrations, depends on healthy postgres, 512MB/1CPU limit, health-checked |
+
+Networks: `internal` bridge network isolates server ↔ postgres communication.
+
+### Self-Hosted Deployment
+
+```bash
+# Quick start
+docker compose up --build -d
+
+# With TLS (mount cert files)
+# 1. Place cert.pem and key.pem in a certs/ directory
+# 2. Update docker-compose.yml:
+#    volumes: - ./certs:/app/certs:ro
+#    environment:
+#      TLS_CERT: /app/certs/cert.pem
+#      TLS_KEY: /app/certs/key.pem
+
+# With custom CORS origins
+# environment:
+#   CORS_ORIGINS: "https://myapp.example.com,https://admin.example.com"
+
+# View logs
+docker compose logs -f server
+
+# Stop
+docker compose down
+
+# Reset database
+docker compose down -v
+```
+
+## Makefile
+
+| Target | Description |
+|--------|-------------|
+| `build-server` | Build Go API server binary |
+| `build-nativehost` | Build native messaging host binary |
+| `build-electron` | Build Electron desktop app |
+| `build-extension-chrome` | Build Chrome extension |
+| `build-extension-firefox` | Build Firefox extension |
+| `build-extension-edge` | Build Edge extension |
+| `build-extensions` | Build all browser extensions |
+| `build-all` | Build everything |
+| `test` | Run all tests (Go + Electron + Extension) |
+| `docker` | Build Docker images |
+| `docker-up` | Start containers (`docker compose up --build -d`) |
+| `docker-down` | Stop containers |
+| `lint` | Run all linters (golangci-lint + eslint) |
+| `package-extensions` | Zip extensions for store submission |
+| `dist-electron` | Package Electron app for current platform |
+| `dist-electron-win` | Package Electron app for Windows (NSIS) |
+| `dist-electron-mac` | Package Electron app for macOS (DMG) |
+| `dist-electron-linux` | Package Electron app for Linux (AppImage + deb) |
+| `clean` | Remove all build artifacts |
+
+## Distribution
+
+### Desktop App (Electron)
+
+Packaged with [electron-builder](https://www.electron.build/):
+
+| Platform | Format | Notes |
+|----------|--------|-------|
+| Windows | NSIS installer | Auto-registers native messaging host via PowerShell post-install |
+| macOS | DMG | Hardened runtime, code signing ready, notarization config included |
+| Linux | AppImage + .deb | Desktop integration, icon set |
+
+The installer bundles:
+- Electron shell + React renderer
+- Go sidecar binary (platform-specific, in `resources/bin/`)
+- Native messaging host binary (in `resources/bin/`)
+- Native host installer scripts (in `resources/scripts/`)
+
+### Browser Extensions
+
+| Target | Store | Package |
+|--------|-------|---------|
+| Chrome | Chrome Web Store | `lgi-pass-chrome.zip` |
+| Firefox | AMO (addons.mozilla.org) | `lgi-pass-firefox.zip` |
+| Edge | Edge Add-ons | `lgi-pass-edge.zip` |
+
+Build and package:
+```bash
+cd extension
+npm run package         # All three
+npm run package:chrome  # Chrome only
+npm run package:firefox # Firefox only
+npm run package:edge    # Edge only
+```
 
 ## Desktop App Features
 
@@ -463,6 +553,8 @@ Multi-stage build:
 ├── scripts/                     # Native host installers (bash + PowerShell)
 ├── Dockerfile                   # Multi-stage Go build
 ├── docker-compose.yml           # PostgreSQL + server
+├── Makefile                     # Build, test, lint, package targets
+├── SECURITY.md                  # Security policy and threat model
 └── go.mod                       # Go module definition
 ```
 

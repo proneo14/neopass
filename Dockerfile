@@ -12,7 +12,8 @@ RUN go mod download
 
 COPY . .
 
-RUN CGO_ENABLED=0 GOOS=linux go build -o /server ./cmd/server/main.go
+RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /server ./cmd/server/main.go && \
+    CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /qpm-native-host ./cmd/nativehost/main.go
 
 # Runtime stage
 FROM alpine:3.20
@@ -23,6 +24,7 @@ RUN apk add --no-cache ca-certificates tzdata && \
 WORKDIR /app
 
 COPY --from=builder /server .
+COPY --from=builder /qpm-native-host .
 COPY migrations/ ./migrations/
 
 USER appuser

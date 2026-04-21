@@ -15,6 +15,10 @@ extraResources:
     to: bin
     filter:
       - "**/*"
+  - from: ../scripts/
+    to: scripts
+    filter:
+      - "install-native-host.*"
 
 win:
   target:

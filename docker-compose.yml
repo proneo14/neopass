@@ -5,7 +5,8 @@ services:
       POSTGRES_DB: password_manager
       POSTGRES_USER: pmuser
       POSTGRES_PASSWORD: pmpass_dev_only
-    # No host port mapping needed — server connects internally
+    networks:
+      - internal
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -23,11 +24,31 @@ services:
       PORT: "8443"
       MIGRATIONS_DIR: migrations
       LOG_LEVEL: debug
+      TLS_CERT: ""
+      TLS_KEY: ""
+      CORS_ORIGINS: ""
     ports:
       - "8444:8443"
     depends_on:
       postgres:
         condition: service_healthy
+    networks:
+      - internal
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: "1.0"
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8443/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+
+networks:
+  internal:
+    driver: bridge
 
 volumes:
   pgdata:
