@@ -173,11 +173,11 @@ function createWindow(): void {
     minWidth: 800,
     minHeight: 600,
     title: 'LGI Pass',
-    backgroundColor: '#020617',
+    backgroundColor: '#0f172a',
     autoHideMenuBar: true,
     titleBarStyle: 'hidden',
     titleBarOverlay: {
-      color: '#020617',
+      color: '#0f172a',
       symbolColor: '#94a3b8',
       height: 36,
     },

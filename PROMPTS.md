@@ -1048,6 +1048,172 @@ README.md:
 
 ---
 
+### Prompt 18b — Standalone Build (SQLite, No Docker)
+
+```
+Add a standalone mode so LGI Pass can run as a single process with no external database or Docker dependency.
+Uses modernc.org/sqlite (pure Go, no CGO) as an embedded database alternative to PostgreSQL.
+
+Architecture:
+- Standalone mode: Electron → Go sidecar (embedded SQLite) — no PostgreSQL needed
+- Server mode: Go server → PostgreSQL — existing multi-user/org deployment (unchanged)
+- The mode is selected via STORAGE_BACKEND env var ("sqlite" or "postgres", default "postgres")
+
+1. Add SQLite dependency:
+   - go get modernc.org/sqlite
+   - go get github.com/jmoiron/sqlx (optional, for consistent query interface)
+
+2. Create internal/db/sqlite.go:
+   - NewSQLiteDB(dbPath string) → opens/creates SQLite file at dbPath
+   - Default path: %APPDATA%/QuantumPasswordManager/vault.db (Windows),
+     ~/Library/Application Support/QuantumPasswordManager/vault.db (macOS),
+     ~/.config/QuantumPasswordManager/vault.db (Linux)
+   - Run migrations on startup (embed the SQL via Go embed)
+   - Enable WAL mode: PRAGMA journal_mode=WAL
+   - Enable foreign keys: PRAGMA foreign_keys=ON
+   - Set busy timeout: PRAGMA busy_timeout=5000
+   - File permissions: 0600 (owner read/write only)
+
+3. Create migrations/sqlite/001_initial.sql:
+   - Same schema as PostgreSQL but with SQLite syntax:
+     - UUID columns → TEXT with CHECK(length(id) = 36)
+     - BYTEA → BLOB
+     - TIMESTAMPTZ → TEXT (ISO 8601 format)
+     - SERIAL → INTEGER PRIMARY KEY AUTOINCREMENT
+     - JSONB → TEXT (store JSON as text, parse in Go)
+     - gen_random_uuid() → generate UUIDs in Go before insert
+     - No CREATE EXTENSION statements
+   - Include all tables: users, organizations, org_members, folders, vault_entries,
+     totp_secrets, shared_2fa, recovery_codes, sessions, audit_log, sync_cursors, invitations
+
+4. Create internal/db/repository_interface.go:
+   - Define Go interfaces for every repository:
+     - UserRepo interface { CreateUser, GetUserByEmail, GetUserByID, UpdateUser, ... }
+     - VaultRepo interface { CreateEntry, GetEntry, ListEntries, UpdateEntry, DeleteEntry, ... }
+     - OrgRepo interface { CreateOrg, GetOrg, AddMember, GetMembers, GetEscrow, ... }
+     - AuditRepo interface { LogAction, GetAuditLog, ... }
+     - SyncRepo interface { GetCursor, UpdateCursor, GetChangedEntries, ... }
+     - TOTPRepo interface { SaveSecret, GetSecret, ShareSecret, ClaimShared, ... }
+     - SessionRepo interface { CreateSession, GetSession, DeleteSession, ... }
+   - Both PostgreSQL and SQLite implementations satisfy these interfaces
+
+5. Refactor internal/db/postgres.go:
+   - Rename concrete repo structs to include "Pg" prefix (PgUserRepo, PgVaultRepo, etc.)
+   - Ensure they implement the new interfaces
+   - No changes to SQL queries — PostgreSQL code stays as-is
+
+6. Create internal/db/sqlite_repos.go:
+   - SQLite implementations of all repository interfaces
+   - Adapt queries for SQLite syntax differences:
+     - $1, $2 → ?1, ?2 (or just ?)
+     - NOW() → datetime('now')
+     - RETURNING → use LastInsertId() or separate SELECT
+     - ILIKE → LIKE (SQLite LIKE is case-insensitive for ASCII)
+     - INTERVAL → datetime('now', '-5 minutes')
+   - Generate UUIDs in Go (crypto/rand) before insert
+
+7. Update internal/config/config.go:
+   - Add StorageBackend field: "sqlite" | "postgres" (env: STORAGE_BACKEND, default: "postgres")
+   - Add SQLiteDBPath field (env: SQLITE_DB_PATH, default: platform-specific app data dir)
+   - When StorageBackend == "sqlite", DATABASE_URL is not required
+
+8. Update cmd/server/main.go:
+   - Check config.StorageBackend
+   - If "sqlite": call NewSQLiteDB(config.SQLiteDBPath), run SQLite migrations
+   - If "postgres": existing PostgreSQL setup (unchanged)
+   - Pass repository interfaces (not concrete types) to services and handlers
+
+9. Update electron/src/main/index.ts (sidecar spawning):
+   - When spawning the Go sidecar, set STORAGE_BACKEND=sqlite in the child process env
+   - Set SQLITE_DB_PATH to the app data directory
+   - No need to check for or start PostgreSQL
+   - The sidecar binary is fully self-contained
+
+10. Standalone installer (electron-builder):
+    - The packaged app includes: Electron shell + Go sidecar binary + native host binary
+    - No Docker, no PostgreSQL, no external dependencies
+    - First launch: Go sidecar creates vault.db, runs migrations, starts serving
+    - User registers → vault created locally → everything works offline
+
+11. SQLite → PostgreSQL migration (org mode activation):
+    - When user is on SQLite (standalone) and activates org mode from Settings:
+      a. App shows "Organization features require a PostgreSQL database" dialog
+      b. Dialog has two options:
+         - "Use Docker" → shows docker run command to start PostgreSQL container:
+           docker run -d --name lgipass-db -e POSTGRES_DB=password_manager
+             -e POSTGRES_USER=pmuser -e POSTGRES_PASSWORD=<generated>
+             -p 5432:5432 postgres:16-alpine
+         - "Connect existing" → form fields: host, port, database, username, password
+      c. App tests the PostgreSQL connection before proceeding
+      d. Migration wizard:
+         - Reads all data from SQLite (users, vault_entries, folders, sessions, etc.)
+         - Runs PostgreSQL migrations (001_initial.sql, 002_admin.sql, 003_sync.sql)
+         - Inserts all SQLite data into PostgreSQL tables
+         - Verifies row counts match
+         - Shows migration summary with entry count
+      e. On success:
+         - Writes DATABASE_URL to app config file (%APPDATA%/QuantumPasswordManager/config.json)
+         - Updates STORAGE_BACKEND to "postgres" in config
+         - Restarts the sidecar with new config
+         - SQLite file is kept as backup (renamed vault.db.bak)
+         - Org features (admin panel, invite, escrow) are now available
+      f. On failure: rollback, keep using SQLite, show error
+
+    - Create internal/db/migrate_sqlite_to_pg.go:
+      - MigrateSQLiteToPg(sqliteDB, pgDB) → reads all tables from SQLite, bulk inserts into PG
+      - Runs inside a PostgreSQL transaction — atomic (all or nothing)
+      - Handles type conversions: TEXT timestamps → TIMESTAMPTZ, TEXT UUIDs → UUID, BLOB → BYTEA
+
+    - Create electron/src/renderer/components/OrgSetupWizard.tsx:
+      - Step 1: "Organization features require PostgreSQL" explanation
+      - Step 2: Docker auto-setup or manual connection form
+      - Step 3: Connection test (green checkmark / red error)
+      - Step 4: Data migration progress bar
+      - Step 5: Success — "You can now create or join an organization"
+
+    - Add IPC handler in electron/src/main/index.ts:
+      - 'test-pg-connection' → sidecar tests the DATABASE_URL
+      - 'migrate-to-postgres' → triggers MigrateSQLiteToPg + sidecar restart
+      - 'get-storage-backend' → returns current backend ("sqlite" or "postgres")
+
+    - Update Settings page (electron/src/renderer/pages/Settings.tsx):
+      - Show current storage mode: "Local (SQLite)" or "Server (PostgreSQL)"
+      - If SQLite: show "Enable Organization Features" button → opens OrgSetupWizard
+      - If PostgreSQL: show connection info (host:port/dbname), "Create Organization" button
+
+12. Org features gating:
+    - When STORAGE_BACKEND=sqlite, admin API routes return 501 Not Implemented
+      with message: "Organization features require PostgreSQL. Go to Settings to upgrade."
+    - The Admin nav link in the sidebar is hidden when on SQLite
+    - The "Create Organization" option in Settings only appears after migration to PostgreSQL
+    - All personal vault features work identically on both backends
+
+13. Backup & portability:
+    - SQLite mode: vault.db is the entire database — user can copy/backup the file
+    - PostgreSQL mode: standard pg_dump for backup
+    - Future: Add export-to-SQLite for users who want to go back to standalone
+    - The .db file itself is NOT encrypted at rest (entries inside are AES-256-GCM encrypted)
+    - For full-file encryption, optionally integrate SQLCipher in the future
+
+14. Concurrent access:
+    - SQLite WAL mode handles Electron + native host reading simultaneously
+    - Single-writer limitation is fine for single-user standalone mode
+
+15. Build targets (update Makefile):
+    - build-standalone: go build -tags sqlite -o bin/server-standalone cmd/server/main.go
+    - The sqlite build tag can optionally gate the SQLite code so the server-mode binary stays lean
+    - build-all now includes build-standalone
+
+Environment variables summary for standalone:
+  STORAGE_BACKEND=sqlite
+  SQLITE_DB_PATH=/path/to/vault.db  (optional, has platform defaults)
+  PORT=0                              (random port in sidecar mode)
+  SIDECAR_MODE=1
+  TLS_CERT / TLS_KEY                  (optional for local-only)
+```
+
+---
+
 ### Prompt 19 — Testing Suite
 
 ```
