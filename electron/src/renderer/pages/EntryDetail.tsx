@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { PasswordGenerator } from '../components/PasswordGenerator';
 import { ENTRY_TYPE_ICONS, ENTRY_TYPE_LABELS } from '../types/vault';
 import { useVaultStore } from '../store/vaultStore';
@@ -10,6 +10,14 @@ const FIELD_LABELS: Record<string, string> = {
   notes: 'Notes', content: 'Content', number: 'Card Number', expiry: 'Expiry',
   cvv: 'CVV', cardholder: 'Cardholder', firstName: 'First Name', lastName: 'Last Name',
   email: 'Email', phone: 'Phone', address: 'Address',
+};
+
+/** Fixed display order per entry type (fields not listed here appear at the end). */
+const FIELD_ORDER: Record<string, string[]> = {
+  login: ['uri', 'username', 'email', 'password', 'notes'],
+  secure_note: ['content', 'notes'],
+  credit_card: ['number', 'expiry', 'cvv', 'cardholder', 'notes'],
+  identity: ['firstName', 'lastName', 'email', 'phone', 'address', 'notes'],
 };
 
 const SENSITIVE_FIELDS = new Set(['password', 'cvv', 'number', 'content']);
@@ -35,11 +43,13 @@ function CopyButton({ value, sensitive = false }: { value: string; sensitive?: b
 export function EntryDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const { entries, entryFields, updateEntryFields, updateEntry } = useVaultStore();
+  const location = useLocation();
+  const { entries, entryFields, updateEntryFields, updateEntry, removeEntry } = useVaultStore();
   const { token, masterKeyHex } = useAuthStore();
-  const [editing, setEditing] = useState(false);
+  const [editing, setEditing] = useState(!!(location.state as { edit?: boolean } | null)?.edit);
   const [showGenerator, setShowGenerator] = useState(false);
   const [revealedFields, setRevealedFields] = useState<Set<string>>(new Set());
+  const [confirmDelete, setConfirmDelete] = useState(false);
 
   const vaultEntry = id ? entries.find((e) => e.id === id) : null;
   const fields = id ? entryFields[id] : null;
@@ -58,7 +68,14 @@ export function EntryDetail() {
 
   const entryType = vaultEntry.entry_type;
   const [editFields, setEditFields] = useState(fields);
-  const fieldOrder = Object.keys(fields);
+
+  // Fixed field display order: use the type-specific order, then any remaining keys
+  const typeOrder = FIELD_ORDER[entryType] ?? [];
+  const allKeys = Object.keys(fields);
+  const fieldOrder = [
+    ...typeOrder.filter((k) => allKeys.includes(k)),
+    ...allKeys.filter((k) => !typeOrder.includes(k) && k !== 'name'),
+  ];
 
   const toggleReveal = (field: string) => {
     setRevealedFields((prev) => {
@@ -216,6 +233,40 @@ export function EntryDetail() {
       <div className="mt-6 pt-4 border-t border-surface-800 flex gap-6 text-xs text-surface-600">
         <span>Created: {formatDate(vaultEntry.created_at)}</span>
         <span>Modified: {formatDate(vaultEntry.updated_at)}</span>
+      </div>
+
+      {/* Delete */}
+      <div className="mt-6 pt-4 border-t border-surface-800">
+        {!confirmDelete ? (
+          <button
+            onClick={() => setConfirmDelete(true)}
+            className="text-sm text-red-400 hover:text-red-300 transition-colors"
+          >
+            Delete entry
+          </button>
+        ) : (
+          <div className="flex items-center gap-3">
+            <span className="text-sm text-red-400">Delete this entry?</span>
+            <button
+              onClick={async () => {
+                if (token && id) {
+                  await window.api.vault.delete(token, id);
+                  removeEntry(id);
+                  navigate('/vault');
+                }
+              }}
+              className="px-3 py-1 rounded-md bg-red-600 hover:bg-red-500 text-white text-sm font-medium transition-colors"
+            >
+              Confirm
+            </button>
+            <button
+              onClick={() => setConfirmDelete(false)}
+              className="px-3 py-1 rounded-md bg-surface-800 hover:bg-surface-700 text-surface-400 text-sm transition-colors"
+            >
+              Cancel
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );

@@ -497,7 +497,7 @@ export function Vault() {
             setContextMenu(null);
           }}
           onEdit={() => {
-            navigate(`/vault/${contextMenu.entryId}`);
+            navigate(`/vault/${contextMenu.entryId}`, { state: { edit: true } });
             setContextMenu(null);
           }}
           onDelete={async () => {
