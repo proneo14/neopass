@@ -40,18 +40,18 @@ type Invitation struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 
-// OrgRepo provides database operations for organizations.
-type OrgRepo struct {
+// PgOrgRepo provides database operations for organizations (PostgreSQL).
+type PgOrgRepo struct {
 	pool *pgxpool.Pool
 }
 
-// NewOrgRepo creates a new OrgRepo.
-func NewOrgRepo(pool *pgxpool.Pool) *OrgRepo {
-	return &OrgRepo{pool: pool}
+// NewPgOrgRepo creates a new PgOrgRepo.
+func NewPgOrgRepo(pool *pgxpool.Pool) *PgOrgRepo {
+	return &PgOrgRepo{pool: pool}
 }
 
 // CreateOrg inserts a new organization.
-func (r *OrgRepo) CreateOrg(ctx context.Context, name string, orgPubKey, encOrgPrivKey []byte) (Organization, error) {
+func (r *PgOrgRepo) CreateOrg(ctx context.Context, name string, orgPubKey, encOrgPrivKey []byte) (Organization, error) {
 	var org Organization
 	err := r.pool.QueryRow(ctx,
 		`INSERT INTO organizations (name, org_public_key, encrypted_org_private_key)
@@ -66,7 +66,7 @@ func (r *OrgRepo) CreateOrg(ctx context.Context, name string, orgPubKey, encOrgP
 }
 
 // GetOrg retrieves an organization by ID.
-func (r *OrgRepo) GetOrg(ctx context.Context, orgID string) (Organization, error) {
+func (r *PgOrgRepo) GetOrg(ctx context.Context, orgID string) (Organization, error) {
 	var org Organization
 	err := r.pool.QueryRow(ctx,
 		`SELECT id, name, org_public_key, encrypted_org_private_key, policy, created_at
@@ -82,7 +82,7 @@ func (r *OrgRepo) GetOrg(ctx context.Context, orgID string) (Organization, error
 }
 
 // AddMember adds a user to an organization.
-func (r *OrgRepo) AddMember(ctx context.Context, orgID, userID, role string, escrowBlob []byte) error {
+func (r *PgOrgRepo) AddMember(ctx context.Context, orgID, userID, role string, escrowBlob []byte) error {
 	_, err := r.pool.Exec(ctx,
 		`INSERT INTO org_members (org_id, user_id, role, escrow_blob)
 		 VALUES ($1, $2, $3, $4)`,
@@ -95,7 +95,7 @@ func (r *OrgRepo) AddMember(ctx context.Context, orgID, userID, role string, esc
 }
 
 // GetMember retrieves a single org membership.
-func (r *OrgRepo) GetMember(ctx context.Context, orgID, userID string) (OrgMember, error) {
+func (r *PgOrgRepo) GetMember(ctx context.Context, orgID, userID string) (OrgMember, error) {
 	var m OrgMember
 	err := r.pool.QueryRow(ctx,
 		`SELECT org_id, user_id, role, joined_at FROM org_members WHERE org_id = $1 AND user_id = $2`,
@@ -111,7 +111,7 @@ func (r *OrgRepo) GetMember(ctx context.Context, orgID, userID string) (OrgMembe
 }
 
 // GetMemberEscrow retrieves the escrow blob for a member.
-func (r *OrgRepo) GetMemberEscrow(ctx context.Context, orgID, userID string) ([]byte, error) {
+func (r *PgOrgRepo) GetMemberEscrow(ctx context.Context, orgID, userID string) ([]byte, error) {
 	var blob []byte
 	err := r.pool.QueryRow(ctx,
 		`SELECT escrow_blob FROM org_members WHERE org_id = $1 AND user_id = $2`,
@@ -127,7 +127,7 @@ func (r *OrgRepo) GetMemberEscrow(ctx context.Context, orgID, userID string) ([]
 }
 
 // ListMembers returns all members of an organization.
-func (r *OrgRepo) ListMembers(ctx context.Context, orgID string) ([]OrgMember, error) {
+func (r *PgOrgRepo) ListMembers(ctx context.Context, orgID string) ([]OrgMember, error) {
 	rows, err := r.pool.Query(ctx,
 		`SELECT om.org_id, om.user_id, u.email, om.role, om.joined_at
 		 FROM org_members om
@@ -152,7 +152,7 @@ func (r *OrgRepo) ListMembers(ctx context.Context, orgID string) ([]OrgMember, e
 }
 
 // RemoveMember removes a user from an organization.
-func (r *OrgRepo) RemoveMember(ctx context.Context, orgID, userID string) error {
+func (r *PgOrgRepo) RemoveMember(ctx context.Context, orgID, userID string) error {
 	tag, err := r.pool.Exec(ctx,
 		`DELETE FROM org_members WHERE org_id = $1 AND user_id = $2`,
 		orgID, userID,
@@ -167,7 +167,7 @@ func (r *OrgRepo) RemoveMember(ctx context.Context, orgID, userID string) error 
 }
 
 // UpdateEscrowBlob updates the escrow blob for a member.
-func (r *OrgRepo) UpdateEscrowBlob(ctx context.Context, orgID, userID string, escrowBlob []byte) error {
+func (r *PgOrgRepo) UpdateEscrowBlob(ctx context.Context, orgID, userID string, escrowBlob []byte) error {
 	tag, err := r.pool.Exec(ctx,
 		`UPDATE org_members SET escrow_blob = $3 WHERE org_id = $1 AND user_id = $2`,
 		orgID, userID, escrowBlob,
@@ -183,7 +183,7 @@ func (r *OrgRepo) UpdateEscrowBlob(ctx context.Context, orgID, userID string, es
 
 // CreateInvitation creates an organization invitation.
 // If a pending invitation already exists for this org+email, it is replaced.
-func (r *OrgRepo) CreateInvitation(ctx context.Context, orgID, email, role, invitedBy string) (Invitation, error) {
+func (r *PgOrgRepo) CreateInvitation(ctx context.Context, orgID, email, role, invitedBy string) (Invitation, error) {
 	// Delete any existing pending invitations for the same org+email
 	_, _ = r.pool.Exec(ctx,
 		`DELETE FROM invitations WHERE org_id = $1 AND email = $2 AND accepted = false`,
@@ -204,7 +204,7 @@ func (r *OrgRepo) CreateInvitation(ctx context.Context, orgID, email, role, invi
 }
 
 // GetPendingInvitation retrieves a pending invitation for a user by org and email.
-func (r *OrgRepo) GetPendingInvitation(ctx context.Context, orgID, email string) (Invitation, error) {
+func (r *PgOrgRepo) GetPendingInvitation(ctx context.Context, orgID, email string) (Invitation, error) {
 	var inv Invitation
 	err := r.pool.QueryRow(ctx,
 		`SELECT id, org_id, email, role, invited_by, accepted, created_at
@@ -223,7 +223,7 @@ func (r *OrgRepo) GetPendingInvitation(ctx context.Context, orgID, email string)
 }
 
 // MarkInvitationAccepted marks an invitation as accepted.
-func (r *OrgRepo) MarkInvitationAccepted(ctx context.Context, invID string) error {
+func (r *PgOrgRepo) MarkInvitationAccepted(ctx context.Context, invID string) error {
 	_, err := r.pool.Exec(ctx,
 		`UPDATE invitations SET accepted = true WHERE id = $1`, invID,
 	)
@@ -231,7 +231,7 @@ func (r *OrgRepo) MarkInvitationAccepted(ctx context.Context, invID string) erro
 }
 
 // ListInvitations returns all invitations for an organization.
-func (r *OrgRepo) ListInvitations(ctx context.Context, orgID string) ([]Invitation, error) {
+func (r *PgOrgRepo) ListInvitations(ctx context.Context, orgID string) ([]Invitation, error) {
 	rows, err := r.pool.Query(ctx,
 		`SELECT id, org_id, email, role, invited_by, accepted, created_at
 		 FROM invitations WHERE org_id = $1 ORDER BY created_at DESC`, orgID,
@@ -253,7 +253,7 @@ func (r *OrgRepo) ListInvitations(ctx context.Context, orgID string) ([]Invitati
 }
 
 // SetOrgPolicy updates the policy JSONB column on an organization.
-func (r *OrgRepo) SetOrgPolicy(ctx context.Context, orgID string, policy json.RawMessage) error {
+func (r *PgOrgRepo) SetOrgPolicy(ctx context.Context, orgID string, policy json.RawMessage) error {
 	tag, err := r.pool.Exec(ctx,
 		`UPDATE organizations SET policy = $2 WHERE id = $1`,
 		orgID, policy,
@@ -268,7 +268,7 @@ func (r *OrgRepo) SetOrgPolicy(ctx context.Context, orgID string, policy json.Ra
 }
 
 // GetUserOrg returns the organization membership for a user (first org found).
-func (r *OrgRepo) GetUserOrg(ctx context.Context, userID string) (OrgMember, Organization, error) {
+func (r *PgOrgRepo) GetUserOrg(ctx context.Context, userID string) (OrgMember, Organization, error) {
 	var m OrgMember
 	var org Organization
 	err := r.pool.QueryRow(ctx,
@@ -291,7 +291,7 @@ func (r *OrgRepo) GetUserOrg(ctx context.Context, userID string) (OrgMember, Org
 }
 
 // GetInvitationsByEmail returns all pending invitations for an email address.
-func (r *OrgRepo) GetInvitationsByEmail(ctx context.Context, email string) ([]Invitation, error) {
+func (r *PgOrgRepo) GetInvitationsByEmail(ctx context.Context, email string) ([]Invitation, error) {
 	rows, err := r.pool.Query(ctx,
 		`SELECT i.id, i.org_id, i.email, i.role, i.invited_by, i.accepted, i.created_at
 		 FROM invitations i

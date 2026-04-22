@@ -15,18 +15,18 @@ type SyncCursor struct {
 	LastSyncAt time.Time `json:"last_sync_at"`
 }
 
-// SyncRepo provides database operations for sync cursors.
-type SyncRepo struct {
+// PgSyncRepo provides database operations for sync cursors (PostgreSQL).
+type PgSyncRepo struct {
 	pool *pgxpool.Pool
 }
 
-// NewSyncRepo creates a new SyncRepo.
-func NewSyncRepo(pool *pgxpool.Pool) *SyncRepo {
-	return &SyncRepo{pool: pool}
+// NewPgSyncRepo creates a new PgSyncRepo.
+func NewPgSyncRepo(pool *pgxpool.Pool) *PgSyncRepo {
+	return &PgSyncRepo{pool: pool}
 }
 
 // GetSyncCursor retrieves the last sync timestamp for a user/device pair.
-func (r *SyncRepo) GetSyncCursor(ctx context.Context, userID, deviceID string) (time.Time, error) {
+func (r *PgSyncRepo) GetSyncCursor(ctx context.Context, userID, deviceID string) (time.Time, error) {
 	var lastSync time.Time
 	err := r.pool.QueryRow(ctx,
 		`SELECT last_sync_at FROM sync_cursors WHERE user_id = $1 AND device_id = $2`,
@@ -40,7 +40,7 @@ func (r *SyncRepo) GetSyncCursor(ctx context.Context, userID, deviceID string) (
 }
 
 // UpsertSyncCursor creates or updates a sync cursor.
-func (r *SyncRepo) UpsertSyncCursor(ctx context.Context, userID, deviceID string, syncAt time.Time) error {
+func (r *PgSyncRepo) UpsertSyncCursor(ctx context.Context, userID, deviceID string, syncAt time.Time) error {
 	_, err := r.pool.Exec(ctx,
 		`INSERT INTO sync_cursors (user_id, device_id, last_sync_at)
 		 VALUES ($1, $2, $3)

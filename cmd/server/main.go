@@ -141,12 +141,12 @@ func main() {
 
 		log.Info().Str("path", cfg.SQLiteDBPath).Msg("running with SQLite backend")
 	} else if database != nil {
-		userRepo := db.NewUserRepo(database.Pool)
-		totpRepo := db.NewTOTPRepo(database.Pool)
-		vaultRepo = db.NewVaultRepo(database.Pool)
-		orgRepo := db.NewOrgRepo(database.Pool)
-		auditRepo := db.NewAuditRepo(database.Pool)
-		syncRepo := db.NewSyncRepo(database.Pool)
+		userRepo := db.NewPgUserRepo(database.Pool)
+		totpRepo := db.NewPgTOTPRepo(database.Pool)
+		vaultRepo = db.NewPgVaultRepo(database.Pool)
+		orgRepo := db.NewPgOrgRepo(database.Pool)
+		auditRepo := db.NewPgAuditRepo(database.Pool)
+		syncRepo := db.NewPgSyncRepo(database.Pool)
 		var authErr error
 		authService, authErr = auth.NewService(userRepo, nil, nil, auth.ServiceConfig{}, vaultRepo, orgRepo)
 		if authErr != nil {

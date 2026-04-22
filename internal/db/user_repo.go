@@ -32,18 +32,18 @@ type KDFParams struct {
 	Parallelism uint8  `json:"parallelism"`
 }
 
-// UserRepo provides database operations for users.
-type UserRepo struct {
+// PgUserRepo provides database operations for users (PostgreSQL).
+type PgUserRepo struct {
 	pool *pgxpool.Pool
 }
 
-// NewUserRepo creates a new UserRepo.
-func NewUserRepo(pool *pgxpool.Pool) *UserRepo {
-	return &UserRepo{pool: pool}
+// NewPgUserRepo creates a new PgUserRepo.
+func NewPgUserRepo(pool *pgxpool.Pool) *PgUserRepo {
+	return &PgUserRepo{pool: pool}
 }
 
 // CreateUser inserts a new user and returns the created user.
-func (r *UserRepo) CreateUser(
+func (r *PgUserRepo) CreateUser(
 	ctx context.Context,
 	email string,
 	authHash []byte,
@@ -66,7 +66,7 @@ func (r *UserRepo) CreateUser(
 }
 
 // GetUserByEmail retrieves a user by email address.
-func (r *UserRepo) GetUserByEmail(ctx context.Context, email string) (User, error) {
+func (r *PgUserRepo) GetUserByEmail(ctx context.Context, email string) (User, error) {
 	var u User
 	err := r.pool.QueryRow(ctx, `
 		SELECT u.id, u.email, u.auth_hash, u.salt, u.kdf_params,
@@ -89,7 +89,7 @@ func (r *UserRepo) GetUserByEmail(ctx context.Context, email string) (User, erro
 }
 
 // GetUserByID retrieves a user by ID.
-func (r *UserRepo) GetUserByID(ctx context.Context, id string) (User, error) {
+func (r *PgUserRepo) GetUserByID(ctx context.Context, id string) (User, error) {
 	var u User
 	err := r.pool.QueryRow(ctx, `
 		SELECT u.id, u.email, u.auth_hash, u.salt, u.kdf_params,
@@ -112,7 +112,7 @@ func (r *UserRepo) GetUserByID(ctx context.Context, id string) (User, error) {
 }
 
 // UpdateUserKeys updates a user's authentication and encryption keys.
-func (r *UserRepo) UpdateUserKeys(
+func (r *PgUserRepo) UpdateUserKeys(
 	ctx context.Context,
 	id string,
 	authHash []byte,

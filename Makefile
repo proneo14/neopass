@@ -88,6 +88,10 @@ dist-electron-mac:
 dist-electron-linux:
 	cd electron && npm run dist:linux
 
+# Database migrations
+migrate:
+	go run cmd/server/main.go -migrate
+
 # Clean
 clean:
 ifeq ($(OS),Windows_NT)

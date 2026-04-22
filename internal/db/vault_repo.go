@@ -39,18 +39,18 @@ type Folder struct {
 	ParentID      *string `json:"parent_id,omitempty"`
 }
 
-// VaultRepo provides database operations for vault entries and folders.
-type VaultRepo struct {
+// PgVaultRepo provides database operations for vault entries and folders (PostgreSQL).
+type PgVaultRepo struct {
 	pool *pgxpool.Pool
 }
 
-// NewVaultRepo creates a new VaultRepo.
-func NewVaultRepo(pool *pgxpool.Pool) *VaultRepo {
-	return &VaultRepo{pool: pool}
+// NewPgVaultRepo creates a new PgVaultRepo.
+func NewPgVaultRepo(pool *pgxpool.Pool) *PgVaultRepo {
+	return &PgVaultRepo{pool: pool}
 }
 
 // CreateEntry inserts a new vault entry and returns it.
-func (r *VaultRepo) CreateEntry(ctx context.Context, entry VaultEntry) (VaultEntry, error) {
+func (r *PgVaultRepo) CreateEntry(ctx context.Context, entry VaultEntry) (VaultEntry, error) {
 	var out VaultEntry
 	err := r.pool.QueryRow(ctx,
 		`INSERT INTO vault_entries (user_id, org_id, entry_type, encrypted_data, nonce, folder_id)
@@ -66,7 +66,7 @@ func (r *VaultRepo) CreateEntry(ctx context.Context, entry VaultEntry) (VaultEnt
 }
 
 // GetEntry retrieves a single vault entry by ID, scoped to the user.
-func (r *VaultRepo) GetEntry(ctx context.Context, entryID, userID string) (VaultEntry, error) {
+func (r *PgVaultRepo) GetEntry(ctx context.Context, entryID, userID string) (VaultEntry, error) {
 	var out VaultEntry
 	err := r.pool.QueryRow(ctx,
 		`SELECT id, user_id, org_id, entry_type, encrypted_data, nonce, version, folder_id, is_deleted, created_at, updated_at
@@ -85,7 +85,7 @@ func (r *VaultRepo) GetEntry(ctx context.Context, entryID, userID string) (Vault
 }
 
 // ListEntries returns vault entries for a user with optional filters (excludes soft-deleted).
-func (r *VaultRepo) ListEntries(ctx context.Context, userID string, filters VaultFilters) ([]VaultEntry, error) {
+func (r *PgVaultRepo) ListEntries(ctx context.Context, userID string, filters VaultFilters) ([]VaultEntry, error) {
 	query := `SELECT id, user_id, org_id, entry_type, encrypted_data, nonce, version, folder_id, is_deleted, created_at, updated_at
 	          FROM vault_entries
 	          WHERE user_id = $1 AND is_deleted = false` // #nosec G201 -- only integer placeholders interpolated via Sprintf
@@ -128,7 +128,7 @@ func (r *VaultRepo) ListEntries(ctx context.Context, userID string, filters Vaul
 }
 
 // UpdateEntry updates a vault entry's encrypted data, nonce, type, and folder, incrementing version.
-func (r *VaultRepo) UpdateEntry(ctx context.Context, entry VaultEntry) (VaultEntry, error) {
+func (r *PgVaultRepo) UpdateEntry(ctx context.Context, entry VaultEntry) (VaultEntry, error) {
 	var out VaultEntry
 	err := r.pool.QueryRow(ctx,
 		`UPDATE vault_entries
@@ -148,7 +148,7 @@ func (r *VaultRepo) UpdateEntry(ctx context.Context, entry VaultEntry) (VaultEnt
 }
 
 // DeleteEntry soft-deletes a vault entry by ID, scoped to the user.
-func (r *VaultRepo) DeleteEntry(ctx context.Context, entryID, userID string) error {
+func (r *PgVaultRepo) DeleteEntry(ctx context.Context, entryID, userID string) error {
 	tag, err := r.pool.Exec(ctx,
 		`UPDATE vault_entries SET is_deleted = true, version = version + 1
 		 WHERE id = $1 AND user_id = $2 AND is_deleted = false`,
@@ -164,7 +164,7 @@ func (r *VaultRepo) DeleteEntry(ctx context.Context, entryID, userID string) err
 }
 
 // ListEntriesForSync returns all vault entries (including soft-deleted) updated after the given time.
-func (r *VaultRepo) ListEntriesForSync(ctx context.Context, userID string, since time.Time) ([]VaultEntry, error) {
+func (r *PgVaultRepo) ListEntriesForSync(ctx context.Context, userID string, since time.Time) ([]VaultEntry, error) {
 	rows, err := r.pool.Query(ctx,
 		`SELECT id, user_id, org_id, entry_type, encrypted_data, nonce, version, folder_id, is_deleted, created_at, updated_at
 		 FROM vault_entries
@@ -190,7 +190,7 @@ func (r *VaultRepo) ListEntriesForSync(ctx context.Context, userID string, since
 }
 
 // GetEntryByID retrieves a vault entry by ID only (no user scope, no soft-delete filter). Used for sync conflict checks.
-func (r *VaultRepo) GetEntryByID(ctx context.Context, entryID string) (VaultEntry, error) {
+func (r *PgVaultRepo) GetEntryByID(ctx context.Context, entryID string) (VaultEntry, error) {
 	var out VaultEntry
 	err := r.pool.QueryRow(ctx,
 		`SELECT id, user_id, org_id, entry_type, encrypted_data, nonce, version, folder_id, is_deleted, created_at, updated_at
@@ -209,7 +209,7 @@ func (r *VaultRepo) GetEntryByID(ctx context.Context, entryID string) (VaultEntr
 
 // UpdateEntryVersioned updates a vault entry only if the current version matches expectedVersion.
 // Returns the updated entry or an error.
-func (r *VaultRepo) UpdateEntryVersioned(ctx context.Context, entry VaultEntry, expectedVersion int) (VaultEntry, error) {
+func (r *PgVaultRepo) UpdateEntryVersioned(ctx context.Context, entry VaultEntry, expectedVersion int) (VaultEntry, error) {
 	var out VaultEntry
 	err := r.pool.QueryRow(ctx,
 		`UPDATE vault_entries
@@ -231,7 +231,7 @@ func (r *VaultRepo) UpdateEntryVersioned(ctx context.Context, entry VaultEntry, 
 }
 
 // CreateFolder inserts a new folder and returns it.
-func (r *VaultRepo) CreateFolder(ctx context.Context, folder Folder) (Folder, error) {
+func (r *PgVaultRepo) CreateFolder(ctx context.Context, folder Folder) (Folder, error) {
 	var out Folder
 	err := r.pool.QueryRow(ctx,
 		`INSERT INTO folders (user_id, name_encrypted, parent_id)
@@ -246,7 +246,7 @@ func (r *VaultRepo) CreateFolder(ctx context.Context, folder Folder) (Folder, er
 }
 
 // ListFolders returns all folders for a user.
-func (r *VaultRepo) ListFolders(ctx context.Context, userID string) ([]Folder, error) {
+func (r *PgVaultRepo) ListFolders(ctx context.Context, userID string) ([]Folder, error) {
 	rows, err := r.pool.Query(ctx,
 		`SELECT id, user_id, name_encrypted, parent_id FROM folders WHERE user_id = $1 ORDER BY id`,
 		userID,
@@ -268,7 +268,7 @@ func (r *VaultRepo) ListFolders(ctx context.Context, userID string) ([]Folder, e
 }
 
 // DeleteFolder removes a folder by ID, scoped to the user.
-func (r *VaultRepo) DeleteFolder(ctx context.Context, folderID, userID string) error {
+func (r *PgVaultRepo) DeleteFolder(ctx context.Context, folderID, userID string) error {
 	tag, err := r.pool.Exec(ctx,
 		`DELETE FROM folders WHERE id = $1 AND user_id = $2`,
 		folderID, userID,

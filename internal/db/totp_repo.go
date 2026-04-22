@@ -38,18 +38,18 @@ type RecoveryCode struct {
 	Used     bool   `json:"used"`
 }
 
-// TOTPRepo provides database operations for 2FA.
-type TOTPRepo struct {
+// PgTOTPRepo provides database operations for 2FA (PostgreSQL).
+type PgTOTPRepo struct {
 	pool *pgxpool.Pool
 }
 
-// NewTOTPRepo creates a new TOTPRepo.
-func NewTOTPRepo(pool *pgxpool.Pool) *TOTPRepo {
-	return &TOTPRepo{pool: pool}
+// NewPgTOTPRepo creates a new PgTOTPRepo.
+func NewPgTOTPRepo(pool *pgxpool.Pool) *PgTOTPRepo {
+	return &PgTOTPRepo{pool: pool}
 }
 
 // UpsertTOTPSecret inserts or updates a TOTP secret for a user.
-func (r *TOTPRepo) UpsertTOTPSecret(ctx context.Context, userID string, encryptedSecret []byte) (string, error) {
+func (r *PgTOTPRepo) UpsertTOTPSecret(ctx context.Context, userID string, encryptedSecret []byte) (string, error) {
 	var id string
 	err := r.pool.QueryRow(ctx, `
 		INSERT INTO totp_secrets (user_id, encrypted_secret, verified)
@@ -65,7 +65,7 @@ func (r *TOTPRepo) UpsertTOTPSecret(ctx context.Context, userID string, encrypte
 }
 
 // GetTOTPSecret retrieves the TOTP secret for a user.
-func (r *TOTPRepo) GetTOTPSecret(ctx context.Context, userID string) (TOTPSecret, error) {
+func (r *PgTOTPRepo) GetTOTPSecret(ctx context.Context, userID string) (TOTPSecret, error) {
 	var s TOTPSecret
 	err := r.pool.QueryRow(ctx, `
 		SELECT id, user_id, encrypted_secret, verified, created_at
@@ -82,7 +82,7 @@ func (r *TOTPRepo) GetTOTPSecret(ctx context.Context, userID string) (TOTPSecret
 }
 
 // MarkTOTPVerified sets the TOTP secret as verified.
-func (r *TOTPRepo) MarkTOTPVerified(ctx context.Context, userID string) error {
+func (r *PgTOTPRepo) MarkTOTPVerified(ctx context.Context, userID string) error {
 	tag, err := r.pool.Exec(ctx, `
 		UPDATE totp_secrets SET verified = true WHERE user_id = $1
 	`, userID)
@@ -96,7 +96,7 @@ func (r *TOTPRepo) MarkTOTPVerified(ctx context.Context, userID string) error {
 }
 
 // DeleteTOTPSecret removes TOTP and all recovery codes for a user.
-func (r *TOTPRepo) DeleteTOTPSecret(ctx context.Context, userID string) error {
+func (r *PgTOTPRepo) DeleteTOTPSecret(ctx context.Context, userID string) error {
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("begin tx: %w", err)
@@ -114,7 +114,7 @@ func (r *TOTPRepo) DeleteTOTPSecret(ctx context.Context, userID string) error {
 }
 
 // InsertRecoveryCodes stores bcrypt-hashed recovery codes for a user.
-func (r *TOTPRepo) InsertRecoveryCodes(ctx context.Context, userID string, codeHashes [][]byte) error {
+func (r *PgTOTPRepo) InsertRecoveryCodes(ctx context.Context, userID string, codeHashes [][]byte) error {
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("begin tx: %w", err)
@@ -138,7 +138,7 @@ func (r *TOTPRepo) InsertRecoveryCodes(ctx context.Context, userID string, codeH
 }
 
 // GetUnusedRecoveryCodes returns all unused recovery code hashes for a user.
-func (r *TOTPRepo) GetUnusedRecoveryCodes(ctx context.Context, userID string) ([]RecoveryCode, error) {
+func (r *PgTOTPRepo) GetUnusedRecoveryCodes(ctx context.Context, userID string) ([]RecoveryCode, error) {
 	rows, err := r.pool.Query(ctx, `
 		SELECT id, user_id, code_hash, used
 		FROM recovery_codes
@@ -161,7 +161,7 @@ func (r *TOTPRepo) GetUnusedRecoveryCodes(ctx context.Context, userID string) ([
 }
 
 // MarkRecoveryCodeUsed marks a specific recovery code as used.
-func (r *TOTPRepo) MarkRecoveryCodeUsed(ctx context.Context, codeID string) error {
+func (r *PgTOTPRepo) MarkRecoveryCodeUsed(ctx context.Context, codeID string) error {
 	tag, err := r.pool.Exec(ctx, `
 		UPDATE recovery_codes SET used = true WHERE id = $1 AND used = false
 	`, codeID)
@@ -175,7 +175,7 @@ func (r *TOTPRepo) MarkRecoveryCodeUsed(ctx context.Context, codeID string) erro
 }
 
 // InsertSharedTOTP stores an encrypted TOTP secret shared between users.
-func (r *TOTPRepo) InsertSharedTOTP(ctx context.Context, fromUserID, toUserID string, encryptedSecret []byte, expiresAt time.Time) (string, error) {
+func (r *PgTOTPRepo) InsertSharedTOTP(ctx context.Context, fromUserID, toUserID string, encryptedSecret []byte, expiresAt time.Time) (string, error) {
 	var id string
 	err := r.pool.QueryRow(ctx, `
 		INSERT INTO shared_2fa (from_user_id, to_user_id, encrypted_totp_secret, expires_at)
@@ -189,7 +189,7 @@ func (r *TOTPRepo) InsertSharedTOTP(ctx context.Context, fromUserID, toUserID st
 }
 
 // GetSharedTOTP retrieves a shared TOTP entry by ID.
-func (r *TOTPRepo) GetSharedTOTP(ctx context.Context, shareID, toUserID string) (SharedTOTP, error) {
+func (r *PgTOTPRepo) GetSharedTOTP(ctx context.Context, shareID, toUserID string) (SharedTOTP, error) {
 	var s SharedTOTP
 	err := r.pool.QueryRow(ctx, `
 		SELECT id, from_user_id, to_user_id, encrypted_totp_secret, expires_at, claimed, created_at
@@ -209,7 +209,7 @@ func (r *TOTPRepo) GetSharedTOTP(ctx context.Context, shareID, toUserID string) 
 }
 
 // MarkSharedTOTPClaimed marks a shared TOTP entry as claimed.
-func (r *TOTPRepo) MarkSharedTOTPClaimed(ctx context.Context, shareID string) error {
+func (r *PgTOTPRepo) MarkSharedTOTPClaimed(ctx context.Context, shareID string) error {
 	tag, err := r.pool.Exec(ctx, `
 		UPDATE shared_2fa SET claimed = true WHERE id = $1
 	`, shareID)
@@ -223,7 +223,7 @@ func (r *TOTPRepo) MarkSharedTOTPClaimed(ctx context.Context, shareID string) er
 }
 
 // ListPendingSharedTOTP lists unclaimed, non-expired shared TOTPs for a user.
-func (r *TOTPRepo) ListPendingSharedTOTP(ctx context.Context, toUserID string) ([]SharedTOTP, error) {
+func (r *PgTOTPRepo) ListPendingSharedTOTP(ctx context.Context, toUserID string) ([]SharedTOTP, error) {
 	rows, err := r.pool.Query(ctx, `
 		SELECT id, from_user_id, to_user_id, encrypted_totp_secret, expires_at, claimed, created_at
 		FROM shared_2fa

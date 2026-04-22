@@ -30,18 +30,18 @@ type AuditFilters struct {
 	Offset   int
 }
 
-// AuditRepo provides database operations for the audit log.
-type AuditRepo struct {
+// PgAuditRepo provides database operations for the audit log (PostgreSQL).
+type PgAuditRepo struct {
 	pool *pgxpool.Pool
 }
 
-// NewAuditRepo creates a new AuditRepo.
-func NewAuditRepo(pool *pgxpool.Pool) *AuditRepo {
-	return &AuditRepo{pool: pool}
+// NewPgAuditRepo creates a new PgAuditRepo.
+func NewPgAuditRepo(pool *pgxpool.Pool) *PgAuditRepo {
+	return &PgAuditRepo{pool: pool}
 }
 
 // LogAction inserts an audit log entry.
-func (r *AuditRepo) LogAction(ctx context.Context, actorID, targetID *string, action string, details json.RawMessage) error {
+func (r *PgAuditRepo) LogAction(ctx context.Context, actorID, targetID *string, action string, details json.RawMessage) error {
 	_, err := r.pool.Exec(ctx,
 		`INSERT INTO audit_log (actor_id, target_id, action, details) VALUES ($1, $2, $3, $4)`,
 		actorID, targetID, action, details,
@@ -53,7 +53,7 @@ func (r *AuditRepo) LogAction(ctx context.Context, actorID, targetID *string, ac
 }
 
 // GetAuditLog returns audit log entries matching the given filters.
-func (r *AuditRepo) GetAuditLog(ctx context.Context, filters AuditFilters) ([]AuditEntry, error) {
+func (r *PgAuditRepo) GetAuditLog(ctx context.Context, filters AuditFilters) ([]AuditEntry, error) {
 	query := `SELECT id, actor_id, target_id, action, details, created_at FROM audit_log WHERE 1=1` // #nosec G201 -- only integer placeholders interpolated via Sprintf
 	args := []interface{}{}
 	argIdx := 1
