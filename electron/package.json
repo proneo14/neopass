@@ -2,6 +2,11 @@
   "name": "quantum-password-manager",
   "version": "1.0.0",
   "description": "Quantum-safe password manager desktop application",
+  "author": {
+    "name": "LGI",
+    "email": "dev@lgi.com"
+  },
+  "homepage": "https://github.com/proneo14/password-manager",
   "main": "dist/main/index.js",
   "scripts": {
     "dev": "concurrently \"npm run dev:renderer\" \"npm run dev:electron\"",
