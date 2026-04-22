@@ -6,6 +6,9 @@ on:
   pull_request:
     branches: [main]
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 permissions:
   contents: read
 
@@ -188,6 +191,11 @@ jobs:
         with:
           name: go-binaries-windows
           path: bin
+      - name: Rename binaries for electron-builder
+        shell: bash
+        run: |
+          cp bin/server-windows.exe bin/server.exe
+          cp bin/qpm-native-host-windows.exe bin/qpm-native-host.exe
       - run: npm ci
       - run: npm run build
       - name: Build Windows installer
@@ -219,6 +227,11 @@ jobs:
         with:
           name: go-binaries-linux
           path: bin
+      - name: Rename binaries for electron-builder
+        run: |
+          cp bin/server-linux bin/server
+          cp bin/qpm-native-host-linux bin/qpm-native-host
+          chmod +x bin/server bin/qpm-native-host
       - run: npm ci
       - run: npm run build
       - name: Build Linux installers
@@ -256,6 +269,11 @@ jobs:
         with:
           name: go-binaries-darwin-arm64
           path: bin
+      - name: Rename binaries for electron-builder
+        run: |
+          cp bin/server-darwin bin/server
+          cp bin/qpm-native-host-darwin bin/qpm-native-host
+          chmod +x bin/server bin/qpm-native-host
       - run: npm ci
       - run: npm run build
       - name: Build macOS installer
