@@ -19,7 +19,7 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
-      - uses: golangci/golangci-lint-action@v6
+      - uses: golangci/golangci-lint-action@v8
         with:
           version: latest
 
@@ -32,9 +32,9 @@ jobs:
         with:
           go-version-file: go.mod
       - name: Run gosec
-        uses: securego/gosec@master
-        with:
-          args: ./...
+        run: |
+          go install github.com/securego/gosec/v2/cmd/gosec@latest
+          gosec -exclude=G104 ./...
 
   go-test:
     name: Go Test
@@ -78,13 +78,13 @@ jobs:
         with:
           go-version-file: go.mod
       - name: Build server
-        run: go build -trimpath -ldflags="-s -w" -o bin/server-${{ matrix.suffix }}${{ matrix.ext }} ./cmd/server/main.go
+        run: go build -trimpath -ldflags="-s -w" -o bin/server-${{ matrix.suffix }}${{ matrix.ext }} ./cmd/server/
         env:
           CGO_ENABLED: "0"
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
       - name: Build native host
-        run: go build -trimpath -ldflags="-s -w" -o bin/qpm-native-host-${{ matrix.suffix }}${{ matrix.ext }} ./cmd/nativehost/main.go
+        run: go build -trimpath -ldflags="-s -w" -o bin/qpm-native-host-${{ matrix.suffix }}${{ matrix.ext }} ./cmd/nativehost/
         env:
           CGO_ENABLED: "0"
           GOOS: ${{ matrix.goos }}

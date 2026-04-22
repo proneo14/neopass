@@ -141,7 +141,7 @@ func (s *SMSService) sendTelnyxSMS(ctx context.Context, to string, body string) 
 		return fmt.Errorf("marshal sms payload: %w", err)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, s.config.APIURL, bytes.NewReader(jsonBody))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, s.config.APIURL, bytes.NewReader(jsonBody)) // #nosec G107 -- APIURL is server config
 	if err != nil {
 		return fmt.Errorf("create request: %w", err)
 	}

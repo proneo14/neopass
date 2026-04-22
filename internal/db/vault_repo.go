@@ -88,7 +88,7 @@ func (r *VaultRepo) GetEntry(ctx context.Context, entryID, userID string) (Vault
 func (r *VaultRepo) ListEntries(ctx context.Context, userID string, filters VaultFilters) ([]VaultEntry, error) {
 	query := `SELECT id, user_id, org_id, entry_type, encrypted_data, nonce, version, folder_id, is_deleted, created_at, updated_at
 	          FROM vault_entries
-	          WHERE user_id = $1 AND is_deleted = false`
+	          WHERE user_id = $1 AND is_deleted = false` // #nosec G201 -- only integer placeholders interpolated via Sprintf
 	args := []interface{}{userID}
 	argIdx := 2
 

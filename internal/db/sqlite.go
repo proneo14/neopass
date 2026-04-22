@@ -100,7 +100,7 @@ func (s *SQLiteDB) RunMigrations(ctx context.Context, migrationsDir string) erro
 			continue
 		}
 
-		content, err := os.ReadFile(filepath.Join(migrationsDir, name))
+		content, err := os.ReadFile(filepath.Join(migrationsDir, name)) // #nosec G304 -- migrationsDir from server config
 		if err != nil {
 			return fmt.Errorf("read migration %s: %w", name, err)
 		}

@@ -54,7 +54,7 @@ func (r *AuditRepo) LogAction(ctx context.Context, actorID, targetID *string, ac
 
 // GetAuditLog returns audit log entries matching the given filters.
 func (r *AuditRepo) GetAuditLog(ctx context.Context, filters AuditFilters) ([]AuditEntry, error) {
-	query := `SELECT id, actor_id, target_id, action, details, created_at FROM audit_log WHERE 1=1`
+	query := `SELECT id, actor_id, target_id, action, details, created_at FROM audit_log WHERE 1=1` // #nosec G201 -- only integer placeholders interpolated via Sprintf
 	args := []interface{}{}
 	argIdx := 1
 

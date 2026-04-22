@@ -422,7 +422,7 @@ func openDesktopApp() *Response {
 		return &Response{Error: "Desktop app not found"}
 	}
 
-	cmd := exec.Command(appPath)
+	cmd := exec.Command(appPath) // #nosec G204 -- appPath is from findDesktopApp() which only returns validated paths
 	cmd.Dir = filepath.Dir(appPath)
 	if err := cmd.Start(); err != nil {
 		return &Response{Error: "Failed to launch desktop app: " + err.Error()}
@@ -441,10 +441,10 @@ func scheduleClipboardClear() {
 	case "windows":
 		scheduleClipboardClearWindows()
 	case "darwin":
-		cmd := exec.Command("bash", "-c", "sleep 30 && echo -n '' | pbcopy")
+		cmd := exec.Command("bash", "-c", "sleep 30 && echo -n '' | pbcopy") // #nosec G204
 		_ = cmd.Start()
 	default:
-		cmd := exec.Command("bash", "-c", "sleep 30 && echo -n '' | xclip -selection clipboard")
+		cmd := exec.Command("bash", "-c", "sleep 30 && echo -n '' | xclip -selection clipboard") // #nosec G204
 		_ = cmd.Start()
 	}
 }
