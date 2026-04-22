@@ -53,13 +53,13 @@ func secureCopyClipboardWindows(text string) error {
 	}
 	// Use RtlMoveMemory to copy UTF-16 data to the locked global memory.
 	// This avoids the go vet "possible misuse of unsafe.Pointer" for uintptr→Pointer.
-	pRtlMoveMemory.Call(ptr, uintptr(unsafe.Pointer(&utf16[0])), uintptr(len(utf16)*2))
+	pRtlMoveMemory.Call(ptr, uintptr(unsafe.Pointer(&utf16[0])), uintptr(len(utf16)*2)) // #nosec G103
 	pGlobalUnlock.Call(hMem)
 	pSetClipboardData.Call(cfUnicodeText, hMem)
 
 	// Set ExcludeClipboardContentFromMonitorProcessing = 1
 	formatName, _ := syscall.UTF16PtrFromString("ExcludeClipboardContentFromMonitorProcessing")
-	fmtID, _, _ := pRegisterClipboardFormatW.Call(uintptr(unsafe.Pointer(formatName)))
+	fmtID, _, _ := pRegisterClipboardFormatW.Call(uintptr(unsafe.Pointer(formatName))) // #nosec G103
 	if fmtID != 0 {
 		hExclude, _, _ := pGlobalAlloc.Call(gmemMoveable, 4)
 		if hExclude != 0 {
@@ -68,7 +68,7 @@ func secureCopyClipboardWindows(text string) error {
 				// Write int32(1) to the locked memory via RtlMoveMemory.
 				// This avoids the go vet "unsafe.Pointer(uintptr)" false positive.
 				val := int32(1)
-				pRtlMoveMemory.Call(pExclude, uintptr(unsafe.Pointer(&val)), 4)
+				pRtlMoveMemory.Call(pExclude, uintptr(unsafe.Pointer(&val)), 4) // #nosec G103
 				pGlobalUnlock.Call(hExclude)
 				pSetClipboardData.Call(fmtID, hExclude)
 			}

@@ -8,7 +8,6 @@ import {
   attachFieldListeners,
   attachGlobalFocusListener,
   showSidePanel,
-  resetPanelDismissed,
   clearAllUI,
   watchFormSubmissions,
   handleShowSavePrompt,

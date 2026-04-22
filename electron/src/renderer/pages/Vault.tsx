@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useRef, useEffect, useCallback } from 'react';
+import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useVaultStore } from '../store/vaultStore';
 import { useAuthStore } from '../store/authStore';
@@ -199,7 +199,7 @@ function NewEntryModal({ entryType, onCancel, onSave }: {
 
 export function Vault() {
   const navigate = useNavigate();
-  const { entries, entryFields, addEntry, setEntries, removeEntry, searchQuery, setSearchQuery, sortBy, setSortBy, selectedTypeFilter, setSelectedTypeFilter } = useVaultStore();
+  const { entries, entryFields, addEntry, removeEntry, searchQuery, setSearchQuery, sortBy, setSortBy, selectedTypeFilter, setSelectedTypeFilter } = useVaultStore();
   const { token, masterKeyHex } = useAuthStore();
   const [showAddDropdown, setShowAddDropdown] = useState(false);
   const [newEntryType, setNewEntryType] = useState<string | null>(null);

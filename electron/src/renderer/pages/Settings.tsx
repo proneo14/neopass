@@ -130,7 +130,7 @@ function ChangePasswordModal({ onClose }: { onClose: () => void }) {
 function TwoFactorModal({ onClose }: { onClose: () => void }) {
   const [step, setStep] = useState<'intro' | 'verify'>('intro');
   const [code, setCode] = useState('');
-  const demoQrUri = 'otpauth://totp/QuantumPM:user@example.com?secret=JBSWY3DPEHPK3PXP&issuer=QuantumPM';
+  const _demoQrUri = 'otpauth://totp/QuantumPM:user@example.com?secret=JBSWY3DPEHPK3PXP&issuer=QuantumPM';
   const demoRecoveryCodes = ['A1B2C3D4', 'E5F6G7H8', 'I9J0K1L2', 'M3N4O5P6', 'Q7R8S9T0', 'U1V2W3X4', 'Y5Z6A7B8', 'C9D0E1F2'];
 
   return (

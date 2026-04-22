@@ -135,17 +135,11 @@ func ExtensionRouter(vaultRepo db.VaultRepository, secret string) chi.Router {
 	return r
 }
 
-func placeholder(msg string) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, http.StatusOK, map[string]string{"message": msg})
-	}
-}
-
 // writeJSON writes a JSON response with the given status code.
 func writeJSON(w http.ResponseWriter, status int, v interface{}) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	json.NewEncoder(w).Encode(v)
+	_ = json.NewEncoder(w).Encode(v)
 }
 
 // writeError writes a JSON error response.

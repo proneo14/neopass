@@ -1,5 +1,5 @@
 import { browserAPI, extractDomain } from '../lib/browser-api';
-import type { AutofillMessage, Credential } from '../lib/messages';
+import type { Credential } from '../lib/messages';
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -19,7 +19,7 @@ export interface FormInfo {
 const USERNAME_HINTS =
   /user|email|login|username|account|identifier|handle|phone|signin/i;
 
-const LOGIN_ACTION_HINTS =
+const _LOGIN_ACTION_HINTS =
   /login|signin|sign-in|auth|session|account|logon/i;
 
 /** Track fields already processed by detectUsernameOnlyForms */
@@ -1107,7 +1107,7 @@ export function attachFieldListeners(
 /**
  * Instrument a single field (minimal — just track it).
  */
-function instrumentField(
+function _instrumentField(
   field: HTMLInputElement,
   _getCredentials: () => Credential[],
   _getForms: () => FormInfo[]

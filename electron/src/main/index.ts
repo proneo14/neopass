@@ -965,7 +965,7 @@ public class SecureClip {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ database_url: connectionString }),
       });
-      return await res.json();
+      return await res.json() as Record<string, unknown>;
     } catch { return { error: 'Failed to connect to backend' }; }
   });
 
@@ -978,7 +978,7 @@ public class SecureClip {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ database_url: databaseUrl }),
       });
-      const result = await res.json();
+      const result = await res.json() as Record<string, unknown>;
       if (!result.error) {
         // Save config and restart sidecar with postgres backend
         const configDir = getAppDataDir();
@@ -1066,7 +1066,7 @@ app.whenReady().then(async () => {
   resetAutoLockTimer();
 
   // Reset auto-lock on user activity
-  const activityEvents = ['mouse-move', 'keydown'] as const;
+  const _activityEvents = ['mouse-move', 'keydown'] as const;
   // Use powerMonitor to detect system idle, reset on any IPC activity
   // (IPC handlers reset via the auth:login handler)
 

@@ -89,7 +89,7 @@ func main() {
 	// Health check
 	r.Get("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"status":"ok"}`))
+		_, _ = w.Write([]byte(`{"status":"ok"}`))
 	})
 
 	// Initialize auth service
@@ -168,7 +168,7 @@ func main() {
 	// API v1 route group
 	r.Route("/api/v1", func(r chi.Router) {
 		r.Get("/", func(w http.ResponseWriter, r *http.Request) {
-			w.Write([]byte(`{"version":"1.0.0"}`))
+			_, _ = w.Write([]byte(`{"version":"1.0.0"}`))
 		})
 
 		if authService != nil {

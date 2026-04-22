@@ -606,7 +606,7 @@ func (r *SQLiteOrgRepo) UpdateEscrowBlob(ctx context.Context, orgID, userID stri
 
 func (r *SQLiteOrgRepo) CreateInvitation(ctx context.Context, orgID, email, role, invitedBy string) (Invitation, error) {
 	// Delete existing pending
-	r.db.ExecContext(ctx, `DELETE FROM invitations WHERE org_id = ? AND email = ? AND accepted = 0`, orgID, email)
+	_, _ = r.db.ExecContext(ctx, `DELETE FROM invitations WHERE org_id = ? AND email = ? AND accepted = 0`, orgID, email)
 
 	id := newUUID()
 	now := nowUTC()

@@ -4,7 +4,6 @@ import type {
   ExtensionMessage,
   NativeHostResponse,
   Credential,
-  SavePromptMessage,
 } from '../lib/messages';
 
 const NATIVE_HOST_ID = 'com.quantum.passwordmanager';
