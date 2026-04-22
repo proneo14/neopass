@@ -1,17 +1,24 @@
-import React from 'react';
+import React, { lazy, Suspense } from 'react';
 import { HashRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { Layout } from './components/Layout';
 import { AuthGuard } from './components/AuthGuard';
 import { Login } from './pages/Login';
-import { Register } from './pages/Register';
-import { Vault } from './pages/Vault';
-import { EntryDetail } from './pages/EntryDetail';
-import { Admin } from './pages/Admin';
-import { Settings } from './pages/Settings';
+
+// Lazy-load pages so only the active view consumes memory
+const Register = lazy(() => import('./pages/Register').then(m => ({ default: m.Register })));
+const Vault = lazy(() => import('./pages/Vault').then(m => ({ default: m.Vault })));
+const EntryDetail = lazy(() => import('./pages/EntryDetail').then(m => ({ default: m.EntryDetail })));
+const Admin = lazy(() => import('./pages/Admin').then(m => ({ default: m.Admin })));
+const Settings = lazy(() => import('./pages/Settings').then(m => ({ default: m.Settings })));
+
+function PageLoader() {
+  return <div className="flex items-center justify-center h-full text-slate-400">Loading…</div>;
+}
 
 export function App() {
   return (
     <HashRouter>
+      <Suspense fallback={<PageLoader />}>
       <Routes>
         {/* Public routes */}
         <Route path="/login" element={<Login />} />
@@ -41,6 +48,7 @@ export function App() {
         {/* Default redirect */}
         <Route path="*" element={<Navigate to="/login" replace />} />
       </Routes>
+      </Suspense>
     </HashRouter>
   );
 }

@@ -259,6 +259,9 @@ function createWindow(): void {
     mainWindow?.show();
   });
 
+  // Throttle background rendering to reduce idle CPU/memory usage
+  mainWindow.webContents.setBackgroundThrottling(true);
+
   if (isDev) {
     mainWindow.webContents.openDevTools({ mode: 'detach' });
   } else {
@@ -1036,6 +1039,11 @@ function resetAutoLockTimer(): void {
       fetch(`${api}/extension/lock`, { method: 'POST' }).catch(() => {});
     }
   }, AUTO_LOCK_TIMEOUT);
+}
+
+// Disable GPU acceleration in production to reduce memory (~27MB savings)
+if (!isDev) {
+  app.disableHardwareAcceleration();
 }
 
 // App lifecycle
