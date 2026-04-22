@@ -32,6 +32,16 @@ function getApiBase(): string {
   return '';
 }
 
+/** Ensure the API is reachable; retry sidecar start once if needed. */
+async function ensureApiBase(): Promise<string> {
+  const base = getApiBase();
+  if (base) return base;
+  // Sidecar may have failed to start (e.g. firewall prompt delay) — retry once
+  console.log('[sidecar] apiBase empty, retrying sidecar start…');
+  await startSidecar();
+  return getApiBase();
+}
+
 function getSidecarPath(): string {
   const platform = process.platform;
   const ext = platform === 'win32' ? '.exe' : '';
@@ -305,7 +315,7 @@ function registerIpcHandlers(): void {
   });
 
   ipcMain.handle('auth:login', async (_event, credentials: { email: string; authHash: string }) => {
-    const api = getApiBase();
+    const api = await ensureApiBase();
     if (!api) return { error: 'Backend not available' };
     try {
       // Derive auth hash from password using PBKDF2 (stand-in for Argon2id until Go sidecar handles it)
@@ -351,7 +361,7 @@ function registerIpcHandlers(): void {
   });
 
   ipcMain.handle('auth:register', async (_event, data: { email: string; password: string }) => {
-    const api = getApiBase();
+    const api = await ensureApiBase();
     if (!api) return { error: 'Backend not available' };
     try {
       // Generate deterministic salt from email, derive auth hash

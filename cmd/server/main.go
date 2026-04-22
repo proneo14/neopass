@@ -196,8 +196,12 @@ func main() {
 		}
 	}
 
-	// Create server
+	// Create server — bind to loopback only in sidecar mode to avoid
+	// firewall prompts; otherwise listen on all interfaces.
 	addr := fmt.Sprintf(":%d", cfg.Port)
+	if cfg.SidecarMode {
+		addr = fmt.Sprintf("127.0.0.1:%d", cfg.Port)
+	}
 	srv := &http.Server{
 		Addr:              addr,
 		Handler:           r,
