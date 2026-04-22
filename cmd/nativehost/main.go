@@ -454,7 +454,9 @@ func findDesktopApp() string {
 	case "windows":
 		// Check common install locations
 		candidates := []string{
+			filepath.Join(os.Getenv("LOCALAPPDATA"), "Programs", "LGI Pass", "LGI Pass.exe"),
 			filepath.Join(os.Getenv("LOCALAPPDATA"), "quantum-password-manager", "Quantum Password Manager.exe"),
+			filepath.Join(os.Getenv("PROGRAMFILES"), "LGI Pass", "LGI Pass.exe"),
 			filepath.Join(os.Getenv("PROGRAMFILES"), "Quantum Password Manager", "Quantum Password Manager.exe"),
 		}
 		for _, p := range candidates {
@@ -464,6 +466,7 @@ func findDesktopApp() string {
 		}
 	case "darwin":
 		candidates := []string{
+			"/Applications/LGI Pass.app/Contents/MacOS/LGI Pass",
 			"/Applications/Quantum Password Manager.app/Contents/MacOS/Quantum Password Manager",
 		}
 		for _, p := range candidates {
@@ -474,6 +477,8 @@ func findDesktopApp() string {
 	default: // linux
 		// Try common paths
 		candidates := []string{
+			"/usr/bin/lgi-pass",
+			"/opt/LGI Pass/lgi-pass",
 			"/usr/bin/quantum-password-manager",
 			"/opt/Quantum Password Manager/quantum-password-manager",
 		}

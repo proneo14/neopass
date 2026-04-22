@@ -4,7 +4,7 @@
 !macro customInstall
   ; Register native messaging host for Chrome, Edge, and Firefox
   DetailPrint "Registering native messaging host..."
-  nsExec::ExecToLog 'powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$INSTDIR\resources\scripts\install-native-host.ps1" -BinaryPath "$INSTDIR\resources\bin\qpm-native-host.exe"'
+  nsExec::ExecToLog 'powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$INSTDIR\resources\scripts\install-native-host.ps1" -BinaryPath "$INSTDIR\resources\bin\qpm-native-host.exe" -ChromeExtensionID "eiaibopmeinjkngnlodpmpfllbfbpgpc"'
 !macroend
 
 !macro customUnInstall

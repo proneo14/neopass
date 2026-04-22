@@ -4,8 +4,10 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
+	"sort"
 
 	"github.com/rs/zerolog/log"
 
@@ -64,15 +66,61 @@ func (s *SQLiteDB) Close() {
 }
 
 // RunMigrations executes SQLite migrations from the migrations/sqlite directory.
+// If the filesystem directory is not available (e.g. when running as an Electron
+// sidecar), it falls back to migrations embedded in the binary.
 func (s *SQLiteDB) RunMigrations(ctx context.Context, migrationsDir string) error {
 	if migrationsDir == "" {
 		migrationsDir = "migrations/sqlite"
 	}
 
-	entries, err := os.ReadDir(migrationsDir)
-	if err != nil {
-		return fmt.Errorf("read sqlite migrations directory %s: %w", migrationsDir, err)
+	type migrationFile struct {
+		name    string
+		content func() ([]byte, error)
 	}
+
+	var migrations []migrationFile
+
+	// Try filesystem first, fall back to embedded migrations
+	entries, fsErr := os.ReadDir(migrationsDir)
+	if fsErr == nil {
+		for _, entry := range entries {
+			if entry.IsDir() || filepath.Ext(entry.Name()) != ".sql" {
+				continue
+			}
+			name := entry.Name()
+			dir := migrationsDir
+			migrations = append(migrations, migrationFile{
+				name: name,
+				content: func() ([]byte, error) {
+					return os.ReadFile(filepath.Join(dir, name)) // #nosec G304 -- migrationsDir from server config
+				},
+			})
+		}
+	} else {
+		// Filesystem migrations not available — use embedded
+		log.Info().Str("dir", migrationsDir).Msg("filesystem migrations not found, using embedded migrations")
+		embeddedEntries, err := fs.ReadDir(EmbeddedSQLiteMigrations, "sqlite_migrations")
+		if err != nil {
+			return fmt.Errorf("read embedded sqlite migrations: %w", err)
+		}
+		for _, entry := range embeddedEntries {
+			if entry.IsDir() || filepath.Ext(entry.Name()) != ".sql" {
+				continue
+			}
+			name := entry.Name()
+			migrations = append(migrations, migrationFile{
+				name: name,
+				content: func() ([]byte, error) {
+					return fs.ReadFile(EmbeddedSQLiteMigrations, "sqlite_migrations/"+name)
+				},
+			})
+		}
+	}
+
+	// Sort by filename to ensure ordering
+	sort.Slice(migrations, func(i, j int) bool {
+		return migrations[i].name < migrations[j].name
+	})
 
 	// Ensure schema_migrations table exists
 	if _, err := s.DB.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -82,38 +130,30 @@ func (s *SQLiteDB) RunMigrations(ctx context.Context, migrationsDir string) erro
 		return fmt.Errorf("create schema_migrations: %w", err)
 	}
 
-	for _, entry := range entries {
-		if entry.IsDir() {
-			continue
-		}
-		name := entry.Name()
-		if filepath.Ext(name) != ".sql" {
-			continue
-		}
-
+	for _, mf := range migrations {
 		// Check if already applied
 		var exists int
 		if err := s.DB.QueryRowContext(ctx,
-			"SELECT COUNT(*) FROM schema_migrations WHERE version = ?", name,
+			"SELECT COUNT(*) FROM schema_migrations WHERE version = ?", mf.name,
 		).Scan(&exists); err == nil && exists > 0 {
-			log.Debug().Str("migration", name).Msg("already applied, skipping")
+			log.Debug().Str("migration", mf.name).Msg("already applied, skipping")
 			continue
 		}
 
-		content, err := os.ReadFile(filepath.Join(migrationsDir, name)) // #nosec G304 -- migrationsDir from server config
+		content, err := mf.content()
 		if err != nil {
-			return fmt.Errorf("read migration %s: %w", name, err)
+			return fmt.Errorf("read migration %s: %w", mf.name, err)
 		}
 
 		if _, err := s.DB.ExecContext(ctx, string(content)); err != nil {
-			return fmt.Errorf("execute migration %s: %w", name, err)
+			return fmt.Errorf("execute migration %s: %w", mf.name, err)
 		}
 		if _, err := s.DB.ExecContext(ctx,
-			"INSERT OR IGNORE INTO schema_migrations (version) VALUES (?)", name,
+			"INSERT OR IGNORE INTO schema_migrations (version) VALUES (?)", mf.name,
 		); err != nil {
-			return fmt.Errorf("record migration %s: %w", name, err)
+			return fmt.Errorf("record migration %s: %w", mf.name, err)
 		}
-		log.Info().Str("migration", name).Msg("applied sqlite migration")
+		log.Info().Str("migration", mf.name).Msg("applied sqlite migration")
 	}
 	return nil
 }

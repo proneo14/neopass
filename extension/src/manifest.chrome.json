@@ -3,6 +3,7 @@
   "name": "LGI Pass",
   "version": "1.0.0",
   "description": "LGI Pass - secure password autofill",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAnpz06UkD5HwGKVJK1q1a+DGurje7G3Nw89rSBlCffR2zwFWlGxJGKhO3+ESvZ/8ZJXUuFjLSwZCaY8swFsEGk44Zmz+cxOQ/eUY5iubm4uQMHQmB+ijb++JvE10ipivbPXOQp06P+/ISagArlhe0c3wInBqhpeqqn4QrrT2fXsY9v9iZqgvaBIr7UbGhwHbhvIVLwds/Szqwsy+l7g0kxw7GQAgOURu3dGWBPLlMyd4AcLv0iVRQ80EUhwLQV2hjl6VZnz2ArneFuzMoZWYWTJDgMY0g8oay/xi8HJ6N3rv+e4rhoJ4mgvSSyotV+Q2pw4FNGPNTIZgS/qwY+YewbQIDAQAB",
   "permissions": ["storage", "nativeMessaging", "activeTab", "scripting", "alarms"],
   "host_permissions": ["https://*/*", "http://*/*"],
   "background": {

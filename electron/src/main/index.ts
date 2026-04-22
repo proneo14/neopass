@@ -16,6 +16,7 @@ import {
 let mainWindow: BrowserWindow | null = null;
 let sidecarProcess: ChildProcess | null = null;
 let sidecarPort: number | null = null;
+let sidecarSecret: string | null = null;
 let autoLockTimer: ReturnType<typeof setTimeout> | null = null;
 
 // Auto-lock timeout in ms (default 15 minutes)
@@ -140,6 +141,19 @@ async function startSidecar(): Promise<void> {
     if (!ready) {
       console.error('[sidecar] failed to become ready within timeout');
       sidecarPort = null;
+    } else {
+      // Read extension secret from lockfile written by the sidecar
+      try {
+        const lockPath = path.join(getAppDataDir(), 'sidecar.lock');
+        const lockData = fs.readFileSync(lockPath, 'utf-8').trim();
+        const lines = lockData.split('\n');
+        if (lines.length > 1) {
+          sidecarSecret = lines[1].trim();
+          console.log('[sidecar] read extension secret from lockfile');
+        }
+      } catch {
+        console.warn('[sidecar] could not read extension secret from lockfile');
+      }
     }
   } catch (err) {
     console.error('Failed to start sidecar:', err);
@@ -177,7 +191,7 @@ async function pushSessionToSidecar(token: string, masterKeyHex: string, userId:
   try {
     await fetch(`${api}/extension/session`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: sidecarHeaders(),
       body: JSON.stringify({
         token,
         master_key_hex: masterKeyHex,
@@ -188,6 +202,22 @@ async function pushSessionToSidecar(token: string, masterKeyHex: string, userId:
   } catch (err) {
     console.error('[extension] failed to push session:', err);
   }
+}
+
+/** Build headers for sidecar extension endpoints, including the shared secret. */
+function sidecarHeaders(): Record<string, string> {
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  if (sidecarSecret) {
+    headers['Authorization'] = `Bearer ${sidecarSecret}`;
+  }
+  return headers;
+}
+
+/** Lock the extension session on the sidecar (best-effort). */
+function lockExtensionSession(): void {
+  const api = getApiBase();
+  if (!api) return;
+  fetch(`${api}/extension/lock`, { method: 'POST', headers: sidecarHeaders() }).catch(() => {});
 }
 
 /**
@@ -350,14 +380,7 @@ function registerIpcHandlers(): void {
 
   ipcMain.handle('auth:logout', async () => {
     // Clear extension session on the server so browser extension mirrors lock state
-    const api = getApiBase();
-    if (!api) return;
-    try {
-      await fetch(`${api}/extension/lock`, { method: 'POST' });
-      console.log('[extension] session cleared on logout');
-    } catch {
-      // Best effort
-    }
+    lockExtensionSession();
   });
 
   ipcMain.handle('auth:register', async (_event, data: { email: string; password: string }) => {
@@ -406,11 +429,9 @@ function registerIpcHandlers(): void {
 
   ipcMain.handle('auth:changePassword', async (_event, token: string, data: { email: string; currentPassword: string; newPassword: string }) => {
     // Clear extension session on the server so browser extension mirrors lock state
-    const api = getApiBase();
-    if (api) {
-      fetch(`${api}/extension/lock`, { method: 'POST' }).catch(() => {});
-    }
+    lockExtensionSession();
     // Proceed with password change
+    const api = getApiBase();
     if (!api) return { error: 'Backend not available' };
     try {
       const salt = nodeCrypto.createHash('sha256').update(data.email).digest();
@@ -1066,10 +1087,7 @@ function resetAutoLockTimer(): void {
     // Notify the renderer to clear master key and lock the vault
     mainWindow?.webContents.send('vault:auto-locked');
     // Clear extension session
-    const api = getApiBase();
-    if (api) {
-      fetch(`${api}/extension/lock`, { method: 'POST' }).catch(() => {});
-    }
+    lockExtensionSession();
   }, AUTO_LOCK_TIMEOUT);
 }
 
@@ -1084,10 +1102,7 @@ app.whenReady().then(async () => {
   writeExtensionLockfile(); // For BACKEND_URL mode — sidecar writes its own in sidecar mode
 
   // Clear any stale extension session from a previous run
-  const api = getApiBase();
-  if (api) {
-    fetch(`${api}/extension/lock`, { method: 'POST' }).catch(() => {});
-  }
+  lockExtensionSession();
 
   // Certificate verification for API server connections in production
   if (!isDev && backendUrl && backendUrl.startsWith('https://')) {
