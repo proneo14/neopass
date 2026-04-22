@@ -18,4 +18,12 @@ export default defineConfig({
       '@': path.resolve(__dirname, 'src/renderer'),
     },
   },
+  test: {
+    root: path.resolve(__dirname),
+    include: [
+      'src/**/*.{test,spec}.{ts,tsx}',
+      '../testing/electron/**/*.{test,spec}.{ts,tsx}',
+    ],
+    environment: 'node',
+  },
 });

@@ -321,6 +321,8 @@ jobs:
           cache-dependency-path: extension/package-lock.json
       - run: npm ci
       - run: npm test
+      - name: Run integration tests
+        run: npx jest --config ../testing/extension/jest.config.js --rootDir ../testing/extension
 
   extension-build:
     name: Extension Build (${{ matrix.browser }})

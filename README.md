@@ -7,7 +7,7 @@ A post-quantum password manager featuring end-to-end encryption with hybrid clas
 | Component | Technology | Description |
 |-----------|-----------|-------------|
 | **Backend** | Go 1.25 / chi router | REST API server with TLS, rate limiting, JWT auth |
-| **Database** | PostgreSQL 16 | Vault storage, user accounts, audit log |
+| **Database** | PostgreSQL 16 / SQLite | Vault storage, user accounts, audit log (SQLite for standalone/dev) |
 | **Desktop App** | Electron 41 / React 18 / Vite | Cross-platform desktop client with biometric unlock |
 | **Browser Extension** | WebExtension (Chrome/Firefox/Edge) | Autofill, native messaging bridge |
 | **Native Host** | Go binary (stdio) | Bridge between browser extension and sidecar/server |
@@ -15,7 +15,7 @@ A post-quantum password manager featuring end-to-end encryption with hybrid clas
 ```
 ┌──────────────┐     ┌──────────────┐     ┌──────────────┐
 │  Electron    │────▶│  Go Server   │────▶│  PostgreSQL  │
-│  Desktop App │     │  (API v1)    │     │              │
+│  Desktop App │     │  (API v1)    │     │  or SQLite   │
 └──────────────┘     └──────┬───────┘     └──────────────┘
                             │
 ┌──────────────┐     ┌──────┴───────┐
@@ -118,6 +118,8 @@ Rate limited: **5 requests/minute per IP**
 
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
+| `POST` | `/admin/test-pg-connection` | Yes | Test PostgreSQL connection (for migration) |
+| `POST` | `/admin/migrate-to-postgres` | Yes | Migrate data from SQLite to PostgreSQL |
 | `GET` | `/admin/my-org` | Yes | Get user's current organization |
 | `GET` | `/admin/my-invitations` | Yes | Get pending invitations for user |
 | `POST` | `/admin/orgs` | Yes | Create a new organization |
@@ -190,9 +192,13 @@ Localhost-only, protected by shared secret (not under `/api/v1`):
 
 ### Migrations
 
+**PostgreSQL** (`migrations/`):
 - `001_initial.sql` — Core schema: users, orgs, vault entries, folders, TOTP, sessions, audit log, sync cursors
 - `002_admin.sql` — Policy column on organizations, invitations table
 - `003_sync.sql` — Soft-delete flag (`is_deleted`) on vault entries
+
+**SQLite** (`migrations/sqlite/`):
+- `001_initial.sql` — Combined schema (all tables in one migration, SQLite-compatible syntax)
 
 ## Device Switching & Biometric Unlock
 
@@ -286,6 +292,8 @@ Wire format uses hex-encoded encrypted data and nonces. Soft-deleted entries are
 | `CORS_ORIGINS` | — | Comma-separated allowed CORS origins (no wildcard in production) |
 | `SIDECAR_MODE` | — | Set to `"1"` to enable sidecar mode (Electron-managed server) |
 | `EXTENSION_SECRET` | — | Shared secret for extension bridge auth (auto-generated in sidecar mode) |
+| `STORAGE_BACKEND` | `"postgres"` | Storage backend: `"postgres"` or `"sqlite"` |
+| `SQLITE_DB_PATH` | Platform app data dir | Path to SQLite database file (used when `STORAGE_BACKEND=sqlite`) |
 | `ENABLE_SMS_2FA` | `"false"` | Set to `"true"` to enable SMS 2FA via Telnyx |
 | `TELNYX_API_KEY` | — | Telnyx API key for SMS 2FA |
 | `TELNYX_FROM_NUMBER` | — | Telnyx sender phone number or messaging profile ID |
@@ -296,7 +304,7 @@ Wire format uses hex-encoded encrypted data and nonces. Soft-deleted entries are
 
 - **Go** 1.25+
 - **Node.js** 18+ and npm
-- **PostgreSQL** 16+ (or Docker)
+- **PostgreSQL** 16+ (or Docker) — not required when using SQLite backend
 - **Docker & Docker Compose** (optional, for containerized deployment)
 
 ### Quick Start (Docker)
@@ -321,6 +329,29 @@ export LOG_LEVEL=debug
 # Run the server
 go run ./cmd/server/main.go
 ```
+
+### Standalone Setup (SQLite)
+
+No PostgreSQL required — uses a local SQLite database:
+
+```bash
+export STORAGE_BACKEND=sqlite
+export SQLITE_DB_PATH="$HOME/.config/QuantumPasswordManager/vault.db"
+export PORT=8443
+export LOG_LEVEL=debug
+
+go run ./cmd/server/main.go
+```
+
+On Windows (PowerShell):
+```powershell
+$env:STORAGE_BACKEND = "sqlite"
+$env:SQLITE_DB_PATH = "$env:APPDATA\QuantumPasswordManager\vault.db"
+$env:PORT = "8443"
+go run ./cmd/server/main.go
+```
+
+> **Note:** Organization/admin features return `501 Not Implemented` on the SQLite backend. Use the Settings page to migrate to PostgreSQL when ready.
 
 ### Desktop App (Electron)
 
@@ -379,12 +410,91 @@ The installer:
 - On Windows, registers manifests in `HKCU` registry keys for Chrome, Edge, and Firefox
 - Native host name: `com.quantum.passwordmanager`
 
+## Testing
+
+All tests are centralized in the `testing/` directory. The suite covers Go backend, Electron desktop app, and browser extension.
+
+### Run All Tests
+
+```bash
+# Go backend tests (crypto, auth, vault, admin — 39 tests)
+go test -v ./testing/...
+
+# Electron tests (IPC crypto, login flow, biometric — 18 tests)
+cd electron && npm test
+
+# Extension tests (autofill, native messaging — 27 tests)
+cd extension && npx jest --config ../testing/extension/jest.config.js --rootDir ../testing/extension
+```
+
+### Go Backend Tests (`testing/`)
+
+Run with race detector and coverage:
+```bash
+go test -race -coverprofile=coverage.out ./testing/...
+```
+
+| File | Tests | Description |
+|------|-------|-------------|
+| `crypto_test.go` | 15 + 2 benchmarks | KDF determinism, AES-256-GCM round-trip/tamper, X-Wing KEM exchange, ML-DSA-65 sign/verify, escrow, ZeroBytes |
+| `auth_handler_test.go` | 8 | Register success/duplicate, login success/wrong password/2FA, rate limiting (429 on 6th attempt), refresh valid/expired |
+| `vault_handler_test.go` | 9 | Create/get/update/delete entries, list with filters, unauthorized access, invalid type, folder CRUD |
+| `admin_service_test.go` | 7 | Create org, access vault as admin/non-admin, change password, audit log, invite+accept, leave org |
+
+Tests use in-memory mock repositories (`mocks.go`) — no database required. Benchmarks:
+```bash
+go test -bench=. -benchmem ./testing/...
+```
+
+### Electron Tests (`testing/electron/`)
+
+Included in the electron vitest config and run via `npm test` from the `electron/` directory:
+
+| File | Tests | Description |
+|------|-------|-------------|
+| `crypto.test.ts` | 8 | IPC encrypt/decrypt round-trip, auth login, vault list, biometric availability, clipboard |
+| `login.spec.ts` | 10 | Login with valid/invalid credentials, 2FA flow, vault loading + decryption, biometric unlock/not-configured |
+
+### Extension Tests (`testing/extension/`)
+
+Run from the `extension/` directory:
+```bash
+cd extension
+npx jest --config ../testing/extension/jest.config.js --rootDir ../testing/extension
+```
+
+| File | Tests | Description |
+|------|-------|-------------|
+| `autofill.test.ts` | 10 | Standard login form detection, SPA forms without `<form>` tag, MutationObserver dynamic form insertion, field value setting with native setter + event dispatch, no false positives on search forms |
+| `native-messaging.test.ts` | 17 | JSON message serialization, 4-byte length-prefix encoding, credential request/response flow, ping/status/lock/save actions, timeout handling, domain matching (exact, subdomain, spoofing prevention) |
+
+### CI
+
+All tests run automatically on push to `main` and pull requests via GitHub Actions (`.github/workflows/ci.yml`):
+
+| Job | Runner | Description |
+|-----|--------|-------------|
+| `go-lint` | ubuntu | golangci-lint |
+| `go-security` | ubuntu | gosec security scanning |
+| `go-test` | ubuntu | `go test -race` with coverage upload |
+| `go-build` | ubuntu | Cross-compile (linux, darwin, darwin-arm64, windows) |
+| `docker` | ubuntu | Docker build + health endpoint verification |
+| `electron-lint` | ubuntu | ESLint |
+| `electron-test` | ubuntu | Vitest (includes `testing/electron/`) |
+| `electron-build` | ubuntu | Vite production build |
+| `release-windows` | windows | NSIS installer (`.exe`) |
+| `release-mac` | macos | DMG installer |
+| `release-linux` | ubuntu | AppImage + `.deb` |
+| `extension-lint` | ubuntu | ESLint |
+| `extension-test` | ubuntu | Jest + integration tests from `testing/extension/` |
+| `extension-build` | ubuntu | Build + zip for Chrome, Firefox, Edge |
+
 ## Docker
 
 ### Dockerfile
 
 Multi-stage build:
-1. **Builder**: `golang:1.24-alpine` — downloads dependencies, compiles server + native host binaries with `CGO_ENABLED=0`, `-trimpath`, `-ldflags="-s -w"`
+1. **Builder**: `golang:1.24-alpine` (with `GOTOOLCHAIN=auto` to satisfy `go 1.25` in go.mod) — downloads dependencies, compiles server + native host binaries with `CGO_ENABLED=0`, `-trimpath`, `-ldflags="-s -w"`
 2. **Runtime**: `alpine:3.20` — minimal image with `ca-certificates` and `tzdata`, runs as non-root `appuser` (UID 1000)
 
 ### docker-compose.yml
@@ -429,6 +539,7 @@ docker compose down -v
 | Target | Description |
 |--------|-------------|
 | `build-server` | Build Go API server binary |
+| `build-standalone` | Build standalone server binary |
 | `build-nativehost` | Build native messaging host binary |
 | `build-electron` | Build Electron desktop app |
 | `build-extension-chrome` | Build Chrome extension |
@@ -437,15 +548,23 @@ docker compose down -v
 | `build-extensions` | Build all browser extensions |
 | `build-all` | Build everything |
 | `test` | Run all tests (Go + Electron + Extension) |
+| `test-go` | Run Go tests only |
+| `test-electron` | Run Electron tests only |
+| `test-extension` | Run extension tests only |
 | `docker` | Build Docker images |
 | `docker-up` | Start containers (`docker compose up --build -d`) |
 | `docker-down` | Stop containers |
 | `lint` | Run all linters (golangci-lint + eslint) |
-| `package-extensions` | Zip extensions for store submission |
+| `lint-go` | Run Go linter only |
+| `package-extension-chrome` | Build and zip Chrome extension |
+| `package-extension-firefox` | Build and zip Firefox extension |
+| `package-extension-edge` | Build and zip Edge extension |
+| `package-extensions` | Zip all extensions for store submission |
 | `dist-electron` | Package Electron app for current platform |
 | `dist-electron-win` | Package Electron app for Windows (NSIS) |
 | `dist-electron-mac` | Package Electron app for macOS (DMG) |
 | `dist-electron-linux` | Package Electron app for Linux (AppImage + deb) |
+| `migrate` | Run database migrations |
 | `clean` | Remove all build artifacts |
 
 ## Distribution
@@ -538,7 +657,8 @@ npm run package:edge    # Edge only
 │   ├── db/                      # PostgreSQL repositories (pgx)
 │   ├── sync/                    # Multi-device sync with conflict resolution
 │   └── vault/                   # Vault CRUD service
-├── migrations/                  # PostgreSQL migration SQL files
+├── testing/                     # Centralized test suite (Go, Electron, Extension)
+├── migrations/                  # SQL migration files (PostgreSQL + SQLite)
 ├── electron/                    # Desktop app (Electron + React + Vite)
 │   └── src/
 │       ├── main/                # Electron main process, biometric, preload
@@ -549,10 +669,24 @@ npm run package:edge    # Edge only
 │       ├── content/             # Content script + autofill
 │       ├── popup/               # Extension popup UI
 │       └── lib/                 # Shared browser API + messaging
+├── testing/                     # Centralized test suite
+│   ├── crypto_test.go           # Crypto tests (KDF, AES-GCM, X-Wing, ML-DSA-65)
+│   ├── mocks.go                 # Mock repositories (User, Vault, Org, Audit)
+│   ├── auth_handler_test.go     # Auth handler tests (register, login, 2FA, rate limit)
+│   ├── vault_handler_test.go    # Vault handler tests (CRUD, auth, filters)
+│   ├── admin_service_test.go    # Admin service tests (orgs, escrow, audit)
+│   ├── electron/                # Electron IPC + flow tests (vitest)
+│   │   ├── crypto.test.ts
+│   │   └── login.spec.ts
+│   └── extension/               # Extension autofill + native messaging tests (jest)
+│       ├── jest.config.js
+│       ├── autofill.test.ts
+│       └── native-messaging.test.ts
 ├── bin/                         # Pre-built native host binaries
 ├── scripts/                     # Native host installers (bash + PowerShell)
 ├── Dockerfile                   # Multi-stage Go build
 ├── docker-compose.yml           # PostgreSQL + server
+├── .github/workflows/ci.yml     # CI/CD pipeline (lint, test, build, release)
 ├── Makefile                     # Build, test, lint, package targets
 ├── SECURITY.md                  # Security policy and threat model
 └── go.mod                       # Go module definition
