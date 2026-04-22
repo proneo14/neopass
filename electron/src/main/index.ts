@@ -107,8 +107,30 @@ async function startSidecar(): Promise<void> {
       sidecarProcess = null;
     });
 
-    // Wait briefly for sidecar to start
-    await new Promise<void>((resolve) => setTimeout(resolve, 1000));
+    // Wait for sidecar to become ready by polling the health endpoint
+    const maxAttempts = 30; // 30 x 200ms = 6 seconds max
+    let ready = false;
+    for (let i = 0; i < maxAttempts; i++) {
+      await new Promise<void>((resolve) => setTimeout(resolve, 200));
+      if (!sidecarProcess) {
+        console.error('[sidecar] process exited before becoming ready');
+        break;
+      }
+      try {
+        const res = await fetch(`http://127.0.0.1:${sidecarPort}/health`);
+        if (res.ok) {
+          ready = true;
+          console.log(`[sidecar] ready on port ${sidecarPort}`);
+          break;
+        }
+      } catch {
+        // Not ready yet, keep polling
+      }
+    }
+    if (!ready) {
+      console.error('[sidecar] failed to become ready within timeout');
+      sidecarPort = null;
+    }
   } catch (err) {
     console.error('Failed to start sidecar:', err);
   }
@@ -224,7 +246,7 @@ function createWindow(): void {
       responseHeaders: {
         ...details.responseHeaders,
         'Content-Security-Policy': [
-          "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self' http://localhost:*",
+          "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self' http://localhost:* http://127.0.0.1:*",
         ],
       },
     });
