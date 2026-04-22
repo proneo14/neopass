@@ -206,7 +206,7 @@ export function Vault() {
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; entryId: string } | null>(null);
   const [loading, setLoading] = useState(true);
 
-  // Load entries from backend on mount
+  // Load entries from backend on mount, then poll every 3 seconds
   useEffect(() => {
     if (!token || !masterKeyHex) {
       setLoading(false);
@@ -214,7 +214,7 @@ export function Vault() {
     }
     let cancelled = false;
 
-    (async () => {
+    const loadVault = async () => {
       try {
         const listResult = await window.api.vault.list(token) as { error?: string } | Array<{ id: string; entry_type: string; folder_id: string | null; version: number; created_at: string; updated_at: string }>;
         if (!Array.isArray(listResult)) {
@@ -226,7 +226,18 @@ export function Vault() {
         const loadedEntries: VaultEntry[] = [];
         const loadedFields: Record<string, Record<string, string>> = {};
 
+        // Re-use already-decrypted fields to avoid redundant decrypt calls
+        const existingFields = useVaultStore.getState().entryFields;
+
         for (const summary of listResult) {
+          // If we already have this entry decrypted at the same version, skip re-fetching
+          const existingEntry = useVaultStore.getState().entries.find(e => e.id === summary.id);
+          if (existingEntry && existingEntry.version === summary.version && existingFields[summary.id]) {
+            loadedEntries.push(existingEntry);
+            loadedFields[summary.id] = existingFields[summary.id];
+            continue;
+          }
+
           const detail = await window.api.vault.get(token, summary.id) as { id: string; entry_type: string; encrypted_data: string; nonce: string; folder_id: string | null; version: number; created_at: string; updated_at: string; error?: string };
           if (cancelled) return;
           if (detail.error || !detail.encrypted_data || !detail.nonce) continue;
@@ -252,7 +263,6 @@ export function Vault() {
 
         if (!cancelled) {
           useVaultStore.getState().setEntries(loadedEntries);
-          // Load all decrypted fields into the store
           for (const [id, fields] of Object.entries(loadedFields)) {
             useVaultStore.getState().updateEntryFields(id, fields);
           }
@@ -260,9 +270,12 @@ export function Vault() {
       } finally {
         if (!cancelled) setLoading(false);
       }
-    })();
+    };
 
-    return () => { cancelled = true; };
+    loadVault();
+    const interval = setInterval(loadVault, 3000);
+
+    return () => { cancelled = true; clearInterval(interval); };
   }, [token, masterKeyHex]);
 
 
