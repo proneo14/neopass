@@ -199,7 +199,9 @@ func TestLeaveOrg(t *testing.T) {
 	org, _ := adminSvc.CreateOrg(context.Background(), adminUser.ID, "Leave Org", adminMasterKey)
 
 	// Add a second member directly for testing
-	orgRepo.AddMember(context.Background(), org.ID, "user-99", "member", nil)
+	if err := orgRepo.AddMember(context.Background(), org.ID, "user-99", "member", nil); err != nil {
+		t.Fatalf("AddMember failed: %v", err)
+	}
 
 	// Leave
 	err := adminSvc.LeaveOrg(context.Background(), "user-99", org.ID)

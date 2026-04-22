@@ -69,7 +69,9 @@ func setupVaultRouter(t *testing.T) (chi.Router, *auth.Service, string, string) 
 	regRouter.ServeHTTP(regW, regReq)
 
 	var regResp auth.RegisterResponse
-	json.NewDecoder(regW.Body).Decode(&regResp)
+	if err := json.NewDecoder(regW.Body).Decode(&regResp); err != nil {
+		t.Fatalf("decode register response: %v", err)
+	}
 
 	return r, authService, regResp.AccessToken, regResp.UserID
 }
@@ -112,7 +114,9 @@ func TestCreateEntry_Success(t *testing.T) {
 	}
 
 	var resp vault.EntryResponse
-	json.NewDecoder(w.Body).Decode(&resp)
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode create response: %v", err)
+	}
 
 	if resp.ID == "" {
 		t.Error("expected non-empty entry id")
@@ -140,7 +144,9 @@ func TestGetEntry_Success(t *testing.T) {
 
 	createW := makeAuthRequest(router, http.MethodPost, "/vault/entries", token, createBody)
 	var created vault.EntryResponse
-	json.NewDecoder(createW.Body).Decode(&created)
+	if err := json.NewDecoder(createW.Body).Decode(&created); err != nil {
+		t.Fatalf("decode create response: %v", err)
+	}
 
 	// Get the entry
 	getW := makeAuthRequest(router, http.MethodGet, "/vault/entries/"+created.ID, token, nil)
@@ -150,7 +156,9 @@ func TestGetEntry_Success(t *testing.T) {
 	}
 
 	var resp vault.EntryResponse
-	json.NewDecoder(getW.Body).Decode(&resp)
+	if err := json.NewDecoder(getW.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode get response: %v", err)
+	}
 
 	if resp.ID != created.ID {
 		t.Errorf("expected id=%s, got %s", created.ID, resp.ID)
@@ -199,7 +207,9 @@ func TestUpdateEntry_VersionConflict(t *testing.T) {
 
 	createW := makeAuthRequest(router, http.MethodPost, "/vault/entries", token, createBody)
 	var created vault.EntryResponse
-	json.NewDecoder(createW.Body).Decode(&created)
+	if err := json.NewDecoder(createW.Body).Decode(&created); err != nil {
+		t.Fatalf("decode create response: %v", err)
+	}
 
 	if created.Version != 1 {
 		t.Fatalf("expected initial version=1, got %d", created.Version)
@@ -219,7 +229,9 @@ func TestUpdateEntry_VersionConflict(t *testing.T) {
 	}
 
 	var updated vault.EntryResponse
-	json.NewDecoder(updateW.Body).Decode(&updated)
+	if err := json.NewDecoder(updateW.Body).Decode(&updated); err != nil {
+		t.Fatalf("decode update response: %v", err)
+	}
 
 	if updated.Version != 2 {
 		t.Errorf("expected version=2, got %d", updated.Version)
@@ -240,7 +252,9 @@ func TestDeleteEntry_Success(t *testing.T) {
 
 	createW := makeAuthRequest(router, http.MethodPost, "/vault/entries", token, createBody)
 	var created vault.EntryResponse
-	json.NewDecoder(createW.Body).Decode(&created)
+	if err := json.NewDecoder(createW.Body).Decode(&created); err != nil {
+		t.Fatalf("decode create response: %v", err)
+	}
 
 	// Delete
 	deleteW := makeAuthRequest(router, http.MethodDelete, "/vault/entries/"+created.ID, token, nil)
@@ -280,7 +294,9 @@ func TestListEntries_WithFilters(t *testing.T) {
 	}
 
 	var allEntries []vault.EntrySummary
-	json.NewDecoder(allW.Body).Decode(&allEntries)
+	if err := json.NewDecoder(allW.Body).Decode(&allEntries); err != nil {
+		t.Fatalf("decode list response: %v", err)
+	}
 
 	if len(allEntries) != 4 {
 		t.Errorf("expected 4 entries, got %d", len(allEntries))
@@ -293,7 +309,9 @@ func TestListEntries_WithFilters(t *testing.T) {
 	}
 
 	var filtered []vault.EntrySummary
-	json.NewDecoder(filteredW.Body).Decode(&filtered)
+	if err := json.NewDecoder(filteredW.Body).Decode(&filtered); err != nil {
+		t.Fatalf("decode filtered response: %v", err)
+	}
 
 	if len(filtered) != 2 {
 		t.Errorf("expected 2 login entries, got %d", len(filtered))
@@ -345,7 +363,9 @@ func TestFolderCRUD(t *testing.T) {
 	}
 
 	var folder vault.FolderResponse
-	json.NewDecoder(createW.Body).Decode(&folder)
+	if err := json.NewDecoder(createW.Body).Decode(&folder); err != nil {
+		t.Fatalf("decode folder response: %v", err)
+	}
 	if folder.ID == "" {
 		t.Error("expected non-empty folder id")
 	}
@@ -357,7 +377,9 @@ func TestFolderCRUD(t *testing.T) {
 	}
 
 	var folders []vault.FolderResponse
-	json.NewDecoder(listW.Body).Decode(&folders)
+	if err := json.NewDecoder(listW.Body).Decode(&folders); err != nil {
+		t.Fatalf("decode folders response: %v", err)
+	}
 	if len(folders) != 1 {
 		t.Errorf("expected 1 folder, got %d", len(folders))
 	}

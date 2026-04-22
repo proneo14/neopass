@@ -229,7 +229,9 @@ func TestLogin_With2FA(t *testing.T) {
 	router.ServeHTTP(w, req)
 
 	var regResp auth.RegisterResponse
-	json.NewDecoder(w.Body).Decode(&regResp)
+	if err := json.NewDecoder(w.Body).Decode(&regResp); err != nil {
+		t.Fatalf("decode register response: %v", err)
+	}
 
 	// Enable 2FA
 	userRepo.SetHas2FA(regResp.UserID, true)
@@ -250,7 +252,9 @@ func TestLogin_With2FA(t *testing.T) {
 	}
 
 	var resp auth.LoginResponse
-	json.NewDecoder(loginW.Body).Decode(&resp)
+	if err := json.NewDecoder(loginW.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode login response: %v", err)
+	}
 
 	if !resp.Requires2FA {
 		t.Error("expected requires_2fa to be true")
@@ -314,7 +318,9 @@ func TestRefreshToken_Valid(t *testing.T) {
 	router.ServeHTTP(w, req)
 
 	var regResp auth.RegisterResponse
-	json.NewDecoder(w.Body).Decode(&regResp)
+	if err := json.NewDecoder(w.Body).Decode(&regResp); err != nil {
+		t.Fatalf("decode register response: %v", err)
+	}
 
 	// Refresh
 	refreshBody := map[string]interface{}{
@@ -331,7 +337,9 @@ func TestRefreshToken_Valid(t *testing.T) {
 	}
 
 	var resp auth.TokenResponse
-	json.NewDecoder(refreshW.Body).Decode(&resp)
+	if err := json.NewDecoder(refreshW.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode refresh response: %v", err)
+	}
 
 	if resp.AccessToken == "" {
 		t.Error("expected new access_token")
