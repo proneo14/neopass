@@ -79,8 +79,10 @@ func main() {
 		r.Use(api.CORSMiddleware(cfg.CORSOrigins))
 	}
 
-	// CSRF protection for browser clients
-	r.Use(api.CSRFMiddleware)
+	// CSRF protection for browser clients (skip in sidecar mode — local-only server)
+	if !cfg.SidecarMode {
+		r.Use(api.CSRFMiddleware)
+	}
 
 	// General rate limiter: 100 requests per minute per IP
 	generalLimiter := api.NewRateLimiter(100, 1*time.Minute)
