@@ -203,7 +203,7 @@ func CSRFMiddleware(next http.Handler) http.Handler {
 		cookie, err := r.Cookie("csrf_token")
 		if err != nil || cookie.Value == "" {
 			token := generateCSRFToken()
-			http.SetCookie(w, &http.Cookie{
+			http.SetCookie(w, &http.Cookie{ // #nosec G124 -- HttpOnly:false is intentional for CSRF double-submit pattern
 				Name:     "csrf_token",
 				Value:    token,
 				Path:     "/",
@@ -212,7 +212,7 @@ func CSRFMiddleware(next http.Handler) http.Handler {
 				SameSite: http.SameSiteStrictMode,
 				MaxAge:   86400,
 			})
-			cookie = &http.Cookie{Value: token}
+			cookie = &http.Cookie{Value: token} // #nosec G124 -- local-only reference, not sent to client
 		}
 
 		// Safe methods are exempt from CSRF validation

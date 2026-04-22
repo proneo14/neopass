@@ -33,7 +33,7 @@ func NewSQLiteDB(dbPath string) (*SQLiteDB, error) {
 
 	// Verify connection
 	if err := db.Ping(); err != nil {
-		db.Close()
+		_ = db.Close()
 		return nil, fmt.Errorf("ping sqlite database: %w", err)
 	}
 
@@ -45,7 +45,7 @@ func NewSQLiteDB(dbPath string) (*SQLiteDB, error) {
 	}
 	for _, p := range pragmas {
 		if _, err := db.Exec(p); err != nil {
-			db.Close()
+			_ = db.Close()
 			return nil, fmt.Errorf("set pragma %q: %w", p, err)
 		}
 	}
@@ -59,7 +59,7 @@ func NewSQLiteDB(dbPath string) (*SQLiteDB, error) {
 
 // Close shuts down the SQLite database connection.
 func (s *SQLiteDB) Close() {
-	s.DB.Close()
+	_ = s.DB.Close()
 	log.Info().Msg("sqlite database connection closed")
 }
 

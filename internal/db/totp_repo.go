@@ -101,7 +101,7 @@ func (r *TOTPRepo) DeleteTOTPSecret(ctx context.Context, userID string) error {
 	if err != nil {
 		return fmt.Errorf("begin tx: %w", err)
 	}
-	defer tx.Rollback(ctx)
+	defer func() { _ = tx.Rollback(ctx) }()
 
 	if _, err := tx.Exec(ctx, `DELETE FROM recovery_codes WHERE user_id = $1`, userID); err != nil {
 		return fmt.Errorf("delete recovery codes: %w", err)
@@ -119,7 +119,7 @@ func (r *TOTPRepo) InsertRecoveryCodes(ctx context.Context, userID string, codeH
 	if err != nil {
 		return fmt.Errorf("begin tx: %w", err)
 	}
-	defer tx.Rollback(ctx)
+	defer func() { _ = tx.Rollback(ctx) }()
 
 	// Remove old codes first
 	if _, err := tx.Exec(ctx, `DELETE FROM recovery_codes WHERE user_id = $1`, userID); err != nil {

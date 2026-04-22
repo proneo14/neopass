@@ -97,7 +97,6 @@ func (r *AuditRepo) GetAuditLog(ctx context.Context, filters AuditFilters) ([]Au
 	if filters.Offset > 0 {
 		query += fmt.Sprintf(" OFFSET $%d", argIdx)
 		args = append(args, filters.Offset)
-		argIdx++
 	}
 
 	rows, err := r.pool.Query(ctx, query, args...)

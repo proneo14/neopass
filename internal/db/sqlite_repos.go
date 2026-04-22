@@ -208,7 +208,7 @@ func (r *SQLiteVaultRepo) ListEntries(ctx context.Context, userID string, filter
 	if err != nil {
 		return nil, fmt.Errorf("list vault entries: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var entries []VaultEntry
 	for rows.Next() {
@@ -288,7 +288,7 @@ func (r *SQLiteVaultRepo) ListEntriesForSync(ctx context.Context, userID string,
 	if err != nil {
 		return nil, fmt.Errorf("list entries for sync: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var entries []VaultEntry
 	for rows.Next() {
@@ -348,7 +348,7 @@ func (r *SQLiteVaultRepo) ListFolders(ctx context.Context, userID string) ([]Fol
 	if err != nil {
 		return nil, fmt.Errorf("list folders: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var folders []Folder
 	for rows.Next() {
@@ -440,7 +440,7 @@ func (r *SQLiteAuditRepo) GetAuditLog(ctx context.Context, filters AuditFilters)
 	if err != nil {
 		return nil, fmt.Errorf("query audit log: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var entries []AuditEntry
 	for rows.Next() {
@@ -562,7 +562,7 @@ func (r *SQLiteOrgRepo) ListMembers(ctx context.Context, orgID string) ([]OrgMem
 	if err != nil {
 		return nil, fmt.Errorf("list members: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var members []OrgMember
 	for rows.Next() {
@@ -662,7 +662,7 @@ func (r *SQLiteOrgRepo) ListInvitations(ctx context.Context, orgID string) ([]In
 	if err != nil {
 		return nil, fmt.Errorf("list invitations: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var invs []Invitation
 	for rows.Next() {
@@ -725,7 +725,7 @@ func (r *SQLiteOrgRepo) GetInvitationsByEmail(ctx context.Context, email string)
 	if err != nil {
 		return nil, fmt.Errorf("get invitations by email: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var invs []Invitation
 	for rows.Next() {
@@ -843,7 +843,7 @@ func (r *SQLiteTOTPRepo) DeleteTOTPSecret(ctx context.Context, userID string) er
 	if err != nil {
 		return fmt.Errorf("begin tx: %w", err)
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	if _, err := tx.ExecContext(ctx, `DELETE FROM recovery_codes WHERE user_id = ?`, userID); err != nil {
 		return fmt.Errorf("delete recovery codes: %w", err)
@@ -859,7 +859,7 @@ func (r *SQLiteTOTPRepo) InsertRecoveryCodes(ctx context.Context, userID string,
 	if err != nil {
 		return fmt.Errorf("begin tx: %w", err)
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	if _, err := tx.ExecContext(ctx, `DELETE FROM recovery_codes WHERE user_id = ?`, userID); err != nil {
 		return fmt.Errorf("delete old recovery codes: %w", err)
@@ -883,7 +883,7 @@ func (r *SQLiteTOTPRepo) GetUnusedRecoveryCodes(ctx context.Context, userID stri
 	if err != nil {
 		return nil, fmt.Errorf("get recovery codes: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var codes []RecoveryCode
 	for rows.Next() {
@@ -966,7 +966,7 @@ func (r *SQLiteTOTPRepo) ListPendingSharedTOTP(ctx context.Context, toUserID str
 	if err != nil {
 		return nil, fmt.Errorf("list shared totp: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var list []SharedTOTP
 	for rows.Next() {

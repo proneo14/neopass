@@ -105,7 +105,6 @@ func (r *VaultRepo) ListEntries(ctx context.Context, userID string, filters Vaul
 	if filters.UpdatedSince != nil {
 		query += fmt.Sprintf(" AND updated_at > $%d", argIdx)
 		args = append(args, *filters.UpdatedSince)
-		argIdx++
 	}
 
 	query += " ORDER BY updated_at DESC"

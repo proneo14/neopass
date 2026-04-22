@@ -153,7 +153,7 @@ func (s *SMSService) sendTelnyxSMS(ctx context.Context, to string, body string) 
 	if err != nil {
 		return fmt.Errorf("telnyx api call: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return fmt.Errorf("telnyx api error: status %d", resp.StatusCode)
@@ -183,7 +183,7 @@ func generateNumericCode(length int) (string, error) {
 		if err != nil {
 			return "", err
 		}
-		code[i] = '0' + byte(n.Int64())
+		code[i] = '0' + byte(n.Int64()) // #nosec G115 -- n is always 0-9 from big.NewInt(10)
 	}
 	return string(code), nil
 }

@@ -108,7 +108,7 @@ func configureLogging() *os.File {
 	}
 
 	logPath := filepath.Join(logDir, "nativehost.log")
-	f, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
+	f, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600) // #nosec G304 -- path is from user-specific app data dir
 	if err != nil {
 		log.Logger = zerolog.New(os.Stderr).With().Timestamp().Logger()
 		return nil
@@ -147,7 +147,7 @@ func writeMessage(w io.Writer, resp *Response) error {
 		return err
 	}
 
-	if err := binary.Write(w, binary.LittleEndian, uint32(len(data))); err != nil {
+	if err := binary.Write(w, binary.LittleEndian, uint32(len(data))); err != nil { // #nosec G115 -- message size is bounded by maxMessageLen
 		return err
 	}
 
@@ -215,7 +215,7 @@ func (c *SidecarClient) getSidecarURL() (string, error) {
 	}
 
 	lockPath := filepath.Join(getAppDataDir(), "sidecar.lock")
-	data, err := os.ReadFile(lockPath)
+	data, err := os.ReadFile(lockPath) // #nosec G304 -- path is from user-specific app data dir
 	if err != nil {
 		return "", fmt.Errorf("sidecar lockfile not found: %w", err)
 	}
@@ -458,7 +458,7 @@ func findDesktopApp() string {
 			filepath.Join(os.Getenv("PROGRAMFILES"), "Quantum Password Manager", "Quantum Password Manager.exe"),
 		}
 		for _, p := range candidates {
-			if _, err := os.Stat(p); err == nil {
+			if _, err := os.Stat(p); err == nil { // #nosec G703 -- candidates are hardcoded known install paths
 				return p
 			}
 		}
