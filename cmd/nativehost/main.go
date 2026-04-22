@@ -71,7 +71,7 @@ func main() {
 	// Log to stderr so stdout is reserved for native messaging protocol
 	logFile := configureLogging()
 	if logFile != nil {
-		defer logFile.Close()
+		defer func() { _ = logFile.Close() }()
 	}
 
 	log.Info().Msg("native messaging host started")
@@ -273,7 +273,7 @@ func (c *SidecarClient) getCredentials(domain string) *Response {
 		c.baseURL = ""
 		return &Response{Error: "Desktop app not running"}
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		return &Response{Error: fmt.Sprintf("sidecar returned %d", resp.StatusCode)}
@@ -299,7 +299,7 @@ func (c *SidecarClient) saveCredential(domain, username, encryptedPassword strin
 		c.baseURL = ""
 		return &Response{Error: "Desktop app not running"}
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
 		return &Response{Error: fmt.Sprintf("sidecar returned %d", resp.StatusCode)}
@@ -322,7 +322,7 @@ func (c *SidecarClient) updateCredential(id, name, username, password, uri, note
 		c.baseURL = ""
 		return &Response{Error: "Desktop app not running"}
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		return &Response{Error: fmt.Sprintf("sidecar returned %d", resp.StatusCode)}
@@ -337,7 +337,7 @@ func (c *SidecarClient) getStatus() *Response {
 		c.baseURL = ""
 		return &Response{Error: "Desktop app not running"}
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		return &Response{Error: fmt.Sprintf("sidecar returned %d", resp.StatusCode)}
@@ -363,7 +363,7 @@ func (c *SidecarClient) lock() *Response {
 		c.baseURL = ""
 		return &Response{Error: "Desktop app not running"}
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	return &Response{Status: "locked"}
 }

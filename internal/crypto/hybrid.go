@@ -60,6 +60,6 @@ func DeriveSessionKey(sharedSecret [32]byte, context string) [32]byte {
 	h.Write([]byte(context))
 
 	var key [32]byte
-	h.Read(key[:])
+	_, _ = h.Read(key[:])
 	return key
 }

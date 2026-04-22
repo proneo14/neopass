@@ -37,7 +37,7 @@ func MigrateSQLiteToPg(ctx context.Context, sqliteDB *sql.DB, pgPool *pgxpool.Po
 	if err != nil {
 		return result, fmt.Errorf("begin pg transaction: %w", err)
 	}
-	defer tx.Rollback(ctx)
+	defer func() { _ = tx.Rollback(ctx) }()
 
 	// 1. Users
 	rows, err := sqliteDB.QueryContext(ctx,
@@ -49,7 +49,7 @@ func MigrateSQLiteToPg(ctx context.Context, sqliteDB *sql.DB, pgPool *pgxpool.Po
 		var id, email, kdfStr, createdStr, updatedStr string
 		var authHash, salt, pubKey, encPrivKey []byte
 		if err := rows.Scan(&id, &email, &authHash, &salt, &kdfStr, &pubKey, &encPrivKey, &createdStr, &updatedStr); err != nil {
-			rows.Close()
+			_ = rows.Close()
 			return result, fmt.Errorf("scan sqlite user: %w", err)
 		}
 		createdAt := parseTimePg(createdStr)
@@ -60,12 +60,12 @@ func MigrateSQLiteToPg(ctx context.Context, sqliteDB *sql.DB, pgPool *pgxpool.Po
 			 ON CONFLICT (id) DO NOTHING`,
 			id, email, authHash, salt, kdfStr, pubKey, encPrivKey, createdAt, updatedAt,
 		); err != nil {
-			rows.Close()
+			_ = rows.Close()
 			return result, fmt.Errorf("insert pg user %s: %w", id, err)
 		}
 		result.Users++
 	}
-	rows.Close()
+	_ = rows.Close()
 
 	// 2. Organizations
 	rows, err = sqliteDB.QueryContext(ctx,
@@ -78,7 +78,7 @@ func MigrateSQLiteToPg(ctx context.Context, sqliteDB *sql.DB, pgPool *pgxpool.Po
 		var orgPubKey, encOrgPrivKey []byte
 		var policyStr *string
 		if err := rows.Scan(&id, &name, &orgPubKey, &encOrgPrivKey, &policyStr, &createdStr); err != nil {
-			rows.Close()
+			_ = rows.Close()
 			return result, fmt.Errorf("scan sqlite org: %w", err)
 		}
 		createdAt := parseTimePg(createdStr)
@@ -92,12 +92,12 @@ func MigrateSQLiteToPg(ctx context.Context, sqliteDB *sql.DB, pgPool *pgxpool.Po
 			 ON CONFLICT (id) DO NOTHING`,
 			id, name, orgPubKey, encOrgPrivKey, policyJSON, createdAt,
 		); err != nil {
-			rows.Close()
+			_ = rows.Close()
 			return result, fmt.Errorf("insert pg org %s: %w", id, err)
 		}
 		result.Organizations++
 	}
-	rows.Close()
+	_ = rows.Close()
 
 	// 3. Org Members
 	rows, err = sqliteDB.QueryContext(ctx,
@@ -109,7 +109,7 @@ func MigrateSQLiteToPg(ctx context.Context, sqliteDB *sql.DB, pgPool *pgxpool.Po
 		var orgID, userID, role, joinedStr string
 		var escrow []byte
 		if err := rows.Scan(&orgID, &userID, &role, &escrow, &joinedStr); err != nil {
-			rows.Close()
+			_ = rows.Close()
 			return result, fmt.Errorf("scan sqlite org_member: %w", err)
 		}
 		if _, err := tx.Exec(ctx,
@@ -117,12 +117,12 @@ func MigrateSQLiteToPg(ctx context.Context, sqliteDB *sql.DB, pgPool *pgxpool.Po
 			 ON CONFLICT (org_id, user_id) DO NOTHING`,
 			orgID, userID, role, escrow, parseTimePg(joinedStr),
 		); err != nil {
-			rows.Close()
+			_ = rows.Close()
 			return result, fmt.Errorf("insert pg org_member: %w", err)
 		}
 		result.OrgMembers++
 	}
-	rows.Close()
+	_ = rows.Close()
 
 	// 4. Folders
 	rows, err = sqliteDB.QueryContext(ctx,
@@ -135,7 +135,7 @@ func MigrateSQLiteToPg(ctx context.Context, sqliteDB *sql.DB, pgPool *pgxpool.Po
 		var nameEnc []byte
 		var parentID *string
 		if err := rows.Scan(&id, &userID, &nameEnc, &parentID); err != nil {
-			rows.Close()
+			_ = rows.Close()
 			return result, fmt.Errorf("scan sqlite folder: %w", err)
 		}
 		if _, err := tx.Exec(ctx,
@@ -143,12 +143,12 @@ func MigrateSQLiteToPg(ctx context.Context, sqliteDB *sql.DB, pgPool *pgxpool.Po
 			 ON CONFLICT (id) DO NOTHING`,
 			id, userID, nameEnc, parentID,
 		); err != nil {
-			rows.Close()
+			_ = rows.Close()
 			return result, fmt.Errorf("insert pg folder %s: %w", id, err)
 		}
 		result.Folders++
 	}
-	rows.Close()
+	_ = rows.Close()
 
 	// 5. Vault Entries
 	rows, err = sqliteDB.QueryContext(ctx,
@@ -163,7 +163,7 @@ func MigrateSQLiteToPg(ctx context.Context, sqliteDB *sql.DB, pgPool *pgxpool.Po
 		var encData, nonce []byte
 		var version, isDeleted int
 		if err := rows.Scan(&id, &userID, &orgID, &entryType, &encData, &nonce, &version, &folderID, &isDeleted, &createdStr, &updatedStr); err != nil {
-			rows.Close()
+			_ = rows.Close()
 			return result, fmt.Errorf("scan sqlite vault_entry: %w", err)
 		}
 		if _, err := tx.Exec(ctx,
@@ -173,12 +173,12 @@ func MigrateSQLiteToPg(ctx context.Context, sqliteDB *sql.DB, pgPool *pgxpool.Po
 			id, userID, orgID, entryType, encData, nonce, version, folderID, isDeleted != 0,
 			parseTimePg(createdStr), parseTimePg(updatedStr),
 		); err != nil {
-			rows.Close()
+			_ = rows.Close()
 			return result, fmt.Errorf("insert pg vault_entry %s: %w", id, err)
 		}
 		result.VaultEntries++
 	}
-	rows.Close()
+	_ = rows.Close()
 
 	// 6. TOTP Secrets
 	rows, err = sqliteDB.QueryContext(ctx,
@@ -191,7 +191,7 @@ func MigrateSQLiteToPg(ctx context.Context, sqliteDB *sql.DB, pgPool *pgxpool.Po
 		var encSecret []byte
 		var verified int
 		if err := rows.Scan(&id, &userID, &encSecret, &verified, &createdStr); err != nil {
-			rows.Close()
+			_ = rows.Close()
 			return result, fmt.Errorf("scan sqlite totp_secret: %w", err)
 		}
 		if _, err := tx.Exec(ctx,
@@ -199,12 +199,12 @@ func MigrateSQLiteToPg(ctx context.Context, sqliteDB *sql.DB, pgPool *pgxpool.Po
 			 ON CONFLICT (user_id) DO NOTHING`,
 			id, userID, encSecret, verified != 0, parseTimePg(createdStr),
 		); err != nil {
-			rows.Close()
+			_ = rows.Close()
 			return result, fmt.Errorf("insert pg totp_secret %s: %w", id, err)
 		}
 		result.TOTPSecrets++
 	}
-	rows.Close()
+	_ = rows.Close()
 
 	// 7. Shared 2FA
 	rows, err = sqliteDB.QueryContext(ctx,
@@ -217,7 +217,7 @@ func MigrateSQLiteToPg(ctx context.Context, sqliteDB *sql.DB, pgPool *pgxpool.Po
 		var encSecret []byte
 		var claimed int
 		if err := rows.Scan(&id, &fromID, &toID, &encSecret, &expiresStr, &claimed, &createdStr); err != nil {
-			rows.Close()
+			_ = rows.Close()
 			return result, fmt.Errorf("scan sqlite shared_2fa: %w", err)
 		}
 		if _, err := tx.Exec(ctx,
@@ -225,12 +225,12 @@ func MigrateSQLiteToPg(ctx context.Context, sqliteDB *sql.DB, pgPool *pgxpool.Po
 			 VALUES ($1, $2, $3, $4, $5, $6, $7) ON CONFLICT (id) DO NOTHING`,
 			id, fromID, toID, encSecret, parseTimePg(expiresStr), claimed != 0, parseTimePg(createdStr),
 		); err != nil {
-			rows.Close()
+			_ = rows.Close()
 			return result, fmt.Errorf("insert pg shared_2fa %s: %w", id, err)
 		}
 		result.SharedTOTP++
 	}
-	rows.Close()
+	_ = rows.Close()
 
 	// 8. Recovery Codes
 	rows, err = sqliteDB.QueryContext(ctx,
@@ -243,19 +243,19 @@ func MigrateSQLiteToPg(ctx context.Context, sqliteDB *sql.DB, pgPool *pgxpool.Po
 		var codeHash []byte
 		var used int
 		if err := rows.Scan(&id, &userID, &codeHash, &used); err != nil {
-			rows.Close()
+			_ = rows.Close()
 			return result, fmt.Errorf("scan sqlite recovery_code: %w", err)
 		}
 		if _, err := tx.Exec(ctx,
 			`INSERT INTO recovery_codes (id, user_id, code_hash, used) VALUES ($1, $2, $3, $4) ON CONFLICT (id) DO NOTHING`,
 			id, userID, codeHash, used != 0,
 		); err != nil {
-			rows.Close()
+			_ = rows.Close()
 			return result, fmt.Errorf("insert pg recovery_code %s: %w", id, err)
 		}
 		result.RecoveryCodes++
 	}
-	rows.Close()
+	_ = rows.Close()
 
 	// 9. Audit Log
 	rows, err = sqliteDB.QueryContext(ctx,
@@ -267,7 +267,7 @@ func MigrateSQLiteToPg(ctx context.Context, sqliteDB *sql.DB, pgPool *pgxpool.Po
 		var id, action, createdStr string
 		var actorID, targetID, detailsStr *string
 		if err := rows.Scan(&id, &actorID, &targetID, &action, &detailsStr, &createdStr); err != nil {
-			rows.Close()
+			_ = rows.Close()
 			return result, fmt.Errorf("scan sqlite audit_log: %w", err)
 		}
 		var detailsJSON json.RawMessage
@@ -279,12 +279,12 @@ func MigrateSQLiteToPg(ctx context.Context, sqliteDB *sql.DB, pgPool *pgxpool.Po
 			 ON CONFLICT (id) DO NOTHING`,
 			id, actorID, targetID, action, detailsJSON, parseTimePg(createdStr),
 		); err != nil {
-			rows.Close()
+			_ = rows.Close()
 			return result, fmt.Errorf("insert pg audit_log %s: %w", id, err)
 		}
 		result.AuditLog++
 	}
-	rows.Close()
+	_ = rows.Close()
 
 	// 10. Sync Cursors
 	rows, err = sqliteDB.QueryContext(ctx,
@@ -295,7 +295,7 @@ func MigrateSQLiteToPg(ctx context.Context, sqliteDB *sql.DB, pgPool *pgxpool.Po
 	for rows.Next() {
 		var userID, deviceID, lastSyncStr string
 		if err := rows.Scan(&userID, &deviceID, &lastSyncStr); err != nil {
-			rows.Close()
+			_ = rows.Close()
 			return result, fmt.Errorf("scan sqlite sync_cursor: %w", err)
 		}
 		if _, err := tx.Exec(ctx,
@@ -303,12 +303,12 @@ func MigrateSQLiteToPg(ctx context.Context, sqliteDB *sql.DB, pgPool *pgxpool.Po
 			 ON CONFLICT (user_id, device_id) DO NOTHING`,
 			userID, deviceID, parseTimePg(lastSyncStr),
 		); err != nil {
-			rows.Close()
+			_ = rows.Close()
 			return result, fmt.Errorf("insert pg sync_cursor: %w", err)
 		}
 		result.SyncCursors++
 	}
-	rows.Close()
+	_ = rows.Close()
 
 	// 11. Invitations
 	rows, err = sqliteDB.QueryContext(ctx,
@@ -320,7 +320,7 @@ func MigrateSQLiteToPg(ctx context.Context, sqliteDB *sql.DB, pgPool *pgxpool.Po
 		var id, orgID, email, role, invitedBy, createdStr string
 		var accepted int
 		if err := rows.Scan(&id, &orgID, &email, &role, &invitedBy, &accepted, &createdStr); err != nil {
-			rows.Close()
+			_ = rows.Close()
 			return result, fmt.Errorf("scan sqlite invitation: %w", err)
 		}
 		if _, err := tx.Exec(ctx,
@@ -328,12 +328,12 @@ func MigrateSQLiteToPg(ctx context.Context, sqliteDB *sql.DB, pgPool *pgxpool.Po
 			 VALUES ($1, $2, $3, $4, $5, $6, $7) ON CONFLICT (id) DO NOTHING`,
 			id, orgID, email, role, invitedBy, accepted != 0, parseTimePg(createdStr),
 		); err != nil {
-			rows.Close()
+			_ = rows.Close()
 			return result, fmt.Errorf("insert pg invitation %s: %w", id, err)
 		}
 		result.Invitations++
 	}
-	rows.Close()
+	_ = rows.Close()
 
 	// Commit the transaction
 	if err := tx.Commit(ctx); err != nil {

@@ -297,5 +297,5 @@ func writeSidecarLockfile(port int, secret string) {
 // removeSidecarLockfile cleans up the lockfile on shutdown.
 func removeSidecarLockfile() {
 	lockPath := filepath.Join(getAppDataDir(), "sidecar.lock")
-	os.Remove(lockPath)
+	_ = os.Remove(lockPath)
 }

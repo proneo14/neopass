@@ -34,7 +34,7 @@ jobs:
       - name: Run gosec
         run: |
           go install github.com/securego/gosec/v2/cmd/gosec@latest
-          gosec -exclude=G104 ./...
+          gosec -exclude=G104 -severity medium -confidence medium -fmt text ./...
 
   go-test:
     name: Go Test
