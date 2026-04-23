@@ -601,6 +601,83 @@ browserAPI.runtime.onMessage.addListener(
       case 'autofillComplete':
         return undefined;
 
+      case 'passkeyCreate':
+        return sendNativeMessage({
+          action: 'passkeyCreate',
+          rpId: message.rpId,
+          rpName: message.rpName,
+          userName: message.userName,
+          displayName: message.displayName,
+          algorithm: message.algorithm,
+          challenge: message.challenge,
+          origin: message.origin,
+          userId: message.userId,
+        }).then((response) => {
+          // Notify user that a passkey was created
+          if (!response.error && response.options) {
+            // Show in-page toast notification via content script
+            browserAPI.tabs.query({ active: true, currentWindow: true })
+              .then((tabs) => {
+                const tabId = tabs[0]?.id;
+                if (tabId) {
+                  browserAPI.tabs.sendMessage(tabId, {
+                    type: 'showToast',
+                    message: `Passkey for ${message.rpId} saved to LGI Pass`,
+                    icon: browserAPI.runtime.getURL('icons/icon-128.png'),
+                  }).catch(() => {});
+                }
+              }).catch(() => {});
+            // Also notify popup if it's open
+            browserAPI.runtime.sendMessage({
+              type: 'passkeyCreated',
+              rpId: message.rpId,
+            }).catch(() => {});
+          }
+          return {
+            type: 'passkeyResponse',
+            action: 'create',
+            options: response.options,
+            error: response.error,
+          };
+        });
+
+      case 'passkeyGet':
+        return sendNativeMessage({
+          action: 'passkeyGet',
+          rpId: message.rpId,
+          allowCredentials: message.allowCredentials,
+        }).then((response) => ({
+          type: 'passkeyResponse',
+          action: 'get',
+          passkeys: response.passkeys,
+          error: response.error,
+        }));
+
+      case 'passkeySign':
+        return sendNativeMessage({
+          action: 'passkeySign',
+          credentialId: message.credentialId,
+          rpId: message.rpId,
+          origin: message.origin,
+          challenge: message.challenge,
+        }).then((response) => ({
+          type: 'passkeyResponse',
+          action: 'sign',
+          assertion: response.assertion,
+          error: response.error,
+        }));
+
+      case 'passkeyList':
+        return sendNativeMessage({
+          action: 'passkeyList',
+          rpId: message.rpId,
+        }).then((response) => ({
+          type: 'passkeyResponse',
+          action: 'list',
+          passkeys: response.passkeys,
+          error: response.error,
+        }));
+
       default:
         return undefined;
     }

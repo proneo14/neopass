@@ -109,6 +109,75 @@ const api = {
       ipcRenderer.invoke('clipboard:copySecure', text, clearAfterMs ?? 30_000),
   },
 
+  passkey: {
+    list: (token: string): Promise<unknown> => {
+      validateString(token, 'token');
+      return ipcRenderer.invoke('passkey:list', token);
+    },
+    delete: (token: string, passkeyId: string): Promise<unknown> => {
+      validateString(token, 'token');
+      validateString(passkeyId, 'passkeyId');
+      return ipcRenderer.invoke('passkey:delete', token, passkeyId);
+    },
+    listHardwareKeys: (token: string): Promise<unknown> => {
+      validateString(token, 'token');
+      return ipcRenderer.invoke('passkey:listHardwareKeys', token);
+    },
+    deleteHardwareKey: (token: string, keyId: string): Promise<unknown> => {
+      validateString(token, 'token');
+      validateString(keyId, 'keyId');
+      return ipcRenderer.invoke('passkey:deleteHardwareKey', token, keyId);
+    },
+    beginRegistration: (token: string, data: Record<string, unknown>): Promise<unknown> => {
+      validateString(token, 'token');
+      validateObject(data, 'data');
+      return ipcRenderer.invoke('passkey:beginRegistration', token, data);
+    },
+    finishRegistration: (token: string, data: Record<string, unknown>): Promise<unknown> => {
+      validateString(token, 'token');
+      validateObject(data, 'data');
+      return ipcRenderer.invoke('passkey:finishRegistration', token, data);
+    },
+    beginAuthentication: (token: string, rpId: string): Promise<unknown> => {
+      validateString(token, 'token');
+      validateString(rpId, 'rpId');
+      return ipcRenderer.invoke('passkey:beginAuthentication', token, rpId);
+    },
+    finishAuthentication: (token: string, data: Record<string, unknown>): Promise<unknown> => {
+      validateString(token, 'token');
+      validateObject(data, 'data');
+      return ipcRenderer.invoke('passkey:finishAuthentication', token, data);
+    },
+  },
+
+  security: {
+    getSettings: (token: string): Promise<{ require_hw_key?: boolean; has_2fa?: boolean; error?: string }> => {
+      validateString(token, 'token');
+      return ipcRenderer.invoke('auth:getSecuritySettings', token);
+    },
+    setRequireHWKey: (token: string, require: boolean): Promise<{ status?: string; error?: string }> => {
+      validateString(token, 'token');
+      return ipcRenderer.invoke('auth:setRequireHWKey', token, require);
+    },
+  },
+
+  hwkey: {
+    beginRegistration: (token: string, data: Record<string, unknown>): Promise<unknown> => {
+      validateString(token, 'token');
+      validateObject(data, 'data');
+      return ipcRenderer.invoke('hwkey:beginRegistration', token, data);
+    },
+    finishRegistration: (token: string, data: Record<string, unknown>): Promise<unknown> => {
+      validateString(token, 'token');
+      validateObject(data, 'data');
+      return ipcRenderer.invoke('hwkey:finishRegistration', token, data);
+    },
+    webauthnCreate: (optionsJSON: string): Promise<{ credential_id?: string; attestation_object?: string; client_data_json?: string; public_key_cbor?: string; transports?: string[]; error?: string }> => {
+      validateString(optionsJSON, 'optionsJSON');
+      return ipcRenderer.invoke('hwkey:webauthnCreate', optionsJSON);
+    },
+  },
+
   admin: {
     getMyOrg: (token: string): Promise<unknown> => {
       validateString(token, 'token');

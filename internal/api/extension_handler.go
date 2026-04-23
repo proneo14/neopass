@@ -1,6 +1,8 @@
 package api
 
 import (
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"net/http"
@@ -10,6 +12,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/rs/zerolog/log"
 
+	"github.com/password-manager/password-manager/internal/auth"
 	"github.com/password-manager/password-manager/internal/crypto"
 	"github.com/password-manager/password-manager/internal/db"
 )
@@ -20,6 +23,7 @@ import (
 type ExtensionHandler struct {
 	vaultRepo db.VaultRepository
 	secret    string // shared secret for authenticating requests from native host
+	webauthn  *auth.WebAuthnService
 
 	mu       sync.RWMutex
 	session  *extensionSession
@@ -42,10 +46,11 @@ type extensionCredential struct {
 	Matched  bool   `json:"matched"`
 }
 
-func NewExtensionHandler(vaultRepo db.VaultRepository, secret string) *ExtensionHandler {
+func NewExtensionHandler(vaultRepo db.VaultRepository, secret string, webauthn *auth.WebAuthnService) *ExtensionHandler {
 	return &ExtensionHandler{
 		vaultRepo: vaultRepo,
 		secret:    secret,
+		webauthn:  webauthn,
 	}
 }
 
@@ -457,6 +462,380 @@ func extractDomainFromURI(uri string) string {
 		u = u[:idx]
 	}
 	return u
+}
+
+// ── Extension Passkey endpoints ──────────────────────────────────────────────
+
+// ExtListPasskeys handles GET /extension/passkeys?rp_id=...
+func (h *ExtensionHandler) ExtListPasskeys(w http.ResponseWriter, r *http.Request) {
+	if !h.verifySecret(r) {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	sess := h.getSession()
+	if sess == nil {
+		writeJSON(w, http.StatusOK, []interface{}{})
+		return
+	}
+
+	rpID := r.URL.Query().Get("rp_id")
+	passkeys, err := h.webauthn.ListPasskeys(r.Context(), sess.UserID, rpID)
+	if err != nil {
+		log.Error().Err(err).Msg("[extension] list passkeys failed")
+		writeJSON(w, http.StatusOK, []interface{}{})
+		return
+	}
+
+	type passkeyInfo struct {
+		CredentialID string `json:"credentialId"`
+		RPID         string `json:"rpId"`
+		RPName       string `json:"rpName"`
+		Username     string `json:"username"`
+		DisplayName  string `json:"displayName"`
+		CreatedAt    string `json:"createdAt"`
+	}
+
+	b64 := base64.URLEncoding.WithPadding(base64.NoPadding)
+	var result []passkeyInfo
+	for _, p := range passkeys {
+		result = append(result, passkeyInfo{
+			CredentialID: b64.EncodeToString(p.CredentialID),
+			RPID:         p.RPID,
+			RPName:       p.RPName,
+			Username:     p.Username,
+			DisplayName:  p.DisplayName,
+			CreatedAt:    p.CreatedAt.Format("2006-01-02T15:04:05Z"),
+		})
+	}
+
+	if result == nil {
+		result = []passkeyInfo{}
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
+// ExtGetPasskeys handles POST /extension/passkeys/get
+func (h *ExtensionHandler) ExtGetPasskeys(w http.ResponseWriter, r *http.Request) {
+	if !h.verifySecret(r) {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	sess := h.getSession()
+	if sess == nil {
+		writeJSON(w, http.StatusOK, []interface{}{})
+		return
+	}
+
+	var req struct {
+		RPID             string   `json:"rp_id"`
+		AllowCredentials []string `json:"allow_credentials"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request")
+		return
+	}
+
+	passkeys, err := h.webauthn.ListPasskeys(r.Context(), sess.UserID, req.RPID)
+	if err != nil {
+		log.Error().Err(err).Msg("[extension] get passkeys failed")
+		writeJSON(w, http.StatusOK, []interface{}{})
+		return
+	}
+
+	b64 := base64.URLEncoding.WithPadding(base64.NoPadding)
+	type passkeyInfo struct {
+		CredentialID string `json:"credentialId"`
+		RPID         string `json:"rpId"`
+		RPName       string `json:"rpName"`
+		Username     string `json:"username"`
+		DisplayName  string `json:"displayName"`
+		CreatedAt    string `json:"createdAt"`
+	}
+
+	var result []passkeyInfo
+	for _, p := range passkeys {
+		credID := b64.EncodeToString(p.CredentialID)
+
+		// If allowCredentials is specified, filter
+		if len(req.AllowCredentials) > 0 {
+			found := false
+			for _, ac := range req.AllowCredentials {
+				if ac == credID {
+					found = true
+					break
+				}
+			}
+			if !found {
+				continue
+			}
+		}
+
+		result = append(result, passkeyInfo{
+			CredentialID: credID,
+			RPID:         p.RPID,
+			RPName:       p.RPName,
+			Username:     p.Username,
+			DisplayName:  p.DisplayName,
+			CreatedAt:    p.CreatedAt.Format("2006-01-02T15:04:05Z"),
+		})
+	}
+
+	if result == nil {
+		result = []passkeyInfo{}
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
+// ExtCreatePasskey handles POST /extension/passkeys/create
+// Combines begin + finish in one call using the extension session's master key.
+func (h *ExtensionHandler) ExtCreatePasskey(w http.ResponseWriter, r *http.Request) {
+	if !h.verifySecret(r) {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	sess := h.getSession()
+	if sess == nil {
+		writeError(w, http.StatusUnauthorized, "vault is locked")
+		return
+	}
+
+	var req struct {
+		RPID        string `json:"rp_id"`
+		RPName      string `json:"rp_name"`
+		Username    string `json:"username"`
+		DisplayName string `json:"display_name"`
+		Algorithm   int    `json:"algorithm"`
+		Challenge   string `json:"challenge"`
+		Origin      string `json:"origin"`
+		UserIDB64   string `json:"user_id_b64"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	if req.RPID == "" {
+		writeError(w, http.StatusBadRequest, "rp_id is required")
+		return
+	}
+	if req.RPName == "" {
+		req.RPName = req.RPID
+	}
+
+	// Step 1: Begin registration to create a session
+	opts, err := h.webauthn.BeginPasskeyRegistration(
+		r.Context(), sess.UserID, req.RPID, req.RPName, req.Username, req.DisplayName,
+	)
+	if err != nil {
+		log.Error().Err(err).Msg("[extension] begin passkey registration failed")
+		writeError(w, http.StatusInternalServerError, "failed to begin registration")
+		return
+	}
+
+	algorithm := req.Algorithm
+	if algorithm == 0 {
+		algorithm = crypto.COSEAlgES256
+	}
+
+	// Step 2: Immediately finish using the extension session's master key
+	finishReq := &auth.FinishPasskeyRegistrationRequest{
+		SessionID:    opts.SessionID,
+		Algorithm:    algorithm,
+		MasterKeyHex: sess.MasterKeyHex,
+		RPID:         req.RPID,
+		RPName:       req.RPName,
+		Username:     req.Username,
+		DisplayName:  req.DisplayName,
+		UserIDB64:    req.UserIDB64,
+	}
+
+	passkey, err := h.webauthn.FinishPasskeyRegistration(r.Context(), sess.UserID, finishReq)
+	if err != nil {
+		log.Error().Err(err).Msg("[extension] finish passkey registration failed")
+		writeError(w, http.StatusInternalServerError, "failed to create passkey")
+		return
+	}
+
+	b64 := base64.URLEncoding.WithPadding(base64.NoPadding)
+
+	// Build a WebAuthn attestation response that the website can verify
+	rpIDHash := crypto.RPIDHash(req.RPID)
+	flags := crypto.FlagUserPresent | crypto.FlagUserVerified | crypto.FlagAttestedCred | crypto.FlagBackupElig | crypto.FlagBackupState
+	attestedCred := crypto.BuildAttestedCredentialData(crypto.LGIPassAAGUID, passkey.CredentialID, passkey.PublicKeyCBOR)
+	authData := crypto.MarshalAuthenticatorData(rpIDHash, flags, 0, attestedCred)
+
+	// Use the website's challenge and origin for clientDataJSON so the
+	// relying party can verify the attestation matches their ceremony.
+	challenge := req.Challenge
+	if challenge == "" {
+		challenge = opts.Challenge
+	}
+	origin := req.Origin
+	if origin == "" {
+		origin = "https://" + req.RPID
+	}
+
+	clientData := map[string]interface{}{
+		"type":        "webauthn.create",
+		"challenge":   challenge,
+		"origin":      origin,
+		"crossOrigin": false,
+	}
+	clientDataJSON, _ := json.Marshal(clientData)
+
+	// Build attestation object with "packed" self-attestation for better RP compatibility,
+	// falling back to "none" if signing fails (e.g. EdDSA key for signing authData).
+	// Packed self-attestation: attStmt = {alg, sig} where sig = Sign(authData || SHA256(clientDataJSON))
+	var attestObj []byte
+	clientDataHash := sha256Hash(clientDataJSON)
+	packSig, packErr := crypto.SignAssertion(
+		decryptedPrivKey(passkey.EncryptedPrivKey, passkey.PrivateKeyNonce, sess.MasterKeyHex),
+		passkey.Algorithm, authData, clientDataHash[:])
+	if packErr == nil && packSig != nil {
+		attestObj, _ = crypto.MarshalPackedAttestationObject(authData, packSig, passkey.Algorithm)
+	}
+	if attestObj == nil {
+		attestObj, _ = crypto.MarshalAttestationObject("none", authData)
+	}
+
+	// Export public key in SPKI/DER format for getPublicKey()
+	spkiKey, _ := crypto.COSEKeyToSPKI(passkey.PublicKeyCBOR)
+
+	resp := map[string]interface{}{
+		"credential_id":        b64.EncodeToString(passkey.CredentialID),
+		"attestation_object":   b64.EncodeToString(attestObj),
+		"client_data_json":     b64.EncodeToString(clientDataJSON),
+		"auth_data":            b64.EncodeToString(authData),
+		"public_key":           b64.EncodeToString(passkey.PublicKeyCBOR),
+		"public_key_spki":      b64.EncodeToString(spkiKey),
+		"public_key_algorithm": passkey.Algorithm,
+		"transports":           passkey.Transports,
+	}
+
+	log.Info().
+		Str("user_id", sess.UserID).
+		Str("rp_id", req.RPID).
+		Str("username", req.Username).
+		Msg("[extension] passkey created")
+
+	writeJSON(w, http.StatusCreated, resp)
+}
+
+// ExtSignPasskey handles POST /extension/passkeys/sign
+func (h *ExtensionHandler) ExtSignPasskey(w http.ResponseWriter, r *http.Request) {
+	if !h.verifySecret(r) {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	sess := h.getSession()
+	if sess == nil {
+		writeError(w, http.StatusUnauthorized, "vault is locked")
+		return
+	}
+
+	var req struct {
+		CredentialID string `json:"credential_id"`
+		RPID         string `json:"rp_id"`
+		Origin       string `json:"origin"`
+		Challenge    string `json:"challenge"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	if req.CredentialID == "" || req.RPID == "" || req.Challenge == "" {
+		writeError(w, http.StatusBadRequest, "credential_id, rp_id, and challenge are required")
+		return
+	}
+
+	if req.Origin == "" {
+		req.Origin = "https://" + req.RPID
+	}
+
+	// Begin authentication to get a session
+	authOpts, err := h.webauthn.BeginPasskeyAuthentication(r.Context(), sess.UserID, req.RPID)
+	if err != nil {
+		log.Error().Err(err).Msg("[extension] begin passkey auth failed")
+		writeError(w, http.StatusInternalServerError, "failed to begin authentication")
+		return
+	}
+
+	// Sign using the extension session's master key
+	signReq := &auth.PasskeySignRequest{
+		SessionID:    authOpts.SessionID,
+		CredentialID: req.CredentialID,
+		MasterKeyHex: sess.MasterKeyHex,
+		RPID:         req.RPID,
+		Origin:       req.Origin,
+		Challenge:    req.Challenge,
+	}
+
+	signResp, err := h.webauthn.SignPasskeyAssertion(r.Context(), sess.UserID, signReq)
+	if err != nil {
+		log.Error().Err(err).Msg("[extension] passkey sign failed")
+		writeError(w, http.StatusInternalServerError, "failed to sign assertion")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, signResp)
+}
+
+// ExtDeletePasskey handles DELETE /extension/passkeys/{id}
+func (h *ExtensionHandler) ExtDeletePasskey(w http.ResponseWriter, r *http.Request) {
+	if !h.verifySecret(r) {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	sess := h.getSession()
+	if sess == nil {
+		writeError(w, http.StatusUnauthorized, "vault is locked")
+		return
+	}
+
+	passkeyID := chi.URLParam(r, "id")
+	if passkeyID == "" {
+		writeError(w, http.StatusBadRequest, "missing passkey ID")
+		return
+	}
+
+	if err := h.webauthn.DeletePasskey(r.Context(), sess.UserID, passkeyID); err != nil {
+		writeError(w, http.StatusNotFound, "passkey not found")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
+}
+
+// getSession returns the current session, or nil if locked.
+func (h *ExtensionHandler) getSession() *extensionSession {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	return h.session
+}
+
+// sha256Hash returns the SHA-256 hash of data.
+func sha256Hash(data []byte) [32]byte {
+	return sha256.Sum256(data)
+}
+
+// decryptedPrivKey decrypts a passkey private key with the session's master key hex.
+// Returns nil on any error (caller should fall back to "none" attestation).
+func decryptedPrivKey(encrypted, nonce []byte, masterKeyHex string) []byte {
+	if len(masterKeyHex) != 64 {
+		return nil
+	}
+	keyBytes, err := hex.DecodeString(masterKeyHex)
+	if err != nil || len(keyBytes) != 32 {
+		return nil
+	}
+	var key [32]byte
+	copy(key[:], keyBytes)
+	plain, err := crypto.DecryptPasskeyPrivateKey(encrypted, nonce, key)
+	if err != nil {
+		return nil
+	}
+	return plain
 }
 
 

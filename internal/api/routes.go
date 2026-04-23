@@ -18,7 +18,7 @@ import (
 // Router sets up all API v1 routes.
 // storageBackend should be "sqlite" or "postgres".
 // sqliteDB is the raw SQLite *sql.DB for migration support (nil when using postgres).
-func Router(authService *auth.Service, totpService *auth.TOTPService, smsService *auth.SMSService, vaultService *vault.Service, adminService *admin.Service, syncService *syncsvc.Service, storageBackend string, sqliteDB *sql.DB) chi.Router {
+func Router(authService *auth.Service, totpService *auth.TOTPService, smsService *auth.SMSService, vaultService *vault.Service, adminService *admin.Service, syncService *syncsvc.Service, webauthnService *auth.WebAuthnService, storageBackend string, sqliteDB *sql.DB) chi.Router {
 	r := chi.NewRouter()
 
 	authHandler := NewAuthHandler(authService)
@@ -29,9 +29,13 @@ func Router(authService *auth.Service, totpService *auth.TOTPService, smsService
 		adminHandler.SetSQLiteDB(sqliteDB)
 	}
 	syncHandler := NewSyncHandler(syncService)
+	passkeyHandler := NewPasskeyHandler(webauthnService)
 
 	// Rate limiter for auth endpoints: 5 requests per minute per IP
 	authLimiter := NewRateLimiter(5, 1*time.Minute)
+
+	// Public FIDO metadata endpoint (no auth required)
+	r.Get("/fido/metadata", passkeyHandler.FIDOMetadata)
 
 	// Public auth routes
 	r.Route("/auth", func(r chi.Router) {
@@ -54,6 +58,10 @@ func Router(authService *auth.Service, totpService *auth.TOTPService, smsService
 		// Password change (self-service)
 		r.Post("/auth/change-password", authHandler.ChangePassword)
 
+		// Security settings
+		r.Post("/auth/require-hardware-key", authHandler.SetRequireHWKey)
+		r.Get("/auth/security-settings", authHandler.GetSecuritySettings)
+
 		// 2FA management (requires full auth)
 		r.Route("/auth/2fa", func(r chi.Router) {
 			r.Post("/setup", tfaHandler.Setup)
@@ -74,6 +82,24 @@ func Router(authService *auth.Service, totpService *auth.TOTPService, smsService
 			r.Post("/folders", vaultHandler.CreateFolder)
 			r.Get("/folders", vaultHandler.ListFolders)
 			r.Delete("/folders/{id}", vaultHandler.DeleteFolder)
+
+			// Passkey routes
+			r.Get("/passkeys", passkeyHandler.ListPasskeys)
+			r.Delete("/passkeys/{id}", passkeyHandler.DeletePasskey)
+			r.Post("/passkeys/register/begin", passkeyHandler.BeginRegistration)
+			r.Post("/passkeys/register/finish", passkeyHandler.FinishRegistration)
+			r.Post("/passkeys/authenticate/begin", passkeyHandler.BeginAuthentication)
+			r.Post("/passkeys/authenticate/finish", passkeyHandler.FinishAuthentication)
+		})
+
+		// Hardware key routes
+		r.Route("/auth/hardware-keys", func(r chi.Router) {
+			r.Get("/", passkeyHandler.ListHardwareKeys)
+			r.Delete("/{id}", passkeyHandler.DeleteHardwareKey)
+			r.Post("/register/begin", passkeyHandler.BeginHardwareKeyRegistration)
+			r.Post("/register/finish", passkeyHandler.FinishHardwareKeyRegistration)
+			r.Post("/authenticate/begin", passkeyHandler.BeginHardwareKeyAuth)
+			r.Post("/authenticate/finish", passkeyHandler.FinishHardwareKeyAuth)
 		})
 
 		// Admin routes
@@ -121,9 +147,9 @@ func Router(authService *auth.Service, totpService *auth.TOTPService, smsService
 
 // ExtensionRouter sets up routes for the browser extension native messaging bridge.
 // These endpoints are localhost-only and protected by a shared secret.
-func ExtensionRouter(vaultRepo db.VaultRepository, secret string) chi.Router {
+func ExtensionRouter(vaultRepo db.VaultRepository, secret string, webauthnService *auth.WebAuthnService) chi.Router {
 	r := chi.NewRouter()
-	h := NewExtensionHandler(vaultRepo, secret)
+	h := NewExtensionHandler(vaultRepo, secret, webauthnService)
 
 	r.Post("/session", h.PushSession)
 	r.Get("/status", h.GetStatus)
@@ -131,6 +157,13 @@ func ExtensionRouter(vaultRepo db.VaultRepository, secret string) chi.Router {
 	r.Post("/credentials", h.SaveCredential)
 	r.Put("/credentials/{id}", h.UpdateCredential)
 	r.Post("/lock", h.Lock)
+
+	// Passkey endpoints for native host
+	r.Get("/passkeys", h.ExtListPasskeys)
+	r.Post("/passkeys/get", h.ExtGetPasskeys)
+	r.Post("/passkeys/create", h.ExtCreatePasskey)
+	r.Post("/passkeys/sign", h.ExtSignPasskey)
+	r.Delete("/passkeys/{id}", h.ExtDeletePasskey)
 
 	return r
 }

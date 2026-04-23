@@ -8,6 +8,7 @@ import { Login } from './pages/Login';
 const Register = lazy(() => import('./pages/Register').then(m => ({ default: m.Register })));
 const Vault = lazy(() => import('./pages/Vault').then(m => ({ default: m.Vault })));
 const EntryDetail = lazy(() => import('./pages/EntryDetail').then(m => ({ default: m.EntryDetail })));
+const Passkeys = lazy(() => import('./pages/Passkeys').then(m => ({ default: m.Passkeys })));
 const Admin = lazy(() => import('./pages/Admin').then(m => ({ default: m.Admin })));
 const Settings = lazy(() => import('./pages/Settings').then(m => ({ default: m.Settings })));
 
@@ -34,6 +35,7 @@ export function App() {
         >
           <Route path="/vault" element={<Vault />} />
           <Route path="/vault/:id" element={<EntryDetail />} />
+          <Route path="/passkeys" element={<Passkeys />} />
           <Route path="/settings" element={<Settings />} />
           <Route
             path="/admin"

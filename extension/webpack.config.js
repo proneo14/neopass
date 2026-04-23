@@ -15,6 +15,7 @@ module.exports = {
   entry: {
     background: path.resolve(__dirname, 'src/background/service-worker.ts'),
     content: path.resolve(__dirname, 'src/content/content.ts'),
+    'passkey-provider': path.resolve(__dirname, 'src/content/passkey-provider.ts'),
     popup: path.resolve(__dirname, 'src/popup/index.tsx'),
   },
 

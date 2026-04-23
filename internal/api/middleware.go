@@ -221,6 +221,21 @@ func CSRFMiddleware(next http.Handler) http.Handler {
 			return
 		}
 
+		// Skip CSRF for extension bridge routes (localhost-only, protected by shared secret)
+		if strings.HasPrefix(r.URL.Path, "/extension/") {
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		// Skip CSRF for non-browser clients (desktop app, CLI).
+		// CSRF exploits require a browser Origin; requests without one aren't vulnerable.
+		origin := r.Header.Get("Origin")
+		referer := r.Header.Get("Referer")
+		if origin == "" && referer == "" {
+			next.ServeHTTP(w, r)
+			return
+		}
+
 		// Skip CSRF for API-only clients using Bearer auth (non-browser)
 		if strings.HasPrefix(r.Header.Get("Authorization"), "Bearer ") {
 			next.ServeHTTP(w, r)

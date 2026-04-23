@@ -14,6 +14,128 @@ import {
   type FormInfo,
 } from './autofill';
 
+// ── Passkey bridge (runs FIRST at module load) ──────────────────
+// The passkey-provider.js runs in the MAIN world (injected via manifest
+// "world":"MAIN" at document_start). It cannot access extension APIs,
+// so it posts messages to this ISOLATED-world script, which relays them
+// to the service worker and returns the response.
+
+const PASSKEY_REQ = 'lgipass-passkey-request';
+const PASSKEY_RES = 'lgipass-passkey-response';
+
+window.addEventListener('message', (event: MessageEvent) => {
+  if (event.source !== window || event.data?.type !== PASSKEY_REQ) return;
+
+  const { id, payload } = event.data;
+  if (!id || !payload?.action) return;
+
+  browserAPI.runtime.sendMessage({ type: payload.action, ...payload })
+    .then((response: unknown) => {
+      window.postMessage({ type: PASSKEY_RES, id, payload: response }, '*');
+    })
+    .catch(() => {
+      window.postMessage({ type: PASSKEY_RES, id, payload: { error: 'bridge failed' } }, '*');
+    });
+});
+
+// ── In-page toast notifications from service worker ─────────────
+browserAPI.runtime.onMessage.addListener((msg: { type?: string; message?: string; icon?: string }) => {
+  if (msg?.type !== 'showToast' || !msg.message) return;
+  showInPageToast(msg.message, msg.icon);
+});
+
+function showInPageToast(message: string, iconUrl?: string) {
+  const container = document.createElement('div');
+  container.id = 'lgipass-toast';
+  container.style.cssText = `
+    position: fixed; top: 16px; right: 16px; z-index: 2147483647;
+    display: flex; align-items: center; gap: 10px;
+    background: #1e1b2e; border: 1px solid #6c5ce7;
+    border-radius: 10px; padding: 12px 18px;
+    box-shadow: 0 8px 32px rgba(108,92,231,0.25);
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    color: #e2e0f0; font-size: 13px;
+    opacity: 0; transform: translateY(-12px) scale(0.96);
+    transition: opacity 0.3s ease, transform 0.3s ease;
+    pointer-events: auto; max-width: 380px;
+  `;
+
+  if (iconUrl) {
+    const img = document.createElement('img');
+    img.src = iconUrl;
+    img.style.cssText = 'width: 28px; height: 28px; border-radius: 6px; flex-shrink: 0;';
+    img.onerror = () => {
+      // Fallback: inline shield SVG if extension icon can't load
+      const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+      svg.setAttribute('viewBox', '0 0 24 24');
+      svg.setAttribute('fill', 'none');
+      svg.style.cssText = 'width: 28px; height: 28px; flex-shrink: 0;';
+      svg.innerHTML = '<path d="M12 2L4 6v5c0 5.25 3.4 10.15 8 11.25C16.6 21.15 20 16.25 20 11V6l-8-4z" fill="#6c5ce7"/><path d="M10 14.5l-2.5-2.5 1.41-1.41L10 11.67l4.09-4.08L15.5 9 10 14.5z" fill="#fff"/>';
+      img.replaceWith(svg);
+    };
+    container.appendChild(img);
+  }
+
+  const textWrap = document.createElement('div');
+  textWrap.style.cssText = 'display: flex; flex-direction: column; gap: 1px;';
+
+  const title = document.createElement('div');
+  title.textContent = 'Passkey Saved';
+  title.style.cssText = 'font-weight: 600; font-size: 13px; color: #a29bfe;';
+  textWrap.appendChild(title);
+
+  const body = document.createElement('div');
+  body.textContent = message;
+  body.style.cssText = 'font-size: 12px; color: #b8b5cc;';
+  textWrap.appendChild(body);
+
+  container.appendChild(textWrap);
+
+  const close = document.createElement('button');
+  close.textContent = '✕';
+  close.style.cssText = `
+    background: none; border: none; color: #6c6888; cursor: pointer;
+    font-size: 14px; padding: 0 0 0 8px; flex-shrink: 0; line-height: 1;
+  `;
+  close.onclick = () => dismiss();
+  container.appendChild(close);
+
+  // Remove any existing toast
+  document.getElementById('lgipass-toast')?.remove();
+  document.body.appendChild(container);
+
+  // Animate in
+  requestAnimationFrame(() => {
+    container.style.opacity = '1';
+    container.style.transform = 'translateY(0) scale(1)';
+  });
+
+  function dismiss() {
+    container.style.opacity = '0';
+    container.style.transform = 'translateY(-12px) scale(0.96)';
+    setTimeout(() => container.remove(), 300);
+  }
+
+  // Auto dismiss after 4 seconds
+  setTimeout(dismiss, 4000);
+}
+
+// Fallback: inject passkey-provider.js for Firefox MV2 (no "world":"MAIN" support).
+// Chrome uses manifest-based MAIN world injection; the dedup guard prevents double-run.
+try {
+  const isFirefox = (globalThis as Record<string, unknown>).browser !== undefined;
+  if (isFirefox) {
+    const s = document.createElement('script');
+    s.src = browserAPI.runtime.getURL('passkey-provider.js');
+    s.onload = () => s.remove();
+    (document.head || document.documentElement).appendChild(s);
+  }
+} catch {
+  // Not critical — Chrome uses manifest injection
+}
+
+// ── Autofill ────────────────────────────────────────────────────
+
 /**
  * Content script — detects login forms on the page, shows autofill
  * overlays, handles credential filling, and prompts to save new logins.

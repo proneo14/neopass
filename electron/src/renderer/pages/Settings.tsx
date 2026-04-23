@@ -254,6 +254,11 @@ export function Settings() {
   const [showBiometricEnroll, setShowBiometricEnroll] = useState(false);
   const [showChangePw, setShowChangePw] = useState(false);
   const [show2fa, setShow2fa] = useState(false);
+  const [requireHWKey, setRequireHWKey] = useState(false);
+  const [hwKeyLoading, setHwKeyLoading] = useState(false);
+  const [hwKeys, setHwKeys] = useState<{ id: string; name: string; created_at: string; last_used_at: string; transports: string[] }[]>([]);
+  const [hwKeyRegLoading, setHwKeyRegLoading] = useState(false);
+  const [hwKeyError, setHwKeyError] = useState('');
   const [showCreateOrg, setShowCreateOrg] = useState(false);
   const [pendingInvites, setPendingInvites] = useState<{ id: string; org_id: string; org_name: string; role: string; created_at: string }[]>([]);
   const [newOrgName, setNewOrgName] = useState('');
@@ -273,6 +278,20 @@ export function Settings() {
     })();
     // Fetch storage backend
     window.api.storage.getBackend().then(setStorageBackend).catch(() => {});
+    // Fetch security settings (require HW key)
+    if (token) {
+      window.api.security.getSettings(token)
+        .then((data) => {
+          if (data.require_hw_key !== undefined) setRequireHWKey(data.require_hw_key);
+        })
+        .catch(() => {});
+      // Fetch registered hardware keys
+      window.api.passkey.listHardwareKeys(token)
+        .then((data: any) => {
+          if (Array.isArray(data)) setHwKeys(data);
+        })
+        .catch(() => {});
+    }
   }, []);
 
   const handleBiometricToggle = async (enabled: boolean) => {
@@ -293,6 +312,89 @@ export function Settings() {
       } finally {
         setBiometricLoading(false);
       }
+    }
+  };
+
+  const handleHWKeyToggle = async (enabled: boolean) => {
+    if (!token) return;
+    setHwKeyLoading(true);
+    try {
+      const result = await window.api.security.setRequireHWKey(token, enabled);
+      if (!result.error) {
+        setRequireHWKey(enabled);
+      }
+    } catch {
+      // ignore
+    } finally {
+      setHwKeyLoading(false);
+    }
+  };
+
+  const handleRegisterHWKey = async () => {
+    if (!token || !email) return;
+    setHwKeyError('');
+    setHwKeyRegLoading(true);
+    try {
+      // Step 1: Get challenge from server
+      const opts = await window.api.hwkey.beginRegistration(token, {
+        username: email,
+        display_name: email,
+      }) as any;
+
+      if (opts.error) {
+        setHwKeyError(opts.error);
+        return;
+      }
+
+      // Step 2: Open a localhost popup window for the WebAuthn ceremony
+      // (Electron's renderer is not a secure context, so we can't call navigator.credentials.create here)
+      const credResult = await window.api.hwkey.webauthnCreate(JSON.stringify(opts));
+
+      if (credResult.error) {
+        if (credResult.error === 'cancelled') return;
+        setHwKeyError(credResult.error);
+        return;
+      }
+
+      // Step 3: Prompt user for a name
+      const keyName = prompt('Give this security key a name:', 'My Security Key');
+      if (!keyName) {
+        setHwKeyError('Registration cancelled');
+        return;
+      }
+
+      // Step 4: Send attestation to server
+      const result = await window.api.hwkey.finishRegistration(token, {
+        session_id: opts.session_id,
+        name: keyName,
+        credential_id: credResult.credential_id,
+        attestation_object: credResult.attestation_object,
+        client_data_json: credResult.client_data_json,
+        public_key_cbor: credResult.public_key_cbor ?? '',
+        transports: credResult.transports ?? ['usb'],
+      }) as any;
+
+      if (result.error) {
+        setHwKeyError(result.error);
+      } else {
+        // Refresh the list
+        const keys = await window.api.passkey.listHardwareKeys(token) as any;
+        if (Array.isArray(keys)) setHwKeys(keys);
+      }
+    } catch (err: any) {
+      setHwKeyError(err?.message ?? 'Registration failed');
+    } finally {
+      setHwKeyRegLoading(false);
+    }
+  };
+
+  const handleDeleteHWKey = async (keyId: string) => {
+    if (!token) return;
+    try {
+      await window.api.passkey.deleteHardwareKey(token, keyId);
+      setHwKeys(prev => prev.filter(k => k.id !== keyId));
+    } catch {
+      // ignore
     }
   };
 
@@ -404,8 +506,63 @@ export function Settings() {
                 </select>
               </div>
             </div>
+            <SettingsToggle
+              label={hwKeyLoading ? 'Require Hardware Key (saving…)' : 'Require Hardware Key for Login'}
+              description="When enabled, a FIDO2 security key (USB/NFC/BLE) is required after password entry"
+              checked={requireHWKey}
+              onChange={hwKeyLoading ? () => {} : handleHWKeyToggle}
+            />
           </div>
         </section>
+
+        {/* Hardware Security Keys — only visible when toggle is on */}
+        {requireHWKey && (
+        <section>
+          <h2 className="text-xs font-semibold text-surface-500 uppercase tracking-wider mb-3">Hardware Security Keys</h2>
+          <div className="space-y-2">
+            <p className="text-xs text-surface-500 px-1 mb-2">
+              Register a FIDO2 security key (USB, NFC, or Bluetooth) for two-factor authentication when logging into your vault.
+            </p>
+            {hwKeys.map((key) => (
+              <div key={key.id} className="flex items-center justify-between px-4 py-3 rounded-md bg-surface-800">
+                <div className="flex items-center gap-3">
+                  <svg className="w-5 h-5 text-accent-400 flex-shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="7" width="20" height="10" rx="2" /><circle cx="16" cy="12" r="2" /><path d="M6 12h4" /></svg>
+                  <div>
+                    <p className="text-sm text-surface-200">{key.name}</p>
+                    <p className="text-xs text-surface-500">
+                      Added {key.created_at ? new Date(key.created_at).toLocaleDateString() : '—'}
+                      {key.transports?.length > 0 && ` · ${key.transports.join(', ')}`}
+                    </p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => handleDeleteHWKey(key.id)}
+                  className="text-red-400 hover:text-red-300 transition-colors"
+                  title="Remove key"
+                >
+                  <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18"/><path d="M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/></svg>
+                </button>
+              </div>
+            ))}
+            {hwKeyError && (
+              <p className="text-xs text-red-400 px-4">{hwKeyError}</p>
+            )}
+            <button
+              onClick={handleRegisterHWKey}
+              disabled={hwKeyRegLoading || !token}
+              className="w-full text-left px-4 py-3 rounded-md bg-surface-800 hover:bg-surface-700 text-sm text-surface-200 transition-colors flex items-center justify-between disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              <div className="flex items-center gap-2">
+                <span className="text-accent-400">+</span>
+                {hwKeyRegLoading ? 'Insert your security key and follow the prompt…' : 'Register a Security Key'}
+              </div>
+              {hwKeyRegLoading && (
+                <span className="text-xs text-surface-500 animate-pulse">Waiting…</span>
+              )}
+            </button>
+          </div>
+        </section>
+        )}
 
         {/* Organization / Enterprise */}
         <section>

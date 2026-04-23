@@ -4,6 +4,7 @@ import { useAuthStore } from '../store/authStore';
 
 const navItems = [
   { to: '/vault', label: 'Vault', icon: '🔐' },
+  { to: '/passkeys', label: 'Passkeys', icon: '🪪' },
 ];
 
 const adminItems = [

@@ -12,6 +12,7 @@ type UserRepository interface {
 	GetUserByEmail(ctx context.Context, email string) (User, error)
 	GetUserByID(ctx context.Context, id string) (User, error)
 	UpdateUserKeys(ctx context.Context, id string, authHash, salt, publicKey, encryptedPrivateKey []byte) error
+	SetRequireHWKey(ctx context.Context, userID string, require bool) error
 }
 
 // VaultRepository defines the interface for vault entry database operations.
@@ -73,4 +74,23 @@ type TOTPRepository interface {
 	GetSharedTOTP(ctx context.Context, shareID, toUserID string) (SharedTOTP, error)
 	MarkSharedTOTPClaimed(ctx context.Context, shareID string) error
 	ListPendingSharedTOTP(ctx context.Context, toUserID string) ([]SharedTOTP, error)
+}
+
+// PasskeyRepository defines the interface for passkey credential database operations.
+type PasskeyRepository interface {
+	CreatePasskey(ctx context.Context, passkey PasskeyCredential) (PasskeyCredential, error)
+	GetPasskeysByRPID(ctx context.Context, userID, rpID string) ([]PasskeyCredential, error)
+	GetPasskeyByCredentialID(ctx context.Context, credentialID []byte) (PasskeyCredential, error)
+	GetAllPasskeys(ctx context.Context, userID string) ([]PasskeyCredential, error)
+	UpdateSignCount(ctx context.Context, credentialID []byte, newCount int) error
+	DeletePasskey(ctx context.Context, userID, passkeyID string) error
+}
+
+// HardwareKeyRepository defines the interface for hardware auth key database operations.
+type HardwareKeyRepository interface {
+	RegisterHardwareKey(ctx context.Context, key HardwareAuthKey) (HardwareAuthKey, error)
+	GetHardwareKeys(ctx context.Context, userID string) ([]HardwareAuthKey, error)
+	GetHardwareKeyByCredentialID(ctx context.Context, credentialID []byte) (HardwareAuthKey, error)
+	UpdateHardwareKeySignCount(ctx context.Context, credentialID []byte, count int) error
+	DeleteHardwareKey(ctx context.Context, userID, keyID string) error
 }

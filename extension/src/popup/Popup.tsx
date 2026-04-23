@@ -4,21 +4,40 @@ import type {
   Credential,
   StatusResponseMessage,
   CredentialsResponseMessage,
+  PasskeyInfo,
 } from '../lib/messages';
 
 type AppStatus = 'loading' | 'locked' | 'unlocked' | 'no-desktop-app';
-type View = 'list' | 'detail';
+type View = 'list' | 'detail' | 'passkeyDetail';
 
 export function Popup() {
   const [status, setStatus] = useState<AppStatus>('loading');
   const [credentials, setCredentials] = useState<Credential[]>([]);
+  const [passkeys, setPasskeys] = useState<PasskeyInfo[]>([]);
   const [currentDomain, setCurrentDomain] = useState<string>('');
   const [view, setView] = useState<View>('list');
   const [selectedCred, setSelectedCred] = useState<Credential | null>(null);
+  const [selectedPasskey, setSelectedPasskey] = useState<PasskeyInfo | null>(null);
   const [showPassword, setShowPassword] = useState(false);
+  const [notification, setNotification] = useState<string | null>(null);
 
   useEffect(() => {
     init();
+
+    // Listen for passkey creation notifications from background
+    function onMessage(msg: { type?: string; rpId?: string }) {
+      if (msg?.type === 'passkeyCreated') {
+        setNotification(`Passkey saved for ${msg.rpId || 'site'}`);
+        // Refresh passkey list
+        if (currentDomain) {
+          browserAPI.runtime.sendMessage({ type: 'passkeyList', rpId: currentDomain })
+            .then((r: any) => setPasskeys(r?.passkeys ?? []))
+            .catch(() => {});
+        }
+        setTimeout(() => setNotification(null), 4000);
+      }
+    }
+    browserAPI.runtime.onMessage.addListener(onMessage);
 
     // Poll server status every 3s so extension mirrors app lock/unlock in real time
     const interval = setInterval(async () => {
@@ -47,7 +66,10 @@ export function Popup() {
       }
     }, 3000);
 
-    return () => clearInterval(interval);
+    return () => {
+      clearInterval(interval);
+      browserAPI.runtime.onMessage.removeListener(onMessage);
+    };
   }, []);
 
   async function init() {
@@ -91,6 +113,19 @@ export function Popup() {
     })) as CredentialsResponseMessage;
 
     setCredentials(credResponse?.credentials ?? []);
+
+    // Fetch passkeys for current domain
+    if (domain) {
+      try {
+        const pkResponse = await browserAPI.runtime.sendMessage({
+          type: 'passkeyList',
+          rpId: domain,
+        }) as { passkeys?: PasskeyInfo[]; error?: string };
+        setPasskeys(pkResponse?.passkeys ?? []);
+      } catch {
+        // Passkey listing may not be available
+      }
+    }
   }
 
   async function handleFill(credential: Credential) {
@@ -124,9 +159,15 @@ export function Popup() {
     setView('detail');
   }
 
+  function handleSelectPasskey(pk: PasskeyInfo) {
+    setSelectedPasskey(pk);
+    setView('passkeyDetail');
+  }
+
   function handleBackToList() {
     setView('list');
     setSelectedCred(null);
+    setSelectedPasskey(null);
     setShowPassword(false);
   }
 
@@ -271,6 +312,49 @@ export function Popup() {
     );
   }
 
+  // Passkey detail view
+  if (view === 'passkeyDetail' && selectedPasskey) {
+    return (
+      <div className="flex flex-col h-full bg-surface-950 text-surface-100">
+        <div className="px-4 py-3 border-b border-surface-800 flex items-center gap-3">
+          <button onClick={handleBackToList} className="text-surface-400 hover:text-surface-200 text-sm">
+            ← Back
+          </button>
+          <span className="text-sm font-medium text-surface-100 truncate flex-1">
+            Passkey — {selectedPasskey.rpName || selectedPasskey.rpId}
+          </span>
+        </div>
+
+        <div className="flex-1 overflow-y-auto px-4 py-3 space-y-3">
+          <div>
+            <label className="text-[10px] uppercase tracking-wider text-surface-500 block mb-1">Website</label>
+            <span className="text-sm text-surface-100">{selectedPasskey.rpName || selectedPasskey.rpId}</span>
+          </div>
+          <div>
+            <label className="text-[10px] uppercase tracking-wider text-surface-500 block mb-1">RP ID</label>
+            <span className="text-sm text-surface-100">{selectedPasskey.rpId}</span>
+          </div>
+          <div>
+            <label className="text-[10px] uppercase tracking-wider text-surface-500 block mb-1">Username</label>
+            <span className="text-sm text-surface-100">{selectedPasskey.username || '—'}</span>
+          </div>
+          <div>
+            <label className="text-[10px] uppercase tracking-wider text-surface-500 block mb-1">Display Name</label>
+            <span className="text-sm text-surface-100">{selectedPasskey.displayName || '—'}</span>
+          </div>
+          <div>
+            <label className="text-[10px] uppercase tracking-wider text-surface-500 block mb-1">Created</label>
+            <span className="text-sm text-surface-100">{selectedPasskey.createdAt ? new Date(selectedPasskey.createdAt).toLocaleDateString() : '—'}</span>
+          </div>
+          <div>
+            <label className="text-[10px] uppercase tracking-wider text-surface-500 block mb-1">Credential ID</label>
+            <span className="text-xs text-surface-400 font-mono break-all">{selectedPasskey.credentialId}</span>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   const matchedCreds = credentials.filter((c) => c.matched);
   const otherCreds = credentials.filter((c) => !c.matched);
 
@@ -371,7 +455,42 @@ export function Popup() {
             )}
           </div>
         )}
+
+        {/* Passkeys for current site */}
+        {passkeys.length > 0 && (
+          <div>
+            <div className="px-4 py-1.5 text-[10px] uppercase tracking-wider text-accent-400 font-semibold bg-surface-900/50">
+              Passkeys{currentDomain ? ` for ${currentDomain}` : ''}
+            </div>
+            {passkeys.map((pk) => (
+              <div
+                key={pk.credentialId}
+                onClick={() => handleSelectPasskey(pk)}
+                className="flex items-center justify-between px-4 py-2.5 hover:bg-surface-900 transition-colors cursor-pointer"
+              >
+                <div className="flex items-center gap-2.5 flex-1 min-w-0">
+                  <span className="text-lg">🪪</span>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium text-surface-100 truncate">
+                      {pk.username || pk.displayName || 'Passkey'}
+                    </p>
+                    <p className="text-xs text-surface-400 truncate">
+                      {pk.rpName || pk.rpId}
+                    </p>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
+
+      {/* Notification banner */}
+      {notification && (
+        <div className="px-4 py-2 bg-green-600/20 border-t border-green-500/30 text-green-400 text-xs text-center shrink-0">
+          {notification}
+        </div>
+      )}
     </div>
   );
 }

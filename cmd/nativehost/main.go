@@ -36,16 +36,42 @@ type Request struct {
 	Notes    string `json:"notes,omitempty"`
 	// For secureCopy
 	Text string `json:"text,omitempty"`
+	// For passkey operations
+	RPID             string                 `json:"rpId,omitempty"`
+	RPName           string                 `json:"rpName,omitempty"`
+	UserName         string                 `json:"userName,omitempty"`
+	DisplayName      string                 `json:"displayName,omitempty"`
+	AllowCredentials []string               `json:"allowCredentials,omitempty"`
+	CredentialID     string                 `json:"credentialId,omitempty"`
+	Challenge        string                 `json:"challenge,omitempty"`
+	Origin           string                 `json:"origin,omitempty"`
+	UserID           string                 `json:"userId,omitempty"`
+	Algorithm        int                    `json:"algorithm,omitempty"`
+	Extra            map[string]interface{} `json:"extra,omitempty"`
 }
 
 // Response represents a native messaging response to the browser extension.
 type Response struct {
-	Status      string       `json:"status,omitempty"`
-	Version     string       `json:"version,omitempty"`
-	Credentials []Credential `json:"credentials,omitempty"`
-	Locked      *bool        `json:"locked,omitempty"`
-	VaultCount  *int         `json:"vaultCount,omitempty"`
-	Error       string       `json:"error,omitempty"`
+	Status      string                 `json:"status,omitempty"`
+	Version     string                 `json:"version,omitempty"`
+	Credentials []Credential           `json:"credentials,omitempty"`
+	Locked      *bool                  `json:"locked,omitempty"`
+	VaultCount  *int                   `json:"vaultCount,omitempty"`
+	Error       string                 `json:"error,omitempty"`
+	// Passkey response fields
+	Passkeys    []PasskeyInfo          `json:"passkeys,omitempty"`
+	Assertion   map[string]interface{} `json:"assertion,omitempty"`
+	Options     map[string]interface{} `json:"options,omitempty"`
+}
+
+// PasskeyInfo represents a passkey credential summary for the extension.
+type PasskeyInfo struct {
+	CredentialID string `json:"credentialId"`
+	RPID         string `json:"rpId"`
+	RPName       string `json:"rpName"`
+	Username     string `json:"username"`
+	DisplayName  string `json:"displayName"`
+	CreatedAt    string `json:"createdAt"`
 }
 
 // Credential represents a single credential returned by the sidecar.
@@ -192,6 +218,36 @@ func handleMessage(client *SidecarClient, msg *Request) *Response {
 
 	case "openApp":
 		return openDesktopApp()
+
+	case "passkeyList":
+		if msg.RPID == "" {
+			return &Response{Error: "rpId is required"}
+		}
+		return client.passkeyList(msg.RPID)
+
+	case "passkeyGet":
+		if msg.RPID == "" {
+			return &Response{Error: "rpId is required"}
+		}
+		return client.passkeyGet(msg.RPID, msg.AllowCredentials)
+
+	case "passkeyCreate":
+		if msg.RPID == "" {
+			return &Response{Error: "rpId is required"}
+		}
+		return client.passkeyCreate(msg)
+
+	case "passkeySign":
+		if msg.CredentialID == "" {
+			return &Response{Error: "credentialId is required"}
+		}
+		return client.passkeySign(msg)
+
+	case "passkeyDelete":
+		if msg.CredentialID == "" {
+			return &Response{Error: "credentialId is required"}
+		}
+		return client.passkeyDelete(msg.CredentialID)
 
 	default:
 		return &Response{Error: "unknown action: " + msg.Action}
@@ -366,6 +422,126 @@ func (c *SidecarClient) lock() *Response {
 	defer func() { _ = resp.Body.Close() }()
 
 	return &Response{Status: "locked"}
+}
+
+// --- Passkey sidecar methods ---
+
+func (c *SidecarClient) passkeyList(rpID string) *Response {
+	resp, err := c.sidecarGet("/extension/passkeys?rp_id=" + rpID)
+	if err != nil {
+		c.baseURL = ""
+		return &Response{Error: "Desktop app not running"}
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		return &Response{Error: fmt.Sprintf("sidecar returned %d", resp.StatusCode)}
+	}
+
+	var passkeys []PasskeyInfo
+	if err := json.NewDecoder(resp.Body).Decode(&passkeys); err != nil {
+		return &Response{Error: "failed to decode passkeys"}
+	}
+
+	return &Response{Passkeys: passkeys}
+}
+
+func (c *SidecarClient) passkeyGet(rpID string, allowCredentials []string) *Response {
+	payload, _ := json.Marshal(map[string]interface{}{
+		"rp_id":             rpID,
+		"allow_credentials": allowCredentials,
+	})
+
+	resp, err := c.sidecarPost("/extension/passkeys/get", strings.NewReader(string(payload)))
+	if err != nil {
+		c.baseURL = ""
+		return &Response{Error: "Desktop app not running"}
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		return &Response{Error: fmt.Sprintf("sidecar returned %d", resp.StatusCode)}
+	}
+
+	var passkeys []PasskeyInfo
+	if err := json.NewDecoder(resp.Body).Decode(&passkeys); err != nil {
+		return &Response{Error: "failed to decode passkeys"}
+	}
+
+	return &Response{Passkeys: passkeys}
+}
+
+func (c *SidecarClient) passkeyCreate(msg *Request) *Response {
+	payload, _ := json.Marshal(map[string]interface{}{
+		"rp_id":        msg.RPID,
+		"rp_name":      msg.RPName,
+		"username":     msg.UserName,
+		"display_name": msg.DisplayName,
+		"algorithm":    msg.Algorithm,
+		"challenge":    msg.Challenge,
+		"origin":       msg.Origin,
+		"user_id_b64":  msg.UserID,
+	})
+
+	resp, err := c.sidecarPost("/extension/passkeys/create", strings.NewReader(string(payload)))
+	if err != nil {
+		c.baseURL = ""
+		return &Response{Error: "Desktop app not running"}
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
+		return &Response{Error: fmt.Sprintf("sidecar returned %d", resp.StatusCode)}
+	}
+
+	var result map[string]interface{}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return &Response{Error: "failed to decode passkey creation result"}
+	}
+
+	return &Response{Status: "created", Options: result}
+}
+
+func (c *SidecarClient) passkeySign(msg *Request) *Response {
+	payload, _ := json.Marshal(map[string]interface{}{
+		"credential_id": msg.CredentialID,
+		"rp_id":         msg.RPID,
+		"origin":        msg.Origin,
+		"challenge":     msg.Challenge,
+	})
+
+	resp, err := c.sidecarPost("/extension/passkeys/sign", strings.NewReader(string(payload)))
+	if err != nil {
+		c.baseURL = ""
+		return &Response{Error: "Desktop app not running"}
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		return &Response{Error: fmt.Sprintf("sidecar returned %d", resp.StatusCode)}
+	}
+
+	var assertion map[string]interface{}
+	if err := json.NewDecoder(resp.Body).Decode(&assertion); err != nil {
+		return &Response{Error: "failed to decode assertion"}
+	}
+
+	return &Response{Status: "ok", Assertion: assertion}
+}
+
+func (c *SidecarClient) passkeyDelete(credentialID string) *Response {
+	resp, err := c.doRequest("DELETE", "/extension/passkeys/"+credentialID, nil)
+	if err != nil {
+		c.baseURL = ""
+		return &Response{Error: "Desktop app not running"}
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		return &Response{Error: fmt.Sprintf("sidecar returned %d", resp.StatusCode)}
+	}
+
+	return &Response{Status: "deleted"}
 }
 
 // --- Secure clipboard ---

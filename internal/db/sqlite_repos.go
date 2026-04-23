@@ -132,6 +132,25 @@ func (r *SQLiteUserRepo) UpdateUserKeys(ctx context.Context, id string, authHash
 	return nil
 }
 
+// SetRequireHWKey updates a user's hardware key requirement.
+func (r *SQLiteUserRepo) SetRequireHWKey(ctx context.Context, userID string, require bool) error {
+	// SQLite doesn't have the column by default; add it if missing
+	r.db.ExecContext(ctx, `ALTER TABLE users ADD COLUMN require_hw_key INTEGER NOT NULL DEFAULT 0`) //nolint:errcheck
+	val := 0
+	if require {
+		val = 1
+	}
+	res, err := r.db.ExecContext(ctx, `UPDATE users SET require_hw_key = ? WHERE id = ?`, val, userID)
+	if err != nil {
+		return fmt.Errorf("set require_hw_key: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return fmt.Errorf("user not found")
+	}
+	return nil
+}
+
 // ── SQLite Vault Repo ────────────────────────────────────────────────────────
 
 // SQLiteVaultRepo implements VaultRepository for SQLite.

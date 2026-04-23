@@ -1,6 +1,7 @@
 import { app, BrowserWindow, ipcMain, Menu, session, dialog, clipboard } from 'electron';
 import path from 'path';
 import fs from 'fs';
+import http from 'http';
 import nodeCrypto from 'crypto';
 import { spawn, execFileSync, ChildProcess } from 'child_process';
 import {
@@ -226,6 +227,7 @@ function lockExtensionSession(): void {
  */
 function writeExtensionLockfile(): void {
   if (!backendUrl) return; // sidecar mode — Go server writes its own lockfile
+  if (sidecarPort) return; // sidecar started successfully — it wrote its own lockfile
   try {
     const dir = getAppDataDir();
     if (!fs.existsSync(dir)) {
@@ -996,6 +998,260 @@ public class SecureClip {
     } catch (err) {
       return { success: false, error: (err as Error).message };
     }
+  });
+
+  // --- Passkey IPC handlers ---
+
+  ipcMain.handle('passkey:list', async (_event, token: string) => {
+    const api = getApiBase();
+    if (!api) return { error: 'Backend not available' };
+    try {
+      const res = await fetch(`${api}/api/v1/vault/passkeys`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      return await res.json();
+    } catch { return { error: 'Failed to connect to backend' }; }
+  });
+
+  ipcMain.handle('passkey:delete', async (_event, token: string, passkeyId: string) => {
+    const api = getApiBase();
+    if (!api) return { error: 'Backend not available' };
+    try {
+      const res = await fetch(`${api}/api/v1/vault/passkeys/${encodeURIComponent(passkeyId)}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      return await res.json();
+    } catch { return { error: 'Failed to connect to backend' }; }
+  });
+
+  ipcMain.handle('passkey:listHardwareKeys', async (_event, token: string) => {
+    const api = getApiBase();
+    if (!api) return { error: 'Backend not available' };
+    try {
+      const res = await fetch(`${api}/api/v1/auth/hardware-keys`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      return await res.json();
+    } catch { return { error: 'Failed to connect to backend' }; }
+  });
+
+  ipcMain.handle('passkey:deleteHardwareKey', async (_event, token: string, keyId: string) => {
+    const api = getApiBase();
+    if (!api) return { error: 'Backend not available' };
+    try {
+      const res = await fetch(`${api}/api/v1/auth/hardware-keys/${encodeURIComponent(keyId)}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      return await res.json();
+    } catch { return { error: 'Failed to connect to backend' }; }
+  });
+
+  ipcMain.handle('passkey:beginRegistration', async (_event, token: string, data: Record<string, unknown>) => {
+    const api = getApiBase();
+    if (!api) return { error: 'Backend not available' };
+    try {
+      const res = await fetch(`${api}/api/v1/vault/passkeys/register/begin`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify(data),
+      });
+      return await res.json();
+    } catch { return { error: 'Failed to connect to backend' }; }
+  });
+
+  ipcMain.handle('passkey:finishRegistration', async (_event, token: string, data: Record<string, unknown>) => {
+    const api = getApiBase();
+    if (!api) return { error: 'Backend not available' };
+    try {
+      const res = await fetch(`${api}/api/v1/vault/passkeys/register/finish`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify(data),
+      });
+      return await res.json();
+    } catch { return { error: 'Failed to connect to backend' }; }
+  });
+
+  ipcMain.handle('passkey:beginAuthentication', async (_event, token: string, rpId: string) => {
+    const api = getApiBase();
+    if (!api) return { error: 'Backend not available' };
+    try {
+      const res = await fetch(`${api}/api/v1/vault/passkeys/authenticate/begin`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ rp_id: rpId }),
+      });
+      return await res.json();
+    } catch { return { error: 'Failed to connect to backend' }; }
+  });
+
+  ipcMain.handle('passkey:finishAuthentication', async (_event, token: string, data: Record<string, unknown>) => {
+    const api = getApiBase();
+    if (!api) return { error: 'Backend not available' };
+    try {
+      const res = await fetch(`${api}/api/v1/vault/passkeys/authenticate/finish`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify(data),
+      });
+      return await res.json();
+    } catch { return { error: 'Failed to connect to backend' }; }
+  });
+
+  // Security settings IPC handlers
+  ipcMain.handle('auth:getSecuritySettings', async (_event, token: string) => {
+    const api = getApiBase();
+    if (!api) return { error: 'Backend not available' };
+    try {
+      const res = await fetch(`${api}/api/v1/auth/security-settings`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      return await res.json();
+    } catch { return { error: 'Failed to connect to backend' }; }
+  });
+
+  ipcMain.handle('auth:setRequireHWKey', async (_event, token: string, require: boolean) => {
+    const api = getApiBase();
+    if (!api) return { error: 'Backend not available' };
+    try {
+      const res = await fetch(`${api}/api/v1/auth/require-hardware-key`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ require }),
+      });
+      return await res.json();
+    } catch { return { error: 'Failed to connect to backend' }; }
+  });
+
+  // Hardware key registration/authentication (vault 2FA)
+  ipcMain.handle('hwkey:beginRegistration', async (_event, token: string, data: Record<string, unknown>) => {
+    const api = getApiBase();
+    if (!api) return { error: 'Backend not available' };
+    try {
+      const res = await fetch(`${api}/api/v1/auth/hardware-keys/register/begin`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify(data),
+      });
+      return await res.json();
+    } catch { return { error: 'Failed to connect to backend' }; }
+  });
+
+  ipcMain.handle('hwkey:finishRegistration', async (_event, token: string, data: Record<string, unknown>) => {
+    const api = getApiBase();
+    if (!api) return { error: 'Backend not available' };
+    try {
+      const res = await fetch(`${api}/api/v1/auth/hardware-keys/register/finish`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify(data),
+      });
+      return await res.json();
+    } catch { return { error: 'Failed to connect to backend' }; }
+  });
+
+  // WebAuthn ceremony via temporary localhost window (Electron renderer is not a secure context)
+  ipcMain.handle('hwkey:webauthnCreate', async (_event, optionsJSON: string) => {
+    return new Promise<Record<string, unknown>>((resolve) => {
+      const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Security Key</title>
+<style>body{background:#1a1a2e;color:#e0e0e0;font-family:system-ui;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;flex-direction:column}
+.msg{text-align:center;max-width:320px}.spinner{border:3px solid #333;border-top:3px solid #7c3aed;border-radius:50%;width:32px;height:32px;animation:spin 1s linear infinite;margin:16px auto}
+@keyframes spin{to{transform:rotate(360deg)}}.err{color:#f87171;margin-top:12px;font-size:14px}</style></head>
+<body><div class="msg"><div class="spinner"></div><p>Touch your security key…</p><p id="err" class="err"></p></div>
+<script>
+(async()=>{try{
+const opts=${optionsJSON};
+const b64=s=>{let r=s.replace(/-/g,'+').replace(/_/g,'/');while(r.length%4)r+='=';return Uint8Array.from(atob(r),c=>c.charCodeAt(0))};
+const toB64=b=>{const a=new Uint8Array(b);let s='';for(let i=0;i<a.length;i++)s+=String.fromCharCode(a[i]);return btoa(s).replace(/\\+/g,'-').replace(/\\//g,'_').replace(/=+$/g,'')};
+const cred=await navigator.credentials.create({publicKey:{
+challenge:b64(opts.challenge),
+rp:opts.rp,
+user:{id:b64(opts.user.id),name:opts.user.name,displayName:opts.user.displayName},
+pubKeyCredParams:opts.pubKeyCredParams,
+authenticatorSelection:{authenticatorAttachment:'cross-platform',residentKey:'discouraged',userVerification:'required'},
+attestation:'direct',timeout:120000
+}});
+if(!cred){document.title='RESULT:'+JSON.stringify({error:'cancelled'});return}
+const r=cred.response;
+const pk=r.getPublicKey?.();
+document.title='RESULT:'+JSON.stringify({
+credential_id:toB64(cred.rawId),
+attestation_object:toB64(r.attestationObject),
+client_data_json:toB64(r.clientDataJSON),
+public_key_cbor:pk?toB64(pk):'',
+transports:r.getTransports?.()??['usb']
+});
+}catch(e){document.title='RESULT:'+JSON.stringify({error:e.message||'WebAuthn failed'})}})();
+</script></body></html>`;
+
+      const server = http.createServer((req, res) => {
+        res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+        res.end(html);
+      });
+
+      server.listen(0, '127.0.0.1', () => {
+        const port = (server.address() as any).port;
+        const win = new BrowserWindow({
+          width: 420,
+          height: 280,
+          parent: mainWindow ?? undefined,
+          modal: true,
+          resizable: false,
+          minimizable: false,
+          maximizable: false,
+          title: 'Register Security Key',
+          webPreferences: { nodeIntegration: false, contextIsolation: true },
+        });
+        win.setMenuBarVisibility(false);
+
+        const cleanup = () => {
+          try { win.close(); } catch { /* already closed */ }
+          server.close();
+        };
+
+        // Watch for title change as the result channel
+        win.webContents.on('page-title-updated', (_e, title) => {
+          if (title.startsWith('RESULT:')) {
+            try {
+              resolve(JSON.parse(title.slice(7)));
+            } catch {
+              resolve({ error: 'Invalid response' });
+            }
+            cleanup();
+          }
+        });
+
+        win.on('closed', () => {
+          server.close();
+          resolve({ error: 'cancelled' });
+        });
+
+        const loadAndRun = async () => {
+          // In dev mode, attach a virtual FIDO2 authenticator so the feature
+          // can be tested without a physical security key.
+          if (isDev) {
+            try {
+              const dbg = win.webContents.debugger;
+              dbg.attach('1.3');
+              await dbg.sendCommand('WebAuthn.enable');
+              await dbg.sendCommand('WebAuthn.addVirtualAuthenticator', {
+                options: {
+                  protocol: 'ctap2',
+                  transport: 'usb',
+                  hasResidentKey: false,
+                  hasUserVerification: true,
+                  isUserVerified: true,
+                },
+              });
+            } catch { /* best-effort */ }
+          }
+          win.loadURL(`http://127.0.0.1:${port}`);
+        };
+        loadAndRun();
+      });
+    });
   });
 
   // Storage backend IPC handlers

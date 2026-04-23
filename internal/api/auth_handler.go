@@ -159,3 +159,51 @@ func (h *AuthHandler) ChangePassword(w http.ResponseWriter, r *http.Request) {
 
 	writeJSON(w, http.StatusOK, map[string]string{"status": "password_changed"})
 }
+
+// SetRequireHWKey handles POST /api/v1/auth/require-hardware-key
+func (h *AuthHandler) SetRequireHWKey(w http.ResponseWriter, r *http.Request) {
+	claims := GetClaims(r.Context())
+	if claims == nil {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
+	var body struct {
+		Require bool `json:"require"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	if err := h.authService.SetRequireHWKey(r.Context(), claims.UserID, body.Require); err != nil {
+		log.Error().Err(err).Str("user_id", claims.UserID).Msg("set require hw key failed")
+		writeError(w, http.StatusInternalServerError, "failed to update setting")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"status":         "updated",
+		"require_hw_key": body.Require,
+	})
+}
+
+// GetSecuritySettings handles GET /api/v1/auth/security-settings
+func (h *AuthHandler) GetSecuritySettings(w http.ResponseWriter, r *http.Request) {
+	claims := GetClaims(r.Context())
+	if claims == nil {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
+	user, err := h.authService.GetUserByID(r.Context(), claims.UserID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to get settings")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"require_hw_key": user.RequireHWKey,
+		"has_2fa":        user.Has2FA,
+	})
+}

@@ -73,6 +73,11 @@ export const browserAPI = {
       browser.alarms.create(name, alarmInfo),
     get onAlarm() { return browser.alarms.onAlarm; },
   },
+
+  notifications: {
+    create: (id: string, options: browser.Notifications.CreateNotificationOptions) =>
+      browser.notifications.create(id, options),
+  },
 };
 
 /**

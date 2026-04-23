@@ -149,6 +149,47 @@ CREATE TABLE IF NOT EXISTS invitations (
 );
 
 -- ============================================================================
+-- Passkey Credentials (WebAuthn passkeys stored in the vault for websites)
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS passkey_credentials (
+    id                    TEXT PRIMARY KEY,
+    user_id               TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    credential_id         BLOB NOT NULL UNIQUE,
+    rp_id                 TEXT NOT NULL,
+    rp_name               TEXT,
+    user_handle           BLOB NOT NULL,
+    username              TEXT,
+    display_name          TEXT,
+    public_key_cbor       BLOB NOT NULL,
+    encrypted_private_key BLOB NOT NULL,
+    private_key_nonce     BLOB NOT NULL,
+    sign_count            INTEGER NOT NULL DEFAULT 0,
+    aaguid                BLOB,
+    transports            TEXT,
+    discoverable          INTEGER NOT NULL DEFAULT 1,
+    backed_up             INTEGER NOT NULL DEFAULT 0,
+    algorithm             INTEGER NOT NULL DEFAULT -7,
+    created_at            TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    last_used_at          TEXT
+);
+
+-- ============================================================================
+-- Hardware Auth Keys (for vault login 2FA)
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS hardware_auth_keys (
+    id              TEXT PRIMARY KEY,
+    user_id         TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    credential_id   BLOB NOT NULL UNIQUE,
+    public_key_cbor BLOB NOT NULL,
+    sign_count      INTEGER NOT NULL DEFAULT 0,
+    aaguid          BLOB,
+    transports      TEXT,
+    name            TEXT NOT NULL,
+    created_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    last_used_at    TEXT
+);
+
+-- ============================================================================
 -- Schema Migrations tracking
 -- ============================================================================
 CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -165,6 +206,10 @@ CREATE INDEX IF NOT EXISTS idx_audit_log_target          ON audit_log (target_id
 CREATE INDEX IF NOT EXISTS idx_sessions_token_hash       ON sessions (token_hash);
 CREATE INDEX IF NOT EXISTS idx_sessions_expires_at       ON sessions (expires_at);
 CREATE INDEX IF NOT EXISTS idx_invitations_org_email     ON invitations (org_id, email);
+CREATE INDEX IF NOT EXISTS idx_passkey_cred_rp_user      ON passkey_credentials (rp_id, user_id);
+CREATE INDEX IF NOT EXISTS idx_passkey_cred_cred_id      ON passkey_credentials (credential_id);
+CREATE INDEX IF NOT EXISTS idx_hw_auth_keys_user         ON hardware_auth_keys (user_id);
+CREATE INDEX IF NOT EXISTS idx_hw_auth_keys_cred_id      ON hardware_auth_keys (credential_id);
 
 -- ============================================================================
 -- Updated-at triggers

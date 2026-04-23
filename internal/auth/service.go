@@ -50,11 +50,12 @@ type LoginRequest struct {
 
 // LoginResponse is returned after successful login.
 type LoginResponse struct {
-	UserID       string `json:"user_id,omitempty"`
-	AccessToken  string `json:"access_token,omitempty"`
-	RefreshToken string `json:"refresh_token,omitempty"`
-	Requires2FA  bool   `json:"requires_2fa,omitempty"`
-	TempToken    string `json:"temp_token,omitempty"` // partial token for 2FA flow
+	UserID       string   `json:"user_id,omitempty"`
+	AccessToken  string   `json:"access_token,omitempty"`
+	RefreshToken string   `json:"refresh_token,omitempty"`
+	Requires2FA  bool     `json:"requires_2fa,omitempty"`
+	TempToken    string   `json:"temp_token,omitempty"`    // partial token for 2FA flow
+	Methods      []string `json:"methods,omitempty"`       // e.g. ["totp","hardware_key"]
 }
 
 // TokenResponse is returned when refreshing tokens.
@@ -198,15 +199,25 @@ func (s *Service) Login(ctx context.Context, req LoginRequest) (LoginResponse, e
 	}
 
 	// Check if 2FA is enabled
-	if user.Has2FA {
+	if user.Has2FA || user.RequireHWKey {
 		tempToken, err := s.generateTempToken(user.ID)
 		if err != nil {
 			return LoginResponse{}, err
 		}
-		log.Info().Str("user_id", user.ID).Msg("login: 2FA required")
+
+		var methods []string
+		if user.Has2FA {
+			methods = append(methods, "totp")
+		}
+		if user.RequireHWKey {
+			methods = append(methods, "hardware_key")
+		}
+
+		log.Info().Str("user_id", user.ID).Strs("methods", methods).Msg("login: 2FA required")
 		return LoginResponse{
 			Requires2FA: true,
 			TempToken:   tempToken,
+			Methods:     methods,
 		}, nil
 	}
 
@@ -461,4 +472,14 @@ func (s *Service) ChangeOwnPassword(ctx context.Context, userID string, oldMaste
 
 	log.Info().Str("user_id", userID).Msg("user changed own password")
 	return nil
+}
+
+// SetRequireHWKey enables or disables the hardware key login requirement for a user.
+func (s *Service) SetRequireHWKey(ctx context.Context, userID string, require bool) error {
+	return s.userRepo.SetRequireHWKey(ctx, userID, require)
+}
+
+// GetUserByID returns a user by ID (for settings retrieval).
+func (s *Service) GetUserByID(ctx context.Context, userID string) (db.User, error) {
+	return s.userRepo.GetUserByID(ctx, userID)
 }

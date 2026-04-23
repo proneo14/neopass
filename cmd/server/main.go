@@ -101,6 +101,7 @@ func main() {
 	var vaultService *vault.Service
 	var adminService *admin.Service
 	var syncService *syncsvc.Service
+	var webauthnService *auth.WebAuthnService
 	var vaultRepo db.VaultRepository
 	var rawSQLiteDB *sql.DB // raw *sql.DB for migration support
 
@@ -139,6 +140,14 @@ func main() {
 		adminService = admin.NewService(orgRepo, userRepo, sqlVaultRepo, auditRepo)
 		syncService = syncsvc.NewService(sqlVaultRepo, syncRepo)
 
+		passkeyRepo := db.NewSQLitePasskeyRepo(sqliteDB.DB)
+		hwKeyRepo := db.NewSQLiteHardwareKeyRepo(sqliteDB.DB)
+		webauthnService = auth.NewWebAuthnService(auth.WebAuthnConfig{
+			RPDisplayName: "LGI Pass",
+			RPID:          "localhost",
+			RPOrigins:     []string{"http://localhost"},
+		}, passkeyRepo, hwKeyRepo)
+
 		log.Info().Str("path", cfg.SQLiteDBPath).Msg("running with SQLite backend")
 	} else if database != nil {
 		userRepo := db.NewPgUserRepo(database.Pool)
@@ -156,6 +165,14 @@ func main() {
 		vaultService = vault.NewService(vaultRepo)
 		adminService = admin.NewService(orgRepo, userRepo, vaultRepo, auditRepo)
 		syncService = syncsvc.NewService(vaultRepo, syncRepo)
+
+		passkeyRepo := db.NewPgPasskeyRepo(database.Pool)
+		hwKeyRepo := db.NewPgHardwareKeyRepo(database.Pool)
+		webauthnService = auth.NewWebAuthnService(auth.WebAuthnConfig{
+			RPDisplayName: "LGI Pass",
+			RPID:          "localhost",
+			RPOrigins:     []string{"http://localhost"},
+		}, passkeyRepo, hwKeyRepo)
 	}
 
 	// SMS 2FA (works with any backend)
@@ -174,7 +191,7 @@ func main() {
 		})
 
 		if authService != nil {
-			r.Mount("/", api.Router(authService, totpService, smsService, vaultService, adminService, syncService, cfg.StorageBackend, rawSQLiteDB))
+			r.Mount("/", api.Router(authService, totpService, smsService, vaultService, adminService, syncService, webauthnService, cfg.StorageBackend, rawSQLiteDB))
 		}
 	})
 
@@ -188,7 +205,7 @@ func main() {
 				extSecret = hex.EncodeToString(b)
 			}
 		}
-		r.Mount("/extension", api.ExtensionRouter(vaultRepo, extSecret))
+		r.Mount("/extension", api.ExtensionRouter(vaultRepo, extSecret, webauthnService))
 
 		// Write sidecar lockfile in sidecar mode
 		if cfg.SidecarMode {

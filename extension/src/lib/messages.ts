@@ -87,6 +87,55 @@ export interface VaultLockedMessage {
   type: 'vaultLocked';
 }
 
+export interface PasskeyCreateMessage {
+  type: 'passkeyCreate';
+  rpId: string;
+  rpName: string;
+  userName: string;
+  displayName: string;
+  challenge?: string;
+  origin?: string;
+  userId?: string;
+  algorithm?: number;
+}
+
+export interface PasskeyGetMessage {
+  type: 'passkeyGet';
+  rpId: string;
+  allowCredentials?: string[];
+}
+
+export interface PasskeySignMessage {
+  type: 'passkeySign';
+  credentialId: string;
+  rpId: string;
+  origin: string;
+  challenge: string;
+}
+
+export interface PasskeyListMessage {
+  type: 'passkeyList';
+  rpId: string;
+}
+
+export interface PasskeyResponseMessage {
+  type: 'passkeyResponse';
+  action: string;
+  passkeys?: PasskeyInfo[];
+  assertion?: Record<string, string>;
+  options?: Record<string, unknown>;
+  error?: string;
+}
+
+export interface PasskeyInfo {
+  credentialId: string;
+  rpId: string;
+  rpName: string;
+  username: string;
+  displayName: string;
+  createdAt: string;
+}
+
 export type ExtensionMessage =
   | FormDetectedMessage
   | RequestCredentialsMessage
@@ -103,7 +152,12 @@ export type ExtensionMessage =
   | FillCredentialMessage
   | SavePromptMessage
   | ShowSavePromptMessage
-  | VaultLockedMessage;
+  | VaultLockedMessage
+  | PasskeyCreateMessage
+  | PasskeyGetMessage
+  | PasskeySignMessage
+  | PasskeyListMessage
+  | PasskeyResponseMessage;
 
 export interface Credential {
   id: string;
@@ -120,10 +174,20 @@ export interface Credential {
  * Native messaging host message types.
  */
 export interface NativeHostRequest {
-  action: 'ping' | 'getCredentials' | 'saveCredential' | 'getStatus' | 'lock';
+  action: 'ping' | 'getCredentials' | 'saveCredential' | 'getStatus' | 'lock'
+    | 'passkeyCreate' | 'passkeyGet' | 'passkeySign' | 'passkeyList' | 'passkeyDelete';
   domain?: string;
   username?: string;
   encryptedPassword?: string;
+  rpId?: string;
+  rpName?: string;
+  userName?: string;
+  displayName?: string;
+  credentialId?: string;
+  challenge?: string;
+  origin?: string;
+  algorithm?: number;
+  allowCredentials?: string[];
 }
 
 export interface NativeHostResponse {
@@ -133,4 +197,7 @@ export interface NativeHostResponse {
   locked?: boolean;
   vaultCount?: number;
   error?: string;
+  passkeys?: PasskeyInfo[];
+  assertion?: Record<string, string>;
+  options?: Record<string, unknown>;
 }
