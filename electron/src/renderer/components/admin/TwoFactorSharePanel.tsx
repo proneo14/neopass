@@ -24,6 +24,7 @@ export function TwoFactorSharePanel({ orgId }: Props) {
   const [members, setMembers] = useState<OrgMember[]>([]);
   const [selectedUserId, setSelectedUserId] = useState('');
   const [totpSecret, setTotpSecret] = useState('');
+  const [label, setLabel] = useState('');
   const [expiresInMin, setExpiresInMin] = useState(60);
   const [loading, setLoading] = useState(true);
   const [sharing, setSharing] = useState(false);
@@ -53,7 +54,7 @@ export function TwoFactorSharePanel({ orgId }: Props) {
     setError('');
     setSuccess('');
     try {
-      const result = await window.api.admin.share2fa(token, selectedUserId, totpSecret.trim(), expiresInMin) as { share_id?: string; error?: string };
+      const result = await window.api.admin.share2fa(token, selectedUserId, totpSecret.trim(), label.trim(), expiresInMin) as { share_id?: string; error?: string };
       if (result.error) {
         setError(result.error);
       } else {
@@ -67,6 +68,7 @@ export function TwoFactorSharePanel({ orgId }: Props) {
         }, ...prev]);
         setSuccess(`2FA secret shared with ${member?.email || selectedUserId}`);
         setTotpSecret('');
+        setLabel('');
         setSelectedUserId('');
       }
     } catch {
@@ -121,6 +123,17 @@ export function TwoFactorSharePanel({ orgId }: Props) {
                 </option>
               ))}
             </select>
+          </div>
+
+          <div>
+            <label className="block text-xs text-surface-400 mb-1">Service / Label</label>
+            <input
+              type="text"
+              value={label}
+              onChange={(e) => setLabel(e.target.value)}
+              placeholder="e.g. GitHub - team@company.com"
+              className="w-full bg-surface-900 border border-surface-600 text-surface-100 text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-accent-500"
+            />
           </div>
 
           <div>

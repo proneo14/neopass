@@ -45,6 +45,7 @@ const ACTION_TYPES = [
 
 export function AuditLogPanel({ orgId }: Props) {
   const [entries, setEntries] = useState<AuditEntry[]>([]);
+  const [userMap, setUserMap] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [actionFilter, setActionFilter] = useState('');
@@ -66,11 +67,12 @@ export function AuditLogPanel({ orgId }: Props) {
       if (toDate) filters.to = new Date(toDate + 'T23:59:59').toISOString();
       filters.limit = '100';
 
-      const result = await window.api.admin.getAuditLog(token, orgId, filters) as AuditEntry[] | { error: string };
+      const result = await window.api.admin.getAuditLog(token, orgId, filters) as { entries: AuditEntry[]; users: Record<string, string> } | { error: string };
       if ('error' in result) {
         setError(result.error);
       } else {
-        setEntries(result);
+        setEntries(result.entries || []);
+        setUserMap(result.users || {});
       }
     } catch {
       setError('Failed to load audit log');
@@ -86,8 +88,8 @@ export function AuditLogPanel({ orgId }: Props) {
     const rows = entries.map((e) => [
       new Date(e.created_at).toISOString(),
       e.action,
-      e.actor_id || '',
-      e.target_id || '',
+      e.actor_id ? (userMap[e.actor_id] || e.actor_id) : '',
+      e.target_id ? (userMap[e.target_id] || e.target_id) : '',
       e.details ? JSON.stringify(e.details) : '',
     ]);
     const csv = [headers, ...rows].map((row) => row.map((cell) => `"${cell.replace(/"/g, '""')}"`).join(',')).join('\n');
@@ -198,11 +200,11 @@ export function AuditLogPanel({ orgId }: Props) {
                         {entry.action.replace(/_/g, ' ')}
                       </span>
                     </td>
-                    <td className="px-4 py-2.5 text-surface-300 text-xs font-mono truncate max-w-[120px]">
-                      {entry.actor_id ? entry.actor_id.slice(0, 8) + '...' : '—'}
+                    <td className="px-4 py-2.5 text-surface-300 text-xs truncate max-w-[160px]" title={entry.actor_id || ''}>
+                      {entry.actor_id ? (userMap[entry.actor_id] || entry.actor_id.slice(0, 8) + '...') : '—'}
                     </td>
-                    <td className="px-4 py-2.5 text-surface-300 text-xs font-mono truncate max-w-[120px]">
-                      {entry.target_id ? entry.target_id.slice(0, 8) + '...' : '—'}
+                    <td className="px-4 py-2.5 text-surface-300 text-xs truncate max-w-[160px]" title={entry.target_id || ''}>
+                      {entry.target_id ? (userMap[entry.target_id] || entry.target_id.slice(0, 8) + '...') : '—'}
                     </td>
                     <td className="px-4 py-2.5 text-surface-500 text-xs truncate max-w-[200px]">
                       {entry.details ? JSON.stringify(entry.details) : '—'}

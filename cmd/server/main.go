@@ -103,6 +103,7 @@ func main() {
 	var syncService *syncsvc.Service
 	var webauthnService *auth.WebAuthnService
 	var vaultRepo db.VaultRepository
+	var userRepo db.UserRepository
 	var rawSQLiteDB *sql.DB // raw *sql.DB for migration support
 
 	if cfg.StorageBackend == "sqlite" {
@@ -122,7 +123,7 @@ func main() {
 			log.Fatal().Err(sqlErr).Msg("failed to run sqlite migrations")
 		}
 
-		userRepo := db.NewSQLiteUserRepo(sqliteDB.DB)
+		userRepo = db.NewSQLiteUserRepo(sqliteDB.DB)
 		totpRepo := db.NewSQLiteTOTPRepo(sqliteDB.DB)
 		sqlVaultRepo := db.NewSQLiteVaultRepo(sqliteDB.DB)
 		vaultRepo = sqlVaultRepo
@@ -151,7 +152,7 @@ func main() {
 
 		log.Info().Str("path", cfg.SQLiteDBPath).Msg("running with SQLite backend")
 	} else if database != nil {
-		userRepo := db.NewPgUserRepo(database.Pool)
+		userRepo = db.NewPgUserRepo(database.Pool)
 		totpRepo := db.NewPgTOTPRepo(database.Pool)
 		vaultRepo = db.NewPgVaultRepo(database.Pool)
 		orgRepo := db.NewPgOrgRepo(database.Pool)
@@ -193,7 +194,7 @@ func main() {
 		})
 
 		if authService != nil {
-			r.Mount("/", api.Router(authService, totpService, smsService, vaultService, adminService, syncService, webauthnService, cfg.StorageBackend, rawSQLiteDB))
+			r.Mount("/", api.Router(authService, totpService, smsService, vaultService, adminService, syncService, webauthnService, userRepo, cfg.StorageBackend, rawSQLiteDB))
 		}
 	})
 

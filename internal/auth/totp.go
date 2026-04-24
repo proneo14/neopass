@@ -166,7 +166,7 @@ func (s *TOTPService) ValidateTOTPServerSide(ctx context.Context, userID string,
 }
 
 // ShareTOTP encrypts a TOTP secret with the recipient's public key and stores it.
-func (s *TOTPService) ShareTOTP(ctx context.Context, fromUserID, toUserID string, totpSecret string, expiresIn time.Duration) (string, error) {
+func (s *TOTPService) ShareTOTP(ctx context.Context, fromUserID, toUserID string, totpSecret, label string, expiresIn time.Duration) (string, error) {
 	// Fetch recipient's public key
 	recipient, err := s.userRepo.GetUserByID(ctx, toUserID)
 	if err != nil {
@@ -176,31 +176,14 @@ func (s *TOTPService) ShareTOTP(ctx context.Context, fromUserID, toUserID string
 		return "", fmt.Errorf("recipient has no public key")
 	}
 
-	// Encrypt TOTP secret with recipient's X-Wing public key via KEM
-	sharedSecret, kemCiphertext, err := pmcrypto.Encapsulate(recipient.PublicKey)
-	if err != nil {
-		return "", fmt.Errorf("encapsulate: %w", err)
-	}
-
-	// Derive encryption key from KEM shared secret
-	encKey := pmcrypto.DeriveSessionKey(sharedSecret, "shared-2fa")
-	pmcrypto.ZeroBytes(sharedSecret[:])
-
-	// Encrypt the TOTP secret
-	encSecret, nonce, err := pmcrypto.Encrypt([]byte(totpSecret), encKey)
-	pmcrypto.ZeroBytes(encKey[:])
+	// Encrypt TOTP secret with recipient's X25519 public key via ECDH
+	blob, err := pmcrypto.X25519Encrypt([]byte(totpSecret), recipient.PublicKey)
 	if err != nil {
 		return "", fmt.Errorf("encrypt shared totp: %w", err)
 	}
 
-	// Blob = KEM ciphertext || nonce || encrypted secret
-	blob := make([]byte, len(kemCiphertext)+len(nonce)+len(encSecret))
-	copy(blob, kemCiphertext)
-	copy(blob[len(kemCiphertext):], nonce)
-	copy(blob[len(kemCiphertext)+len(nonce):], encSecret)
-
 	expiresAt := time.Now().Add(expiresIn)
-	shareID, err := s.totpRepo.InsertSharedTOTP(ctx, fromUserID, toUserID, blob, expiresAt)
+	shareID, err := s.totpRepo.InsertSharedTOTP(ctx, fromUserID, toUserID, blob, label, expiresAt)
 	if err != nil {
 		return "", err
 	}
@@ -214,55 +197,35 @@ func (s *TOTPService) ShareTOTP(ctx context.Context, fromUserID, toUserID string
 	return shareID, nil
 }
 
-// ClaimSharedTOTP decrypts and returns a shared TOTP secret.
-func (s *TOTPService) ClaimSharedTOTP(ctx context.Context, userID string, shareID string, privateKey []byte) (string, error) {
+// ClaimSharedTOTP decrypts and returns a shared TOTP secret and its label.
+func (s *TOTPService) ClaimSharedTOTP(ctx context.Context, userID string, shareID string, privateKey []byte) (secret, label string, err error) {
 	shared, err := s.totpRepo.GetSharedTOTP(ctx, shareID, userID)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 
 	if shared.Claimed {
-		return "", ErrShareClaimed
+		return "", "", ErrShareClaimed
 	}
 	if time.Now().After(shared.ExpiresAt) {
-		return "", ErrShareExpired
+		return "", "", ErrShareExpired
 	}
 
-	kemCtSize := 1120 // xwing.CiphertextSize
-	if len(shared.EncryptedTOTPSecret) < kemCtSize+pmcrypto.NonceSize {
-		return "", fmt.Errorf("invalid shared totp blob")
-	}
-
-	kemCiphertext := shared.EncryptedTOTPSecret[:kemCtSize]
-	nonce := shared.EncryptedTOTPSecret[kemCtSize : kemCtSize+pmcrypto.NonceSize]
-	encSecret := shared.EncryptedTOTPSecret[kemCtSize+pmcrypto.NonceSize:]
-
-	// Decapsulate to get shared secret
-	sharedSecret, err := pmcrypto.Decapsulate(privateKey, kemCiphertext)
+	// Decrypt using X25519 ECDH (privateKey is PKCS8 DER format)
+	plainSecret, err := pmcrypto.X25519Decrypt(shared.EncryptedTOTPSecret, privateKey)
 	if err != nil {
-		return "", fmt.Errorf("decapsulate: %w", err)
-	}
-
-	// Derive same encryption key
-	encKey := pmcrypto.DeriveSessionKey(sharedSecret, "shared-2fa")
-	pmcrypto.ZeroBytes(sharedSecret[:])
-
-	// Decrypt TOTP secret
-	plainSecret, err := pmcrypto.Decrypt(encSecret, nonce, encKey)
-	pmcrypto.ZeroBytes(encKey[:])
-	if err != nil {
-		return "", fmt.Errorf("decrypt shared totp: %w", err)
+		return "", "", fmt.Errorf("decrypt shared totp: %w", err)
 	}
 	defer pmcrypto.ZeroBytes(plainSecret)
 
 	// Mark as claimed
 	if err := s.totpRepo.MarkSharedTOTPClaimed(ctx, shareID); err != nil {
-		return "", err
+		return "", "", err
 	}
 
 	log.Info().Str("user_id", userID).Str("share_id", shareID).Msg("shared TOTP claimed")
 
-	return string(plainSecret), nil
+	return string(plainSecret), shared.Label, nil
 }
 
 // DisableTOTP removes 2FA for a user.

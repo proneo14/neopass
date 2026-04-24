@@ -203,7 +203,8 @@ func (h *AuthHandler) GetSecuritySettings(w http.ResponseWriter, r *http.Request
 	}
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"require_hw_key": user.RequireHWKey,
-		"has_2fa":        user.Has2FA,
+		"require_hw_key":        user.RequireHWKey,
+		"has_2fa":               user.Has2FA,
+		"encrypted_private_key": hex.EncodeToString(user.EncryptedPrivateKey),
 	})
 }

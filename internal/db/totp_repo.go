@@ -25,6 +25,7 @@ type SharedTOTP struct {
 	FromUserID          string    `json:"from_user_id"`
 	ToUserID            string    `json:"to_user_id"`
 	EncryptedTOTPSecret []byte    `json:"-"`
+	Label               string    `json:"label"`
 	ExpiresAt           time.Time `json:"expires_at"`
 	Claimed             bool      `json:"claimed"`
 	CreatedAt           time.Time `json:"created_at"`
@@ -175,13 +176,13 @@ func (r *PgTOTPRepo) MarkRecoveryCodeUsed(ctx context.Context, codeID string) er
 }
 
 // InsertSharedTOTP stores an encrypted TOTP secret shared between users.
-func (r *PgTOTPRepo) InsertSharedTOTP(ctx context.Context, fromUserID, toUserID string, encryptedSecret []byte, expiresAt time.Time) (string, error) {
+func (r *PgTOTPRepo) InsertSharedTOTP(ctx context.Context, fromUserID, toUserID string, encryptedSecret []byte, label string, expiresAt time.Time) (string, error) {
 	var id string
 	err := r.pool.QueryRow(ctx, `
-		INSERT INTO shared_2fa (from_user_id, to_user_id, encrypted_totp_secret, expires_at)
-		VALUES ($1, $2, $3, $4)
+		INSERT INTO shared_2fa (from_user_id, to_user_id, encrypted_totp_secret, label, expires_at)
+		VALUES ($1, $2, $3, $4, $5)
 		RETURNING id
-	`, fromUserID, toUserID, encryptedSecret, expiresAt).Scan(&id)
+	`, fromUserID, toUserID, encryptedSecret, label, expiresAt).Scan(&id)
 	if err != nil {
 		return "", fmt.Errorf("insert shared totp: %w", err)
 	}
@@ -192,11 +193,11 @@ func (r *PgTOTPRepo) InsertSharedTOTP(ctx context.Context, fromUserID, toUserID 
 func (r *PgTOTPRepo) GetSharedTOTP(ctx context.Context, shareID, toUserID string) (SharedTOTP, error) {
 	var s SharedTOTP
 	err := r.pool.QueryRow(ctx, `
-		SELECT id, from_user_id, to_user_id, encrypted_totp_secret, expires_at, claimed, created_at
+		SELECT id, from_user_id, to_user_id, encrypted_totp_secret, label, expires_at, claimed, created_at
 		FROM shared_2fa
 		WHERE id = $1 AND to_user_id = $2
 	`, shareID, toUserID).Scan(
-		&s.ID, &s.FromUserID, &s.ToUserID, &s.EncryptedTOTPSecret,
+		&s.ID, &s.FromUserID, &s.ToUserID, &s.EncryptedTOTPSecret, &s.Label,
 		&s.ExpiresAt, &s.Claimed, &s.CreatedAt,
 	)
 	if err != nil {
@@ -225,7 +226,7 @@ func (r *PgTOTPRepo) MarkSharedTOTPClaimed(ctx context.Context, shareID string) 
 // ListPendingSharedTOTP lists unclaimed, non-expired shared TOTPs for a user.
 func (r *PgTOTPRepo) ListPendingSharedTOTP(ctx context.Context, toUserID string) ([]SharedTOTP, error) {
 	rows, err := r.pool.Query(ctx, `
-		SELECT id, from_user_id, to_user_id, encrypted_totp_secret, expires_at, claimed, created_at
+		SELECT id, from_user_id, to_user_id, encrypted_totp_secret, label, expires_at, claimed, created_at
 		FROM shared_2fa
 		WHERE to_user_id = $1 AND claimed = false AND expires_at > now()
 		ORDER BY created_at DESC
@@ -238,7 +239,7 @@ func (r *PgTOTPRepo) ListPendingSharedTOTP(ctx context.Context, toUserID string)
 	var list []SharedTOTP
 	for rows.Next() {
 		var s SharedTOTP
-		if err := rows.Scan(&s.ID, &s.FromUserID, &s.ToUserID, &s.EncryptedTOTPSecret,
+		if err := rows.Scan(&s.ID, &s.FromUserID, &s.ToUserID, &s.EncryptedTOTPSecret, &s.Label,
 			&s.ExpiresAt, &s.Claimed, &s.CreatedAt); err != nil {
 			return nil, fmt.Errorf("scan shared totp: %w", err)
 		}

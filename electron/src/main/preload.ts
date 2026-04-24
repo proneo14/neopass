@@ -279,17 +279,27 @@ const api = {
       validateString(orgId, 'orgId');
       return ipcRenderer.invoke('admin:getAuditLog', token, orgId, filters);
     },
-    share2fa: (token: string, toUserId: string, totpSecret: string, expiresInMin: number): Promise<unknown> => {
+    share2fa: (token: string, toUserId: string, totpSecret: string, label: string, expiresInMin: number): Promise<unknown> => {
       validateString(token, 'token');
       validateString(toUserId, 'toUserId');
       validateString(totpSecret, 'totpSecret');
-      return ipcRenderer.invoke('admin:share2fa', token, toUserId, totpSecret, expiresInMin);
+      return ipcRenderer.invoke('admin:share2fa', token, toUserId, totpSecret, label, expiresInMin);
     },
     propagateKeys: (token: string, orgId: string, masterKey: string): Promise<unknown> => {
       validateString(token, 'token');
       validateString(orgId, 'orgId');
       validateString(masterKey, 'masterKey');
       return ipcRenderer.invoke('admin:propagateKeys', token, orgId, masterKey);
+    },
+    listPending2FA: (token: string): Promise<unknown> => {
+      validateString(token, 'token');
+      return ipcRenderer.invoke('auth:listPending2FA', token);
+    },
+    claim2FA: (token: string, shareId: string, masterKeyHex: string): Promise<unknown> => {
+      validateString(token, 'token');
+      validateString(shareId, 'shareId');
+      validateString(masterKeyHex, 'masterKeyHex');
+      return ipcRenderer.invoke('auth:claim2FA', token, shareId, masterKeyHex);
     },
   },
 

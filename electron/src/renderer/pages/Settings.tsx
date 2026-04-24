@@ -399,6 +399,9 @@ export function Settings() {
   const [hwKeyError, setHwKeyError] = useState('');
   const [showCreateOrg, setShowCreateOrg] = useState(false);
   const [pendingInvites, setPendingInvites] = useState<{ id: string; org_id: string; org_name: string; role: string; created_at: string }[]>([]);
+  const [pending2FAShares, setPending2FAShares] = useState<{ id: string; from_user: string; label: string; expires_at: string; created_at: string }[]>([]);
+  const [claimingShareId, setClaimingShareId] = useState('');
+  const [claimResult, setClaimResult] = useState<{ secret?: string; label?: string; error?: string } | null>(null);
   const [newOrgName, setNewOrgName] = useState('');
   const [orgLoading, setOrgLoading] = useState(false);
   const [orgError, setOrgError] = useState('');
@@ -571,6 +574,41 @@ export function Settings() {
     })();
   }, [orgId, token]);
 
+  // Fetch pending 2FA shares
+  useEffect(() => {
+    if (!token) return;
+    (async () => {
+      try {
+        const result = await window.api.admin.listPending2FA(token) as { id: string; from_user: string; label: string; expires_at: string; created_at: string }[] | { error: string };
+        if (Array.isArray(result)) {
+          setPending2FAShares(result);
+        }
+      } catch { /* ignore */ }
+    })();
+  }, [token]);
+
+  const handleClaim2FA = async (shareId: string) => {
+    if (!token) { setClaimResult({ error: 'Not logged in' }); return; }
+    if (!masterKeyHex) { setClaimResult({ error: 'Master key not available — please re-login' }); return; }
+    setClaimingShareId(shareId);
+    setClaimResult(null);
+    try {
+      const result = await window.api.admin.claim2FA(token, shareId, masterKeyHex) as { totp_secret?: string; label?: string; error?: string };
+      if (result.error) {
+        setClaimResult({ error: result.error });
+      } else if (result.totp_secret) {
+        setClaimResult({ secret: result.totp_secret, label: result.label });
+        setPending2FAShares((prev) => prev.filter((s) => s.id !== shareId));
+      } else {
+        setClaimResult({ error: 'Unexpected response from server' });
+      }
+    } catch (e) {
+      setClaimResult({ error: `Failed to claim 2FA secret: ${e instanceof Error ? e.message : 'unknown'}` });
+    } finally {
+      setClaimingShareId('');
+    }
+  };
+
   return (
     <div>
       <h1 className="text-lg font-semibold text-surface-100 mb-6">Settings</h1>
@@ -606,6 +644,48 @@ export function Settings() {
               Two-Factor Authentication
               <span className={`text-xs ${has2fa ? 'text-green-400' : 'text-surface-500'}`}>{has2fa ? 'Enabled' : 'Not configured'}</span>
             </button>
+
+            {/* Pending 2FA Shares */}
+            {(pending2FAShares.length > 0 || claimResult) && (
+              <div className="bg-accent-600/10 border border-accent-500/30 rounded-lg p-4 space-y-3">
+                {pending2FAShares.length > 0 && (
+                  <>
+                    <div className="flex items-center gap-2">
+                      <span className="text-accent-400 text-sm font-medium">🔑 Shared 2FA Secrets</span>
+                      <span className="text-xs bg-accent-500/20 text-accent-300 px-2 py-0.5 rounded-full">{pending2FAShares.length}</span>
+                    </div>
+                    {pending2FAShares.map((share) => (
+                      <div key={share.id} className="flex items-center justify-between bg-surface-800 rounded-lg px-3 py-2">
+                        <div>
+                          <p className="text-sm text-surface-200">{share.label || 'Shared 2FA'}</p>
+                          <p className="text-xs text-surface-500">From {share.from_user} · Expires {new Date(share.expires_at).toLocaleString()}</p>
+                        </div>
+                        <button
+                          onClick={() => handleClaim2FA(share.id)}
+                          disabled={claimingShareId === share.id}
+                          className="text-xs bg-accent-600 hover:bg-accent-500 disabled:opacity-50 text-white rounded-lg px-3 py-1.5 transition-colors"
+                        >
+                          {claimingShareId === share.id ? 'Claiming…' : 'Claim'}
+                        </button>
+                      </div>
+                    ))}
+                  </>
+                )}
+                {claimResult?.error && (
+                  <p className="text-xs text-red-400">{claimResult.error}</p>
+                )}
+                {claimResult?.secret && (
+                  <div className="bg-green-500/10 border border-green-500/30 rounded-lg p-3 space-y-2">
+                    <p className="text-xs text-green-400 font-medium">2FA Secret Claimed Successfully</p>
+                    {claimResult.label && (
+                      <p className="text-xs text-surface-200">For: <span className="font-medium">{claimResult.label}</span></p>
+                    )}
+                    <p className="text-xs text-surface-300 font-mono break-all select-all">{claimResult.secret}</p>
+                    <p className="text-xs text-surface-500">Add this secret to your authenticator app or the matching vault entry.</p>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         </section>
 

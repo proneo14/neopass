@@ -566,11 +566,9 @@ func (s *Service) propagateOrgKey(ctx context.Context, orgID string, orgPrivKey 
 			continue
 		}
 
-		// Check if they already have a per-admin key
-		existing, _ := s.orgRepo.GetMemberOrgKey(ctx, orgID, m.UserID)
-		if len(existing) > 0 {
-			continue
-		}
+		// Always re-propagate: re-derive the admin's master key from escrow
+		// and re-encrypt the org private key. This handles cases where the
+		// admin re-registered with a new password (invalidating old per-admin key).
 
 		// Get their escrow → decrypt to get their master key
 		escrow, err := s.orgRepo.GetMemberEscrow(ctx, orgID, m.UserID)

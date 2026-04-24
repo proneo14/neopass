@@ -72,7 +72,7 @@ type TOTPRepository interface {
 	InsertRecoveryCodes(ctx context.Context, userID string, codeHashes [][]byte) error
 	GetUnusedRecoveryCodes(ctx context.Context, userID string) ([]RecoveryCode, error)
 	MarkRecoveryCodeUsed(ctx context.Context, codeID string) error
-	InsertSharedTOTP(ctx context.Context, fromUserID, toUserID string, encryptedSecret []byte, expiresAt time.Time) (string, error)
+	InsertSharedTOTP(ctx context.Context, fromUserID, toUserID string, encryptedSecret []byte, label string, expiresAt time.Time) (string, error)
 	GetSharedTOTP(ctx context.Context, shareID, toUserID string) (SharedTOTP, error)
 	MarkSharedTOTPClaimed(ctx context.Context, shareID string) error
 	ListPendingSharedTOTP(ctx context.Context, toUserID string) ([]SharedTOTP, error)

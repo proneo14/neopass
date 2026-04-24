@@ -18,13 +18,13 @@ import (
 // Router sets up all API v1 routes.
 // storageBackend should be "sqlite" or "postgres".
 // sqliteDB is the raw SQLite *sql.DB for migration support (nil when using postgres).
-func Router(authService *auth.Service, totpService *auth.TOTPService, smsService *auth.SMSService, vaultService *vault.Service, adminService *admin.Service, syncService *syncsvc.Service, webauthnService *auth.WebAuthnService, storageBackend string, sqliteDB *sql.DB) chi.Router {
+func Router(authService *auth.Service, totpService *auth.TOTPService, smsService *auth.SMSService, vaultService *vault.Service, adminService *admin.Service, syncService *syncsvc.Service, webauthnService *auth.WebAuthnService, userRepo db.UserRepository, storageBackend string, sqliteDB *sql.DB) chi.Router {
 	r := chi.NewRouter()
 
 	authHandler := NewAuthHandler(authService)
 	tfaHandler := NewTwoFactorHandler(totpService, smsService, authService)
 	vaultHandler := NewVaultHandler(vaultService)
-	adminHandler := NewAdminHandler(adminService)
+	adminHandler := NewAdminHandler(adminService, userRepo)
 	if sqliteDB != nil {
 		adminHandler.SetSQLiteDB(sqliteDB)
 	}
@@ -69,6 +69,7 @@ func Router(authService *auth.Service, totpService *auth.TOTPService, smsService
 			r.Post("/disable", tfaHandler.Disable)
 			r.Post("/share", tfaHandler.Share)
 			r.Post("/claim/{id}", tfaHandler.Claim)
+			r.Get("/pending", tfaHandler.ListPending)
 		})
 
 		// Vault routes

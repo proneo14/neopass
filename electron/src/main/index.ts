@@ -828,6 +828,12 @@ public class SecureClip {
         console.error('[leaveOrg] Failed to reset config:', e);
       }
 
+      // Schedule app restart after returning the response so the renderer can process it
+      setTimeout(() => {
+        app.relaunch();
+        app.exit(0);
+      }, 500);
+
       return result;
     } catch { return { error: 'Failed to connect to backend' }; }
   });
@@ -928,7 +934,7 @@ public class SecureClip {
     } catch { return { error: 'Failed to connect to backend' }; }
   });
 
-  ipcMain.handle('admin:share2fa', async (_event, token: string, toUserId: string, totpSecret: string, expiresInMin: number) => {
+  ipcMain.handle('admin:share2fa', async (_event, token: string, toUserId: string, totpSecret: string, label: string, expiresInMin: number) => {
     const api = getApiBase();
     if (!api) return { error: 'Backend not available' };
     try {
@@ -938,11 +944,57 @@ public class SecureClip {
         body: JSON.stringify({
           to_user_id: toUserId,
           totp_secret: totpSecret,
+          label: label,
           expires_in_minutes: expiresInMin,
         }),
       });
       return await res.json();
     } catch { return { error: 'Failed to connect to backend' }; }
+  });
+
+  ipcMain.handle('auth:listPending2FA', async (_event, token: string) => {
+    const api = getApiBase();
+    if (!api) return { error: 'Backend not available' };
+    try {
+      const res = await fetch(`${api}/api/v1/auth/2fa/pending`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      return await res.json();
+    } catch { return { error: 'Failed to connect to backend' }; }
+  });
+
+  ipcMain.handle('auth:claim2FA', async (_event, token: string, shareId: string, masterKeyHex: string) => {
+    const api = getApiBase();
+    if (!api) return { error: 'Backend not available' };
+    try {
+      // Step 1: Fetch user's encrypted private key from security settings
+      const settingsRes = await fetch(`${api}/api/v1/auth/security-settings`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const settings = await settingsRes.json() as { encrypted_private_key?: string; error?: string };
+      if (settings.error || !settings.encrypted_private_key) {
+        return { error: 'Failed to fetch private key' };
+      }
+
+      // Step 2: Decrypt private key with master key
+      const masterKey = Buffer.from(masterKeyHex, 'hex');
+      const encPrivKey = Buffer.from(settings.encrypted_private_key, 'hex');
+      // Format: iv(12) || ciphertext || authTag(16)
+      const iv = encPrivKey.subarray(0, 12);
+      const authTag = encPrivKey.subarray(encPrivKey.length - 16);
+      const ciphertext = encPrivKey.subarray(12, encPrivKey.length - 16);
+      const decipher = nodeCrypto.createDecipheriv('aes-256-gcm', masterKey, iv);
+      decipher.setAuthTag(authTag);
+      const privateKeyDer = Buffer.concat([decipher.update(ciphertext), decipher.final()]);
+
+      // Step 3: Call claim endpoint with raw private key
+      const res = await fetch(`${api}/api/v1/auth/2fa/claim/${encodeURIComponent(shareId)}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ private_key: privateKeyDer.toString('hex') }),
+      });
+      return await res.json();
+    } catch (e) { return { error: `Claim failed: ${e instanceof Error ? e.message : 'unknown'}` }; }
   });
 
   ipcMain.handle('admin:propagateKeys', async (_event, token: string, orgId: string, masterKey: string) => {

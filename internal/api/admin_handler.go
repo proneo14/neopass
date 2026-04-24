@@ -21,12 +21,13 @@ import (
 // AdminHandler handles admin HTTP endpoints.
 type AdminHandler struct {
 	adminService *admin.Service
+	userRepo     db.UserRepository
 	sqliteDB     *sql.DB // nil when not using SQLite backend
 }
 
 // NewAdminHandler creates a new AdminHandler.
-func NewAdminHandler(adminService *admin.Service) *AdminHandler {
-	return &AdminHandler{adminService: adminService}
+func NewAdminHandler(adminService *admin.Service, userRepo db.UserRepository) *AdminHandler {
+	return &AdminHandler{adminService: adminService, userRepo: userRepo}
 }
 
 // SetSQLiteDB sets the SQLite database reference for migration support.
@@ -498,7 +499,29 @@ func (h *AdminHandler) GetAuditLog(w http.ResponseWriter, r *http.Request) {
 		entries = []db.AuditEntry{}
 	}
 
-	writeJSON(w, http.StatusOK, entries)
+	// Resolve user IDs to emails
+	emailMap := map[string]string{}
+	if h.userRepo != nil {
+		seen := map[string]bool{}
+		for _, e := range entries {
+			if e.ActorID != nil && !seen[*e.ActorID] {
+				seen[*e.ActorID] = true
+			}
+			if e.TargetID != nil && !seen[*e.TargetID] {
+				seen[*e.TargetID] = true
+			}
+		}
+		for uid := range seen {
+			if u, err := h.userRepo.GetUserByID(r.Context(), uid); err == nil {
+				emailMap[uid] = u.Email
+			}
+		}
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"entries": entries,
+		"users":   emailMap,
+	})
 }
 
 // PropagateKeys handles POST /api/v1/admin/orgs/{id}/propagate-keys

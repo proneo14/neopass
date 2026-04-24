@@ -11,6 +11,7 @@ import (
 	"github.com/rs/zerolog/log"
 
 	"github.com/password-manager/password-manager/internal/auth"
+	"github.com/password-manager/password-manager/internal/db"
 )
 
 // TwoFactorHandler handles 2FA HTTP endpoints.
@@ -179,9 +180,10 @@ func (h *TwoFactorHandler) Share(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var body struct {
-		ToUserID    string `json:"to_user_id"`
-		TOTPSecret  string `json:"totp_secret"`
-		ExpiresInMin int   `json:"expires_in_minutes"` // default 60
+		ToUserID     string `json:"to_user_id"`
+		TOTPSecret   string `json:"totp_secret"`
+		Label        string `json:"label"` // e.g. "GitHub - team@company.com"
+		ExpiresInMin int    `json:"expires_in_minutes"` // default 60
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
@@ -198,7 +200,7 @@ func (h *TwoFactorHandler) Share(w http.ResponseWriter, r *http.Request) {
 		expiresIn = 60 * time.Minute
 	}
 
-	shareID, err := h.totpService.ShareTOTP(r.Context(), claims.UserID, body.ToUserID, body.TOTPSecret, expiresIn)
+	shareID, err := h.totpService.ShareTOTP(r.Context(), claims.UserID, body.ToUserID, body.TOTPSecret, body.Label, expiresIn)
 	if err != nil {
 		log.Error().Err(err).
 			Str("from_user", claims.UserID).
@@ -248,7 +250,7 @@ func (h *TwoFactorHandler) Claim(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	secret, err := h.totpService.ClaimSharedTOTP(r.Context(), claims.UserID, shareID, privKeyBytes)
+	secret, label, err := h.totpService.ClaimSharedTOTP(r.Context(), claims.UserID, shareID, privKeyBytes)
 	if err != nil {
 		if errors.Is(err, auth.ErrShareExpired) {
 			writeError(w, http.StatusGone, "share expired")
@@ -265,6 +267,7 @@ func (h *TwoFactorHandler) Claim(w http.ResponseWriter, r *http.Request) {
 
 	writeJSON(w, http.StatusOK, map[string]string{
 		"totp_secret": secret,
+		"label":       label,
 		"status":      "claimed",
 	})
 }
@@ -366,4 +369,50 @@ func (h *TwoFactorHandler) Disable(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, map[string]string{"status": "2fa_disabled"})
+}
+
+// ListPending handles GET /api/v1/auth/2fa/pending
+// Returns pending (unclaimed, non-expired) shared TOTPs for the current user.
+func (h *TwoFactorHandler) ListPending(w http.ResponseWriter, r *http.Request) {
+	claims := GetClaims(r.Context())
+	if claims == nil {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
+	shares, err := h.totpService.ListPendingShares(r.Context(), claims.UserID)
+	if err != nil {
+		log.Error().Err(err).Msg("list pending 2FA shares failed")
+		writeError(w, http.StatusInternalServerError, "failed to list pending shares")
+		return
+	}
+
+	if shares == nil {
+		shares = []db.SharedTOTP{}
+	}
+
+	// Return only safe fields (no encrypted data), resolve sender email
+	type pendingShare struct {
+		ID        string    `json:"id"`
+		FromUser  string    `json:"from_user"`
+		Label     string    `json:"label"`
+		ExpiresAt time.Time `json:"expires_at"`
+		CreatedAt time.Time `json:"created_at"`
+	}
+	result := make([]pendingShare, len(shares))
+	for i, s := range shares {
+		fromUser := s.FromUserID
+		if u, err := h.authService.GetUserByID(r.Context(), s.FromUserID); err == nil {
+			fromUser = u.Email
+		}
+		result[i] = pendingShare{
+			ID:        s.ID,
+			FromUser:  fromUser,
+			Label:     s.Label,
+			ExpiresAt: s.ExpiresAt,
+			CreatedAt: s.CreatedAt,
+		}
+	}
+
+	writeJSON(w, http.StatusOK, result)
 }

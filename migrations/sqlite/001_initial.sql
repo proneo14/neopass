@@ -86,6 +86,7 @@ CREATE TABLE IF NOT EXISTS shared_2fa (
     from_user_id          TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     to_user_id            TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     encrypted_totp_secret BLOB NOT NULL,
+    label                 TEXT NOT NULL DEFAULT '',
     expires_at            TEXT NOT NULL,
     claimed               INTEGER NOT NULL DEFAULT 0,
     created_at            TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))

@@ -957,12 +957,12 @@ func (r *SQLiteTOTPRepo) MarkRecoveryCodeUsed(ctx context.Context, codeID string
 	return nil
 }
 
-func (r *SQLiteTOTPRepo) InsertSharedTOTP(ctx context.Context, fromUserID, toUserID string, encryptedSecret []byte, expiresAt time.Time) (string, error) {
+func (r *SQLiteTOTPRepo) InsertSharedTOTP(ctx context.Context, fromUserID, toUserID string, encryptedSecret []byte, label string, expiresAt time.Time) (string, error) {
 	id := newUUID()
 	_, err := r.db.ExecContext(ctx, `
-		INSERT INTO shared_2fa (id, from_user_id, to_user_id, encrypted_totp_secret, expires_at)
-		VALUES (?, ?, ?, ?, ?)
-	`, id, fromUserID, toUserID, encryptedSecret, expiresAt.UTC().Format(timeFormat))
+		INSERT INTO shared_2fa (id, from_user_id, to_user_id, encrypted_totp_secret, label, expires_at)
+		VALUES (?, ?, ?, ?, ?, ?)
+	`, id, fromUserID, toUserID, encryptedSecret, label, expiresAt.UTC().Format(timeFormat))
 	if err != nil {
 		return "", fmt.Errorf("insert shared totp: %w", err)
 	}
@@ -974,9 +974,9 @@ func (r *SQLiteTOTPRepo) GetSharedTOTP(ctx context.Context, shareID, toUserID st
 	var claimed int
 	var expiresStr, createdStr string
 	err := r.db.QueryRowContext(ctx, `
-		SELECT id, from_user_id, to_user_id, encrypted_totp_secret, expires_at, claimed, created_at
+		SELECT id, from_user_id, to_user_id, encrypted_totp_secret, label, expires_at, claimed, created_at
 		FROM shared_2fa WHERE id = ? AND to_user_id = ?
-	`, shareID, toUserID).Scan(&s.ID, &s.FromUserID, &s.ToUserID, &s.EncryptedTOTPSecret,
+	`, shareID, toUserID).Scan(&s.ID, &s.FromUserID, &s.ToUserID, &s.EncryptedTOTPSecret, &s.Label,
 		&expiresStr, &claimed, &createdStr)
 	if err != nil {
 		if err == sql.ErrNoRows {
@@ -1005,7 +1005,7 @@ func (r *SQLiteTOTPRepo) MarkSharedTOTPClaimed(ctx context.Context, shareID stri
 func (r *SQLiteTOTPRepo) ListPendingSharedTOTP(ctx context.Context, toUserID string) ([]SharedTOTP, error) {
 	now := nowUTC()
 	rows, err := r.db.QueryContext(ctx, `
-		SELECT id, from_user_id, to_user_id, encrypted_totp_secret, expires_at, claimed, created_at
+		SELECT id, from_user_id, to_user_id, encrypted_totp_secret, label, expires_at, claimed, created_at
 		FROM shared_2fa
 		WHERE to_user_id = ? AND claimed = 0 AND expires_at > ?
 		ORDER BY created_at DESC
@@ -1020,7 +1020,7 @@ func (r *SQLiteTOTPRepo) ListPendingSharedTOTP(ctx context.Context, toUserID str
 		var s SharedTOTP
 		var claimed int
 		var expiresStr, createdStr string
-		if err := rows.Scan(&s.ID, &s.FromUserID, &s.ToUserID, &s.EncryptedTOTPSecret,
+		if err := rows.Scan(&s.ID, &s.FromUserID, &s.ToUserID, &s.EncryptedTOTPSecret, &s.Label,
 			&expiresStr, &claimed, &createdStr); err != nil {
 			return nil, fmt.Errorf("scan shared totp: %w", err)
 		}
