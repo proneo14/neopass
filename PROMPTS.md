@@ -1658,3 +1658,1528 @@ Depends on: Prompt 3 (crypto), Prompt 4 (auth), Prompt 6 (vault), Prompt 13-16 (
    - TestChallenge_Expiry: verify expired challenge is rejected
    - TestChallenge_Replay: verify used challenge cannot be reused
 ```
+
+---
+
+## Phase 6: Vault UX Essentials
+
+### Prompt 23 — Favorites, Archive & Trash
+
+```
+Add favorites, archive, and trash to the vault. These are table-stakes features that
+Bitwarden and 1Password both have. The goal is zero-knowledge — the server stores flags
+but never decrypts entries.
+
+Depends on: Prompt 6 (vault CRUD), Prompt 18b (SQLite).
+
+--- Part A: Database Changes ---
+
+1. Create migration migrations/007_vault_ux.sql (PostgreSQL):
+   ALTER TABLE vault_entries ADD COLUMN is_favorite BOOLEAN NOT NULL DEFAULT false;
+   ALTER TABLE vault_entries ADD COLUMN is_archived BOOLEAN NOT NULL DEFAULT false;
+   ALTER TABLE vault_entries ADD COLUMN deleted_at TIMESTAMPTZ;
+
+   -- When is_deleted=true AND deleted_at is set, entry is in trash
+   -- After 30 days past deleted_at, entry should be permanently purged
+   CREATE INDEX idx_vault_entries_favorite ON vault_entries(user_id, is_favorite) WHERE is_favorite = true;
+   CREATE INDEX idx_vault_entries_archived ON vault_entries(user_id, is_archived) WHERE is_archived = true;
+   CREATE INDEX idx_vault_entries_trash ON vault_entries(user_id, deleted_at) WHERE is_deleted = true;
+
+2. Create matching SQLite migration migrations/sqlite/007_vault_ux.sql:
+   - Same columns, no partial index support in SQLite so use regular indexes
+
+--- Part B: Backend Changes ---
+
+3. Update internal/db/vault_repo.go:
+   - Add fields to VaultEntry struct:
+     - IsFavorite bool      `json:"is_favorite"`
+     - IsArchived bool      `json:"is_archived"`
+     - DeletedAt  *time.Time `json:"deleted_at,omitempty"`
+   - Update VaultFilters struct — add fields:
+     - IsFavorite *bool   — filter for favorites only
+     - IsArchived *bool   — filter for archived only
+     - InTrash    *bool   — filter for trashed items (is_deleted=true AND deleted_at IS NOT NULL)
+   - ListEntries: by default exclude archived and trashed entries (WHERE is_archived=false AND is_deleted=false)
+     unless the filter explicitly asks for them
+   - Update CreateEntry, UpdateEntry to include new fields in INSERT/UPDATE
+
+4. Add new methods to VaultRepository interface in internal/db/repository.go:
+   - SetFavorite(ctx, entryID, userID string, favorite bool) error
+   - SetArchived(ctx, entryID, userID string, archived bool) error
+   - RestoreEntry(ctx, entryID, userID string) error
+     — sets is_deleted=false, deleted_at=NULL
+   - PermanentlyDeleteEntry(ctx, entryID, userID string) error
+     — actually DELETE FROM vault_entries
+   - PurgeExpiredTrash(ctx, userID string) (int, error)
+     — DELETE WHERE is_deleted=true AND deleted_at < now()-30 days, return count
+   - ListTrash(ctx, userID string) ([]VaultEntry, error)
+     — WHERE is_deleted=true AND deleted_at IS NOT NULL
+
+5. Implement these methods in both PostgreSQL (internal/db/vault_repo.go) and
+   SQLite (internal/db/sqlite_repos.go) backends.
+
+6. Update DeleteEntry to set deleted_at=now() alongside is_deleted=true (soft delete to trash).
+
+7. Update internal/api/vault_handler.go:
+   - PUT  /api/v1/vault/entries/{id}/favorite  — body: { "is_favorite": true/false }
+   - PUT  /api/v1/vault/entries/{id}/archive   — body: { "is_archived": true/false }
+   - POST /api/v1/vault/entries/{id}/restore   — restore from trash
+   - DELETE /api/v1/vault/entries/{id}/permanent — permanently delete (requires is_deleted=true)
+   - GET  /api/v1/vault/entries?filter=favorites — list favorites only
+   - GET  /api/v1/vault/entries?filter=archived  — list archived only
+   - GET  /api/v1/vault/entries?filter=trash     — list trashed items
+   - On server startup or on pull sync, call PurgeExpiredTrash for the requesting user
+
+8. Update internal/api/routes.go to register the new routes.
+
+--- Part C: Electron App Changes ---
+
+9. Update electron/src/main/index.ts — add IPC handlers:
+   - 'vault:setFavorite' → PUT /vault/entries/{id}/favorite
+   - 'vault:setArchived' → PUT /vault/entries/{id}/archive
+   - 'vault:restore'     → POST /vault/entries/{id}/restore
+   - 'vault:permanentDelete' → DELETE /vault/entries/{id}/permanent
+   - 'vault:listTrash'   → GET /vault/entries?filter=trash
+
+10. Update electron/src/main/preload.ts — expose new APIs:
+    - window.api.vault.setFavorite(id, favorite)
+    - window.api.vault.setArchived(id, archived)
+    - window.api.vault.restore(id)
+    - window.api.vault.permanentDelete(id)
+    - window.api.vault.listTrash()
+
+11. Update electron/src/renderer/components/Sidebar.tsx:
+    - Add sidebar sections below existing navigation:
+      - ⭐ Favorites — filters vault to favorites only
+      - 📦 Archive — shows archived entries
+      - 🗑️ Trash — shows trashed entries with days remaining + restore/permanent delete
+    - Show count badges next to each section
+    - Active section is highlighted
+
+12. Update electron/src/renderer/pages/Vault.tsx:
+    - Add activeFilter state: 'all' | 'favorites' | 'archived' | 'trash'
+    - Favorites sort first in the main 'all' view
+    - Star icon toggle on each entry row (filled yellow ⭐ if favorite, outline otherwise)
+    - Context menu additions:
+      - "Add to Favorites" / "Remove from Favorites"
+      - "Archive" (moves to archive)
+      - "Move to Trash" (replaces current delete)
+    - When viewing Trash:
+      - Show "X days remaining" per entry (30 - days since deleted_at)
+      - "Restore" button per entry
+      - "Delete Forever" button per entry (with confirmation dialog)
+      - "Empty Trash" button in header (permanently deletes all)
+    - When viewing Archive:
+      - "Unarchive" button per entry
+      - No creation or editing allowed in archive view
+
+13. Update electron/src/renderer/pages/EntryDetail.tsx:
+    - Show favorite star toggle in entry header
+    - If entry is archived, show "Archived" badge and "Unarchive" action
+    - If entry is in trash, show read-only view with "Restore" and "Delete Forever" buttons
+
+14. Update extension popup (extension/src/popup/Popup.tsx):
+    - Show star icon next to favorited credentials
+    - Sort favorites first in the credential list for the current domain
+
+--- Part D: Sync Compatibility ---
+
+15. Update sync protocol:
+    - Include is_favorite, is_archived, deleted_at in sync pull responses
+    - Include these fields in push changes
+    - The sync already handles is_deleted — extend it to carry deleted_at timestamp
+```
+
+---
+
+### Prompt 24 — Password History, Multiple URIs & Clone
+
+```
+Add password history tracking, multiple URIs per login entry, and entry cloning.
+These are quality-of-life features both Bitwarden and 1Password provide.
+
+Depends on: Prompt 6 (vault), Prompt 23 (vault UX).
+
+--- Part A: Password History ---
+
+Password history is stored client-side inside the encrypted vault entry JSON blob.
+The server never sees plaintext — this preserves zero-knowledge.
+
+1. Update the encrypted JSON structure for login entries:
+   Current: { "name": "", "username": "", "password": "", "uri": "", "notes": "", "totp": "" }
+   New:     { "name": "", "username": "", "password": "", "uris": [...], "notes": "", "totp": "",
+              "passwordHistory": [{ "password": "old_pw", "changedAt": "ISO8601" }, ...] }
+
+   - When saving a login entry and the password field changed vs the previous version:
+     - Push the OLD password + current timestamp into passwordHistory array
+     - Keep max 10 entries (FIFO — drop oldest when exceeding 10)
+
+2. Electron client-side (electron/src/renderer/pages/EntryDetail.tsx):
+   - Before calling vault:update, compare new password vs current decrypted password
+   - If different, append { password: oldPassword, changedAt: new Date().toISOString() }
+     to the passwordHistory array
+   - Trim to 10 entries
+
+3. EntryDetail.tsx — Password History display:
+   - Collapsible "Password History" section below the password field
+   - Only shown for login entries that have passwordHistory with entries
+   - Each item shows: masked password (toggleable), "Changed on" date, copy button
+   - Sorted newest first
+   - "Clear History" button with confirmation
+
+--- Part B: Multiple URIs ---
+
+4. Update the encrypted JSON structure for login entries:
+   - Replace single "uri" field with "uris" array:
+     uris: [{ uri: "https://github.com/login", match: "base_domain" }, ...]
+   - Match detection modes:
+     - "base_domain" (default) — match on registrable domain (e.g., github.com matches *.github.com)
+     - "host" — exact hostname match
+     - "starts_with" — URI starts with the stored value
+     - "regex" — URI matches the regex pattern
+     - "exact" — exact full URI match
+     - "never" — never autofill for this URI (exclusion)
+   - For backward compatibility, if entry has "uri" string instead of "uris" array,
+     treat it as uris: [{ uri: value, match: "base_domain" }]
+
+5. EntryDetail.tsx — Multiple URIs UI:
+   - Show list of URIs with a match mode dropdown per URI
+   - "Add URI" button to append a new row
+   - Remove button (X) per URI row (must keep at least one)
+   - URI input + match mode selector (dropdown: Base domain, Host, Starts with, Regex, Exact, Never)
+   - "Launch" icon button per URI that opens it in default browser via shell.openExternal
+
+6. Update extension autofill domain matching (extension/src/content/autofill.ts):
+   - When receiving credentials from native host, each credential now has a uris array
+   - For each URI entry, apply the match detection mode:
+     - base_domain: extract registrable domain from both, compare
+     - host: compare hostnames exactly
+     - starts_with: check if page URL starts with stored URI
+     - regex: new RegExp(storedUri).test(pageUrl)
+     - exact: page URL === stored URI
+     - never: skip this credential for autofill
+   - A credential matches if ANY of its URIs match the current page
+   - Update extension popup to show the primary URI (first in array) for display
+
+7. Update native host (cmd/nativehost/main.go) credential matching:
+   - When matching credentials for a domain, check all URIs in the entry
+   - Apply match detection modes as described above
+
+--- Part C: Clone Entry ---
+
+8. Add clone endpoint to backend:
+   - POST /api/v1/vault/entries/{id}/clone
+   - Reads the entry, creates a new entry with:
+     - New UUID
+     - Same encrypted_data, nonce, entry_type, folder_id
+     - Version reset to 1
+     - is_favorite, is_archived reset to false
+   - Returns the new entry
+   - The client then decrypts, prepends "Copy of " to the name, re-encrypts, and updates
+
+9. Add IPC handler: 'vault:clone' → POST /vault/entries/{id}/clone
+   - After cloning on server, decrypt locally, modify name, re-encrypt, update
+
+10. Update Vault.tsx context menu:
+    - Add "Clone" option
+    - After clone: navigate to the new entry's detail page in edit mode
+
+11. Update extension:
+    - No extension changes needed — cloning is a desktop-only operation
+```
+
+---
+
+### Prompt 25 — Master Password Re-prompt
+
+```
+Add per-entry master password re-prompt. When enabled on a vault entry, the user must
+re-enter their master password before viewing or copying sensitive fields (password, CVV,
+secure note content). Both Bitwarden and 1Password have this feature.
+
+Depends on: Prompt 6 (vault), Prompt 23 (vault UX).
+
+1. Add reprompt flag to the vault entry encrypted JSON blob:
+   - Add "reprompt": 0 | 1 to the entry JSON (0 = no reprompt, 1 = master password)
+   - This is stored inside the encrypted data, so the server never knows which entries
+     require re-prompt — it's a client-side enforcement
+   - Default: 0 (no reprompt)
+
+2. Update EntryDetail.tsx:
+   - Add "Master password re-prompt" toggle in edit mode (checkbox or switch)
+   - When reprompt=1 and user tries to:
+     - View (unmask) a password, CVV, or secure note content
+     - Copy a password, CVV, or secure note content
+     - Edit the entry
+   - Show a modal dialog: "Enter your master password to continue"
+   - Input field for master password
+   - On submit: derive auth hash from entered password + stored email using same KDF
+   - Compare derived masterKeyHex with stored masterKeyHex in authStore
+   - If match: allow the action, cache approval for this entry for 5 minutes
+   - If mismatch: show error, do not allow action
+   - After 5 minutes or if vault is locked: require re-prompt again
+
+3. Create electron/src/renderer/components/RepromptDialog.tsx:
+   - Modal overlay with password input
+   - "Verify" button + "Cancel" button
+   - Auto-focus on password input
+   - Enter key submits
+   - Loading spinner during KDF derivation
+
+4. Update Vault.tsx:
+   - Context menu "Copy Password" action: if entry has reprompt=1, show re-prompt first
+   - Context menu "Copy Username" action: no re-prompt needed (username is not sensitive)
+   - Show a small 🔒 lock icon on entries that have reprompt enabled
+
+5. Update extension autofill:
+   - When autofilling an entry that has reprompt=1:
+     - Extension popup shows a password prompt before filling
+     - Password is sent to native host → sidecar for verification
+     - If verified: proceed with autofill
+     - If user cancels or fails: abort autofill
+   - Add message type: { type: 'verifyMasterPassword', password: string } → returns { verified: boolean }
+
+6. Add verification endpoint to sidecar extension bridge:
+   - POST /extension/verify-password — body: { password: string }
+   - Derives keys from password + email, compares with session's master key
+   - Returns { verified: true/false }
+   - Rate-limited: 5 attempts per minute
+
+7. Update IPC: 'vault:verifyMasterPassword' → returns boolean
+   - Derives keys locally in main process, compares with stored masterKeyHex
+```
+
+---
+
+## Phase 7: Security Intelligence
+
+### Prompt 26 — Vault Health Report & Breach Monitoring
+
+```
+Build a vault health report page (like 1Password's Watchtower or Bitwarden's Vault Health Reports)
+and integrate Have I Been Pwned breach monitoring. All analysis runs client-side to maintain
+zero-knowledge — the server never sees plaintext passwords or their hashes.
+
+Depends on: Prompt 6 (vault), Prompt 10 (UI).
+
+--- Part A: Password Health Analysis (Client-Side) ---
+
+1. Create electron/src/renderer/utils/passwordHealth.ts:
+
+   analyzeVault(entries: DecryptedEntry[]) → VaultHealthReport:
+   - Weak Passwords:
+     - Score each password: length, character variety (upper, lower, digit, symbol),
+       common patterns (sequential chars, repeated chars, keyboard walks)
+     - Scoring: 0-20 = Critical, 21-40 = Weak, 41-60 = Fair, 61-80 = Good, 81-100 = Strong
+     - Flag entries with score < 40 as weak
+   - Reused Passwords:
+     - Group entries by password (hash with SHA-256 for comparison, don't store plaintext)
+     - Any group with > 1 entry = reused password
+     - Return groups with entry IDs and count
+   - Old Passwords:
+     - Entries where updated_at is older than 365 days (configurable threshold)
+     - Ignore secure notes and identities
+   - Missing TOTP:
+     - Login entries where URI matches a known list of sites supporting 2FA
+       but the entry has no totp field set
+     - Include a hardcoded list of popular domains that support TOTP:
+       google.com, github.com, facebook.com, amazon.com, dropbox.com,
+       twitter.com, microsoft.com, apple.com, slack.com, etc. (top 50)
+   - Insecure Sites:
+     - Login entries where ALL URIs start with http:// (not https://)
+   - Return VaultHealthReport: { weak, reused, old, missingTotp, insecure,
+     totalLogins, overallScore (0-100 percentage of healthy entries) }
+
+2. Create electron/src/renderer/utils/hibp.ts:
+
+   checkPasswordBreach(password: string) → Promise<number>:
+   - SHA-1 hash the password (using Web Crypto API)
+   - Take first 5 characters (prefix)
+   - GET https://api.pwnedpasswords.com/range/{prefix}
+   - Parse response: each line is "SUFFIX:COUNT"
+   - Check if remaining 35 characters of hash appear in response
+   - Return breach count (0 = not breached)
+   - This is k-anonymity: the full hash never leaves the device
+
+   checkEmailBreach(email: string) → Promise<Breach[]>:
+   - This requires HIBP API key (optional, configured in Settings)
+   - GET https://haveibeenpwned.com/api/v3/breachedaccount/{email}
+   - Header: hibp-api-key: {key}
+   - Return array of breach info: { name, date, dataClasses }
+   - If no API key configured, skip email breach checking
+
+   batchCheckPasswords(entries: DecryptedEntry[]) → Promise<Map<string, number>>:
+   - Check each login entry's password against HIBP
+   - Rate limit: max 1 request per 1.5 seconds (HIBP rate limit)
+   - Show progress indicator during batch check
+   - Return map of entry ID → breach count
+   - Cache results in memory for the session (don't re-check until next unlock)
+
+--- Part B: Vault Health Report UI ---
+
+3. Create electron/src/renderer/pages/HealthReport.tsx:
+   - Page title: "Vault Health" or "Security Report"
+   - Overall health score: large circular progress indicator (0-100%)
+   - Color coded: red (<40), orange (40-70), green (>70)
+
+   Summary cards (top row):
+   - 🔴 Exposed Passwords — count of entries found in data breaches (HIBP)
+   - 🟠 Weak Passwords — count of entries with weak passwords
+   - 🟡 Reused Passwords — count of entries sharing passwords
+   - 🔵 Old Passwords — count of entries not updated in 365+ days
+   - 🟢 Missing 2FA — count of entries on TOTP-supporting sites without TOTP
+   - ⚠️ Insecure Sites — count of entries with HTTP-only URIs
+
+   Click any card → expand to show the list of affected entries:
+   - Entry name, username, domain
+   - Severity indicator
+   - "View" button → navigates to EntryDetail
+   - For reused: show group (which other entries share this password)
+   - For exposed: show breach count and "Change Password" recommendation
+
+   Bottom section:
+   - "Check for Breaches" button — runs HIBP batch check with progress bar
+   - "Last checked: {date}" timestamp
+   - Note: "Breach checking uses k-anonymity. Your passwords never leave this device."
+
+4. Update electron/src/renderer/components/Sidebar.tsx:
+   - Add "🛡️ Health" or "📊 Reports" nav item below Vault
+   - Show warning badge if there are critical findings (exposed or weak passwords)
+
+5. Update electron/src/main/preload.ts:
+   - No new IPC needed — all analysis is client-side in the renderer
+   - HIBP API calls go directly from renderer (they're public HTTPS APIs, no auth needed)
+   - Ensure CSP allows connecting to api.pwnedpasswords.com and haveibeenpwned.com
+
+6. Update electron/src/main/index.ts:
+   - Add api.pwnedpasswords.com and haveibeenpwned.com to CSP connect-src directive
+
+--- Part C: Entry-Level Breach Indicators ---
+
+7. Update electron/src/renderer/pages/Vault.tsx:
+   - After vault unlock, run analyzeVault() in background
+   - Show small warning icons on entries in the vault list:
+     - 🔴 if password found in breach
+     - 🟠 if weak password
+     - 🟡 if reused password
+   - These indicators are cached in vaultStore for the session
+
+8. Update EntryDetail.tsx:
+   - Show inline warning banners:
+     - "This password was found in {N} data breaches. Change it immediately."
+     - "This password is weak. Consider using the password generator."
+     - "This password is reused across {N} entries."
+   - "Generate New Password" shortcut button when weak/reused/breached
+```
+
+---
+
+## Phase 8: Sharing & Collaboration
+
+### Prompt 27 — Secure Send
+
+```
+Implement Secure Send — time-limited encrypted sharing of text or files via a unique link.
+Recipients don't need an LGI Pass account. The decryption key is in the URL fragment
+(never sent to the server). This is Bitwarden's "Send" feature equivalent.
+
+Depends on: Prompt 3 (crypto), Prompt 4 (auth), Prompt 18 (Docker/server).
+
+--- Part A: Database ---
+
+1. Create migration migrations/008_sends.sql:
+
+   CREATE TABLE sends (
+     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+     user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+     slug TEXT NOT NULL UNIQUE,             -- random URL-safe slug (16 chars)
+     send_type TEXT NOT NULL CHECK (send_type IN ('text', 'file')),
+     encrypted_data BYTEA NOT NULL,         -- AES-256-GCM encrypted payload
+     nonce BYTEA NOT NULL,                  -- GCM nonce
+     encrypted_name BYTEA,                  -- encrypted display name (optional)
+     name_nonce BYTEA,
+     password_hash BYTEA,                   -- bcrypt hash of optional access password
+     max_access_count INT,                  -- NULL = unlimited
+     access_count INT NOT NULL DEFAULT 0,
+     file_name TEXT,                        -- original filename (for file sends, unencrypted)
+     file_size INT,                         -- file size in bytes
+     expires_at TIMESTAMPTZ NOT NULL,
+     disabled BOOLEAN NOT NULL DEFAULT false,
+     hide_email BOOLEAN NOT NULL DEFAULT false,
+     created_at TIMESTAMPTZ DEFAULT now()
+   );
+
+   CREATE INDEX idx_sends_user ON sends(user_id);
+   CREATE INDEX idx_sends_slug ON sends(slug);
+   CREATE INDEX idx_sends_expires ON sends(expires_at);
+
+2. Create matching SQLite migration migrations/sqlite/008_sends.sql.
+
+--- Part B: Backend ---
+
+3. Add SendRepository interface to internal/db/repository.go:
+   - CreateSend(ctx, send Send) (Send, error)
+   - GetSendBySlug(ctx, slug string) (Send, error)
+   - ListSends(ctx, userID string) ([]Send, error)
+   - IncrementAccessCount(ctx, sendID string) error
+   - DeleteSend(ctx, sendID, userID string) error
+   - DisableSend(ctx, sendID, userID string) error
+   - PurgeExpiredSends(ctx) (int, error)
+
+4. Implement in both PostgreSQL and SQLite backends.
+
+5. Create internal/api/send_handler.go:
+   Authenticated endpoints (require JWT):
+   - POST   /api/v1/sends         — create a new send
+     - Body: { type, encrypted_data (hex), nonce (hex), encrypted_name, name_nonce,
+               password (plaintext, server bcrypt-hashes), max_access_count, expires_in_hours,
+               hide_email, file_name, file_size }
+     - Generate random slug (16 chars, crypto/rand, base62)
+     - Validate: expires_in_hours <= 720 (30 days max), file_size <= 100MB
+     - Returns: { id, slug, url: "/send/{slug}" }
+   - GET    /api/v1/sends         — list user's sends
+   - DELETE /api/v1/sends/{id}    — delete a send
+   - PUT    /api/v1/sends/{id}/disable — disable without deleting
+
+   Public endpoints (NO authentication):
+   - GET    /api/v1/send/{slug}   — retrieve a send
+     - Check: not expired, not disabled, access_count < max_access_count (if set)
+     - If password_hash set: require password in query param or header
+       POST /api/v1/send/{slug}/access — body: { password: "..." }
+       Verify bcrypt, if wrong return 401
+     - Increment access_count
+     - Return: { type, encrypted_data, nonce, file_name, file_size, expires_at,
+                 sender_email (unless hide_email) }
+     - If max_access_count reached: return 410 Gone
+     - If expired: return 410 Gone
+
+6. Register routes in internal/api/routes.go:
+   - Authenticated: /api/v1/sends (under auth middleware)
+   - Public: /api/v1/send/{slug} (NO auth middleware)
+   - Purge expired sends on server startup
+
+--- Part C: Electron App ---
+
+7. Create electron/src/renderer/pages/Send.tsx:
+   - Two tabs: "Create Send" and "My Sends"
+
+   Create Send tab:
+   - Type selector: Text or File
+   - Text mode: large textarea for content
+   - File mode: file picker (drag & drop or browse), show filename + size
+   - Options panel:
+     - Name (optional descriptive name)
+     - Expiration: dropdown (1 hour, 1 day, 2 days, 3 days, 7 days, 14 days, 30 days, custom)
+     - Max access count: number input (0 = unlimited)
+     - Password: optional password field
+     - Hide my email: checkbox
+   - "Create Send" button:
+     a. Generate 32-byte random key locally (crypto.getRandomValues)
+     b. Encrypt content with AES-256-GCM using generated key
+     c. Encrypt name if provided with same key
+     d. POST to /api/v1/sends with encrypted data
+     e. Build share URL: https://{server}/send/{slug}#{base64url(key)}
+     f. Show the URL in a copyable field with "Copy Link" button
+     g. Warning: "The link contains the decryption key. Anyone with this link can access the content."
+
+   My Sends tab:
+   - List all user's sends: name (or "Unnamed"), type, created date, expires date,
+     access count / max count, status (active/expired/disabled/max reached)
+   - "Copy Link" button per send (re-constructs URL — key must be cached locally
+     since server doesn't store it; store in local encrypted send metadata)
+   - "Disable" toggle
+   - "Delete" button with confirmation
+
+8. Create a minimal public receive page:
+   - This could be served by the Go server at /send/{slug}
+   - Simple HTML page (server-rendered, minimal dependencies):
+     a. Page loads → reads #{key} from URL fragment
+     b. Fetches encrypted data from GET /api/v1/send/{slug}
+     c. If password required: show password input form
+     d. Decrypts data in browser using SubtleCrypto API with the key from fragment
+     e. Text type: show decrypted text with copy button
+     f. File type: decrypt and offer download
+     g. Branding: "Sent via LGI Pass" with link to project
+   - The fragment (key) is NEVER sent to the server — browsers strip fragments from HTTP requests
+
+9. Add IPC handlers for send operations:
+   - 'send:create', 'send:list', 'send:delete', 'send:disable'
+
+10. Update Sidebar.tsx:
+    - Add "📤 Send" nav item
+
+--- Part D: Security ---
+
+11. Security requirements:
+    - Decryption key is ONLY in the URL fragment (# part) — never sent to server
+    - Server stores only encrypted blobs — cannot decrypt sends
+    - Rate limit public access endpoint: 10 requests per minute per IP
+    - Expired sends are purged by background goroutine (run every hour)
+    - File size limit: 100MB (configurable)
+    - Password-protected sends: bcrypt the password server-side
+    - CORS: Allow public send access from any origin (it's a public sharing feature)
+```
+
+---
+
+### Prompt 28 — Collections (Shared Vaults)
+
+```
+Implement collections — shared vaults within an organization where multiple members can
+access the same encrypted entries. Each collection has its own symmetric key, encrypted
+per-member with their X-Wing public key. This is the foundation of team credential sharing
+in both Bitwarden and 1Password.
+
+Depends on: Prompt 7 (admin/org), Prompt 3 (crypto).
+
+--- Part A: Database ---
+
+1. Create migration migrations/009_collections.sql:
+
+   CREATE TABLE collections (
+     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+     org_id UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+     name_encrypted BYTEA NOT NULL,              -- AES-256-GCM encrypted name
+     name_nonce BYTEA NOT NULL,
+     external_id TEXT,                            -- optional external reference ID
+     created_at TIMESTAMPTZ DEFAULT now(),
+     updated_at TIMESTAMPTZ DEFAULT now()
+   );
+
+   -- Per-member access to a collection with their encrypted copy of the collection key
+   CREATE TABLE collection_members (
+     collection_id UUID REFERENCES collections(id) ON DELETE CASCADE,
+     user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+     encrypted_key BYTEA NOT NULL,               -- collection symmetric key encrypted with user's public key
+     permission TEXT NOT NULL CHECK (permission IN ('read', 'write', 'manage')),
+     PRIMARY KEY (collection_id, user_id)
+   );
+
+   -- Junction table: entries can belong to multiple collections
+   CREATE TABLE collection_entries (
+     collection_id UUID REFERENCES collections(id) ON DELETE CASCADE,
+     entry_id UUID REFERENCES vault_entries(id) ON DELETE CASCADE,
+     PRIMARY KEY (collection_id, entry_id)
+   );
+
+   CREATE INDEX idx_collections_org ON collections(org_id);
+   CREATE INDEX idx_collection_members_user ON collection_members(user_id);
+   CREATE INDEX idx_collection_entries_entry ON collection_entries(entry_id);
+
+2. Create matching SQLite migration (but collections require PostgreSQL/org mode,
+   so SQLite version just creates the tables for schema consistency).
+
+--- Part B: Crypto ---
+
+3. Add to internal/crypto/vault.go or new file internal/crypto/collection.go:
+   - GenerateCollectionKey() → (key [32]byte, error)
+     — 32 random bytes for AES-256-GCM collection key
+   - EncryptCollectionKey(collectionKey [32]byte, userPublicKey []byte) → ([]byte, error)
+     — Encrypt collection key with user's X-Wing public key (KEM encapsulate + AES-GCM)
+   - DecryptCollectionKey(encryptedKey []byte, userPrivateKey []byte) → ([32]byte, error)
+     — Decrypt collection key with user's X-Wing private key
+
+--- Part C: Backend ---
+
+4. Add CollectionRepository interface to internal/db/repository.go:
+   - CreateCollection(ctx, collection Collection) (Collection, error)
+   - GetCollection(ctx, collectionID string) (Collection, error)
+   - ListCollections(ctx, orgID string) ([]Collection, error)
+   - ListUserCollections(ctx, userID string) ([]CollectionWithPermission, error)
+   - UpdateCollection(ctx, collection Collection) error
+   - DeleteCollection(ctx, collectionID string) error
+   - AddCollectionMember(ctx, collectionID, userID string, encryptedKey []byte, permission string) error
+   - RemoveCollectionMember(ctx, collectionID, userID string) error
+   - GetCollectionMembers(ctx, collectionID string) ([]CollectionMember, error)
+   - GetCollectionKey(ctx, collectionID, userID string) ([]byte, error)
+   - AddEntryToCollection(ctx, collectionID, entryID string) error
+   - RemoveEntryFromCollection(ctx, collectionID, entryID string) error
+   - GetCollectionEntries(ctx, collectionID, userID string) ([]VaultEntry, error)
+   - GetEntryCollections(ctx, entryID string) ([]Collection, error)
+
+5. Implement in PostgreSQL backend. SQLite returns 501 Not Implemented (org feature).
+
+6. Create internal/api/collection_handler.go:
+   - POST   /api/v1/orgs/{orgId}/collections                    — create collection
+     - Admin or manager creates collection
+     - Generate collection key, encrypt for creator, store
+   - GET    /api/v1/orgs/{orgId}/collections                    — list org collections
+   - GET    /api/v1/collections/{id}                             — get collection details
+   - PUT    /api/v1/collections/{id}                             — update collection name
+   - DELETE /api/v1/collections/{id}                             — delete collection (manage only)
+   - POST   /api/v1/collections/{id}/members                    — add member
+     - Body: { user_id, permission }
+     - Encrypt collection key with new member's public key
+   - DELETE /api/v1/collections/{id}/members/{uid}              — remove member
+   - PUT    /api/v1/collections/{id}/members/{uid}/permission   — change permission
+   - POST   /api/v1/collections/{id}/entries                    — add entry to collection
+     - Entry must be re-encrypted with collection key (client sends the re-encrypted blob)
+   - DELETE /api/v1/collections/{id}/entries/{entryId}          — remove entry from collection
+   - GET    /api/v1/collections/{id}/entries                    — list entries in collection
+
+   Permission enforcement:
+   - "read": can list and read entries, cannot modify
+   - "write": can read, add, edit entries
+   - "manage": can read, write, add/remove members, delete collection
+
+--- Part D: Electron App ---
+
+7. Update Admin.tsx — add "Collections" tab:
+   - List all org collections with member count and entry count
+   - Create collection form: name + initial members
+   - Edit collection: rename, add/remove members, change permissions
+   - Delete collection with confirmation
+
+8. Update Vault.tsx sidebar:
+   - Show collections alongside folders (separate section: "Collections")
+   - Click collection → filter vault to show collection entries
+   - Collection entries show a "shared" indicator icon
+
+9. Update EntryDetail.tsx:
+   - "Assign to Collection" action in edit mode
+   - Shows which collections the entry belongs to
+   - Permission indicator: read-only entries are not editable
+
+10. Add IPC handlers for all collection operations.
+11. Add preload API: window.api.collections.{create, list, get, update, delete, addMember, ...}
+```
+
+---
+
+### Prompt 29 — Emergency Access
+
+```
+Implement emergency access — users can designate trusted contacts who can request
+access to their vault after a configurable waiting period. The vault owner can approve
+or reject during the wait. Both Bitwarden and 1Password offer this.
+
+Depends on: Prompt 3 (crypto), Prompt 4 (auth), Prompt 6 (vault).
+
+--- Part A: Database ---
+
+1. Create migration migrations/010_emergency_access.sql:
+
+   CREATE TABLE emergency_access (
+     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+     grantor_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+     grantee_id UUID REFERENCES users(id) ON DELETE SET NULL,
+     grantee_email TEXT NOT NULL,
+     status TEXT NOT NULL CHECK (status IN
+       ('invited', 'accepted', 'recovery_initiated', 'recovery_approved', 'recovery_rejected', 'expired')),
+     access_type TEXT NOT NULL CHECK (access_type IN ('view', 'takeover')),
+     wait_time_days INT NOT NULL DEFAULT 7,
+     encrypted_key BYTEA,                          -- grantor's master key encrypted with grantee's public key
+     key_nonce BYTEA,
+     recovery_initiated_at TIMESTAMPTZ,
+     created_at TIMESTAMPTZ DEFAULT now(),
+     updated_at TIMESTAMPTZ DEFAULT now()
+   );
+
+   CREATE INDEX idx_emergency_grantor ON emergency_access(grantor_id);
+   CREATE INDEX idx_emergency_grantee ON emergency_access(grantee_id);
+
+2. Create matching SQLite migration.
+
+--- Part B: Backend ---
+
+3. Add EmergencyAccessRepository interface:
+   - CreateEmergencyAccess(ctx, ea EmergencyAccess) (EmergencyAccess, error)
+   - GetEmergencyAccess(ctx, id string) (EmergencyAccess, error)
+   - ListGrantedAccess(ctx, grantorID string) ([]EmergencyAccess, error)
+   - ListTrustedBy(ctx, granteeID string) ([]EmergencyAccess, error)
+   - UpdateStatus(ctx, id, status string) error
+   - SetEncryptedKey(ctx, id string, encryptedKey, nonce []byte) error
+   - InitiateRecovery(ctx, id string) error  — sets status + recovery_initiated_at
+   - DeleteEmergencyAccess(ctx, id string) error
+   - GetAutoApproveEligible(ctx) ([]EmergencyAccess, error) — where recovery_initiated_at + wait_time_days <= now
+
+4. Create internal/api/emergency_handler.go:
+   - POST   /api/v1/emergency-access/invite    — grantor invites grantee by email
+     - Body: { email, access_type ("view"|"takeover"), wait_time_days (1-30) }
+     - Creates record with status "invited"
+   - GET    /api/v1/emergency-access/granted    — list people I've granted access to
+   - GET    /api/v1/emergency-access/trusted    — list people who've trusted me
+   - POST   /api/v1/emergency-access/{id}/accept — grantee accepts invitation
+     - Status: invited → accepted
+     - Grantor should encrypt their master key with grantee's public key at this point
+       (grantor is notified to approve the key exchange)
+   - POST   /api/v1/emergency-access/{id}/confirm — grantor confirms and sends encrypted key
+     - Body: { encrypted_key (hex), key_nonce (hex) }
+     - Grantor encrypts their master key with grantee's public key
+   - POST   /api/v1/emergency-access/{id}/initiate — grantee initiates recovery
+     - Status: accepted → recovery_initiated
+     - Sets recovery_initiated_at = now
+     - Grantor should be notified (audit log entry)
+   - POST   /api/v1/emergency-access/{id}/approve  — grantor approves recovery early
+     - Status: recovery_initiated → recovery_approved
+   - POST   /api/v1/emergency-access/{id}/reject   — grantor rejects recovery
+     - Status: recovery_initiated → recovery_rejected
+   - GET    /api/v1/emergency-access/{id}/vault     — grantee reads vault (after approval)
+     - Check: status == recovery_approved OR (status == recovery_initiated
+       AND recovery_initiated_at + wait_time_days <= now)
+     - Return encrypted vault entries + encrypted master key
+     - Grantee decrypts master key with their private key, then decrypts entries
+   - POST   /api/v1/emergency-access/{id}/takeover  — grantee takes over account
+     - Only if access_type == takeover AND access is approved/auto-approved
+     - Reset grantor's password, re-encrypt vault with new master key
+   - DELETE /api/v1/emergency-access/{id}            — revoke/cancel
+
+5. Background job (on server startup or periodic):
+   - Check for emergency access records where:
+     status == recovery_initiated AND recovery_initiated_at + wait_time_days <= now()
+   - Auto-approve: set status = recovery_approved
+   - Run every hour
+
+--- Part C: Electron App ---
+
+6. Add "Emergency Access" section to Settings.tsx:
+   Two sub-sections:
+
+   "Trusted Contacts" (people who can access MY vault):
+   - List of grantees: email, access type (view/takeover), wait time, status
+   - "Add Trusted Contact" button → form: email, access type, wait time slider (1-30 days)
+   - Status indicators: invited, accepted (ready), recovery initiated (⚠️ with countdown),
+     approved, rejected
+   - "Reject" button when status is recovery_initiated
+   - "Revoke" button to remove access entirely
+   - When grantee accepts: prompt to encrypt master key for them → call /confirm
+
+   "People Who Trust Me" (vaults I can access):
+   - List of grantors: email, access type, wait time, status
+   - "Accept" button for pending invitations
+   - "Request Access" button when status is accepted → initiates recovery
+   - "View Vault" button when access is approved → shows read-only vault view
+   - Countdown timer when recovery is initiated: "Access in X days Y hours"
+
+7. Add IPC handlers for all emergency access operations.
+8. Add preload API: window.api.emergencyAccess.{invite, accept, confirm, initiate, approve, reject, getVault, ...}
+9. Audit log: all emergency access actions are logged.
+```
+
+---
+
+## Phase 9: Import/Export & Interoperability
+
+### Prompt 30 — Import from Other Password Managers
+
+```
+Implement a vault import feature supporting CSV/JSON exports from major password managers.
+All parsing happens client-side in the Electron renderer — no plaintext data is sent to the server.
+Users can import when switching from another password manager.
+
+Depends on: Prompt 6 (vault), Prompt 10 (Electron UI).
+
+--- Part A: Import Parsers ---
+
+1. Create electron/src/renderer/utils/importers/ directory with a parser per format:
+
+   electron/src/renderer/utils/importers/types.ts:
+   - ImportedEntry: { type, name, username, password, uri, uris, notes, totp,
+     fields (custom), cardNumber, cardExpiry, cardCvv, cardHolder,
+     firstName, lastName, email, phone, address, folder }
+   - ImportResult: { entries: ImportedEntry[], folders: string[], errors: string[], warnings: string[] }
+
+   electron/src/renderer/utils/importers/bitwarden.ts:
+   - parseBitwardenCSV(csv: string) → ImportResult
+     - Columns: folder, favorite, type, name, notes, fields, reprompt, login_uri, login_username,
+       login_password, login_totp
+     - Type mapping: 1=login, 2=secure_note, 3=card, 4=identity
+   - parseBitwardenJSON(json: string) → ImportResult
+     - Standard Bitwarden JSON export format with encrypted/unencrypted variants
+
+   electron/src/renderer/utils/importers/onepassword.ts:
+   - parse1PasswordCSV(csv: string) → ImportResult
+     - 1PUX format columns: Title, Url, Username, Password, Notes, Type
+   - parse1Password1PUX(data: ArrayBuffer) → ImportResult
+     - 1PUX is a zip containing JSON, parse the export.data file
+
+   electron/src/renderer/utils/importers/lastpass.ts:
+   - parseLastPassCSV(csv: string) → ImportResult
+     - Columns: url, username, password, totp, extra, name, grouping, fav
+
+   electron/src/renderer/utils/importers/chrome.ts:
+   - parseChromeCSV(csv: string) → ImportResult
+     - Columns: name, url, username, password, note
+
+   electron/src/renderer/utils/importers/firefox.ts:
+   - parseFirefoxCSV(csv: string) → ImportResult
+     - Columns: url, username, password, httpRealm, formActionOrigin, guid, timeCreated,
+       timeLastUsed, timePasswordChanged
+
+   electron/src/renderer/utils/importers/keepass.ts:
+   - parseKeePassCSV(csv: string) → ImportResult
+     - Columns: Group, Title, Username, Password, URL, Notes
+
+   electron/src/renderer/utils/importers/dashlane.ts:
+   - parseDashlaneCSV(csv: string) → ImportResult
+     - Columns: username, username2, username3, title, password, note, url, category, otpSecret
+
+   electron/src/renderer/utils/importers/index.ts:
+   - ImportFormat enum: Bitwarden_CSV, Bitwarden_JSON, OnePassword_CSV, OnePassword_1PUX,
+     LastPass_CSV, Chrome_CSV, Firefox_CSV, KeePass_CSV, Dashlane_CSV
+   - parseImport(format: ImportFormat, data: string | ArrayBuffer) → ImportResult
+
+   Each parser:
+   - Handle UTF-8 BOM
+   - Skip empty rows
+   - Map fields to ImportedEntry structure
+   - Collect parsing errors per row (don't fail entire import)
+   - Handle missing/optional columns gracefully
+
+--- Part B: Import Wizard UI ---
+
+2. Create electron/src/renderer/components/ImportWizard.tsx:
+   Step 1 — Source Selection:
+   - Grid of import source buttons with logos:
+     Bitwarden, 1Password, LastPass, Chrome, Firefox, KeePass, Dashlane
+   - Each shows "CSV" or "JSON" format badge
+   - Brief instruction per source: "Export from Bitwarden: Settings → Export Vault → CSV"
+
+   Step 2 — File Upload:
+   - Drag & drop zone or file browse button
+   - Accept: .csv, .json, .1pux
+   - Show file name and size after selection
+   - "Parse" button
+
+   Step 3 — Preview & Configure:
+   - Table showing parsed entries: type icon, name, username, URI, folder
+   - Entry count summary: "Found X logins, Y notes, Z cards, W identities"
+   - Errors/warnings section (collapsible) if any rows failed to parse
+   - Duplicate detection: check against existing vault entries by (username + URI)
+     - Highlight duplicates with "Already exists" badge
+     - Checkbox: "Skip duplicates" (default: checked)
+   - Folder mapping: show detected folders, option to create in LGI Pass or skip
+   - Select/deselect individual entries with checkboxes
+
+   Step 4 — Import:
+   - "Import X entries" button with confirmation
+   - Progress bar (entry by entry):
+     a. For each entry: create encrypted JSON blob, encrypt with master key
+     b. POST to /api/v1/vault/entries
+     c. Create folders as needed
+   - Success summary: "Imported X entries into Y folders. Z skipped (duplicates)."
+   - "View Vault" button to go to vault page
+
+3. Add import to Settings.tsx:
+   - "Import Data" section with "Import from another password manager" button → opens ImportWizard
+   - Also accessible from empty vault state (shown when vault has 0 entries)
+
+4. Add IPC handlers if needed (all parsing is client-side, but vault creation uses existing IPC).
+```
+
+---
+
+### Prompt 31 — Enhanced Export & SSH Keys
+
+```
+Add enhanced export options and SSH key storage as a new vault entry type.
+
+Depends on: Prompt 6 (vault), Prompt 10 (Electron UI).
+
+--- Part A: Enhanced Export ---
+
+1. Update electron/src/renderer/pages/Settings.tsx — "Export Data" section:
+   - Three export format options:
+     a. Encrypted JSON (existing) — full backup, importable back into LGI Pass
+     b. Unencrypted JSON — all entries decrypted, standard format
+     c. Unencrypted CSV — flat CSV for spreadsheet/import into other managers
+
+   - Before any export:
+     - Master password re-prompt (always, regardless of reprompt setting)
+     - Warning dialog: "Exporting unencrypted data exposes your passwords. The exported file
+       is NOT encrypted. Delete it after importing into another application."
+
+   - CSV format:
+     - Columns: folder, type, name, username, password, uri, notes, totp, fields
+     - One row per entry
+     - Fields column: JSON string of custom fields
+     - Credit card entries: name, number, expiry, cvv, cardholder in their own columns
+     - Identity entries: firstName, lastName, email, phone, address in their own columns
+
+   - JSON format (unencrypted):
+     - { version: 1, exportDate: ISO8601, entries: [...], folders: [...] }
+     - Each entry: { type, name, fields..., folder, favorite, reprompt }
+     - Compatible with Bitwarden JSON import format where possible
+
+   - File save dialog: Electron dialog.showSaveDialog with appropriate extension
+   - After export: log to audit (if org mode): "vault_exported"
+
+--- Part B: SSH Key Entry Type ---
+
+2. Update database: add 'ssh_key' to entry_type CHECK constraint.
+   Create migration migrations/011_ssh_keys.sql:
+   - PostgreSQL: ALTER TABLE vault_entries DROP CONSTRAINT vault_entries_entry_type_check;
+     ALTER TABLE vault_entries ADD CONSTRAINT vault_entries_entry_type_check
+     CHECK (entry_type IN ('login', 'secure_note', 'credit_card', 'identity', 'ssh_key'));
+   - SQLite: no ALTER CHECK support, but SQLite doesn't enforce CHECK by default anyway
+
+3. SSH key encrypted JSON structure:
+   {
+     "name": "GitHub Deploy Key",
+     "privateKey": "-----BEGIN OPENSSH PRIVATE KEY-----\n...",
+     "publicKey": "ssh-ed25519 AAAA... user@host",
+     "fingerprint": "SHA256:...",
+     "keyType": "ed25519",        -- ed25519, rsa, ecdsa
+     "passphrase": "",            -- optional key passphrase
+     "notes": ""
+   }
+
+4. Update EntryDetail.tsx for SSH key display:
+   - Public key: monospace text field with copy button
+   - Private key: hidden by default, toggle to show (monospace), copy button
+   - Fingerprint: read-only display
+   - Key type badge: Ed25519, RSA-4096, ECDSA
+   - "Copy Public Key" prominent button
+   - When creating: option to paste existing key OR generate new key pair
+
+5. Update Vault.tsx:
+   - Add SSH key type (🔑 icon, differentiate from login with different color or 🗝️)
+   - Include in "Add Entry" type selector
+
+6. SSH key generation (optional, client-side):
+   - Generate Ed25519 or RSA-4096 key pair using Web Crypto or Node.js crypto
+   - Convert to OpenSSH format
+   - Calculate fingerprint (SHA-256 of public key)
+   - No server involvement — all client-side
+
+7. Update extension: no changes needed — SSH keys are desktop-only entries.
+```
+
+---
+
+## Phase 10: UX Polish
+
+### Prompt 32 — Theme Toggle, Tags & Keyboard Shortcuts
+
+```
+Add light/dark theme toggle, a tag system for vault entries, and keyboard shortcuts.
+These are quality-of-life features that improve daily usability.
+
+Depends on: Prompt 9-10 (Electron UI).
+
+--- Part A: Dark/Light Theme ---
+
+1. Update electron/tailwind.config.mjs:
+   - Set darkMode: 'class' (manual toggle via class on <html>)
+
+2. Create electron/src/renderer/store/themeStore.ts (Zustand):
+   - theme: 'dark' | 'light' | 'system'
+   - resolvedTheme: 'dark' | 'light' (actual applied theme)
+   - setTheme(theme) — persists to localStorage
+   - On init: read from localStorage, default 'dark'
+   - If 'system': listen to window.matchMedia('(prefers-color-scheme: dark)')
+
+3. Update electron/src/renderer/App.tsx:
+   - Apply 'dark' class to <html> element based on resolvedTheme
+   - Wrap app in theme provider
+
+4. Audit all components for hard-coded dark colors:
+   - Replace bg-slate-900 with bg-white dark:bg-slate-900
+   - Replace text-white with text-slate-900 dark:text-white
+   - Replace bg-slate-800 with bg-slate-100 dark:bg-slate-800
+   - Replace border-slate-700 with border-slate-200 dark:border-slate-700
+   - Focus on: Sidebar, Vault, EntryDetail, Settings, Admin, Login, Register
+   - Extension popup: keep dark theme only (popup is small, dark works better)
+
+5. Add theme toggle to Settings.tsx:
+   - "Appearance" section
+   - Three options: Light, Dark, System (with radio buttons or segmented control)
+   - Live preview when toggling
+
+--- Part B: Tags System ---
+
+6. Add tags to vault entry encrypted JSON:
+   - Inside the encrypted blob, add: "tags": ["work", "social", "banking", ...]
+   - Tags are encrypted (zero-knowledge), so server can't filter by tag
+   - All tag filtering happens client-side after decryption
+
+7. Update EntryDetail.tsx:
+   - Tag input field in edit mode:
+     - Type tag name, press Enter or comma to add
+     - Click X on tag to remove
+     - Auto-suggest from existing tags across all entries
+     - Max 10 tags per entry
+   - Display mode: show tags as colored pills below entry name
+
+8. Update Vault.tsx:
+   - "Tags" section in sidebar (below folders):
+     - List all unique tags across all decrypted entries
+     - Click tag → filter vault to entries with that tag
+     - Show entry count per tag
+   - Tag filter can combine with folder filter and type filter
+   - Tags appear as small pills in the entry list view
+
+9. Update vaultStore.ts:
+   - Add selectedTags: string[] filter
+   - Derive allTags from decrypted entries
+
+--- Part C: Keyboard Shortcuts ---
+
+10. Create electron/src/renderer/utils/keyboard.ts:
+    - Global keyboard shortcut handler using document.addEventListener('keydown')
+    - Shortcut definitions:
+      Global (work from any page):
+      - Ctrl+N — new vault entry (open create dialog)
+      - Ctrl+F — focus search bar
+      - Ctrl+G — open password generator
+      - Ctrl+L — lock vault
+      - Ctrl+, — open settings
+      - Ctrl+Shift+C — copy current entry's password (if on entry detail)
+      - Ctrl+Shift+U — copy current entry's username (if on entry detail)
+      - Escape — close any open modal/dialog
+
+      Vault list:
+      - ↑/↓ — navigate entries
+      - Enter — open selected entry
+      - Delete — move selected entry to trash (with confirmation)
+
+    - Don't trigger shortcuts when focused on input/textarea (except Escape)
+    - Use event.preventDefault() to avoid browser defaults
+
+11. Create electron/src/renderer/components/ShortcutHelp.tsx:
+    - Modal showing all available shortcuts in a two-column grid
+    - Triggered by Ctrl+? or from Settings page
+    - Group by category: Navigation, Vault, Entry, General
+
+12. Add "Keyboard Shortcuts" link in Settings.tsx → opens ShortcutHelp modal.
+```
+
+---
+
+### Prompt 33 — Vault Timeout Actions, Username Generator & Misc UX
+
+```
+Add vault timeout action options, email alias / username generator, and other UX improvements.
+
+Depends on: Prompt 10-11 (Electron UI, biometric).
+
+--- Part A: Vault Timeout Actions ---
+
+1. Update electron/src/renderer/store/authStore.ts:
+   - Add timeoutAction: 'lock' | 'logout' (default: 'lock')
+   - 'lock': clear master key, keep session token, user re-enters password or biometric to unlock
+   - 'logout': clear everything (token, master key, cached entries), redirect to login page,
+     require full email + password re-entry
+
+2. Update electron/src/main/index.ts auto-lock handler:
+   - Read timeoutAction from auth store (via IPC)
+   - If 'lock': existing behavior (clear master key, show unlock)
+   - If 'logout': clear all session data, close sidecar session, redirect to /login
+   - Extension bridge: if logout, also clear extension session
+
+3. Update Settings.tsx:
+   - "Vault Timeout Action" dropdown alongside the existing auto-lock timeout:
+     - Lock (default) — "Require master password or biometric to unlock"
+     - Log out — "Clear all data and require full login"
+
+--- Part B: Username / Email Alias Generator ---
+
+4. Create electron/src/renderer/components/UsernameGenerator.tsx:
+   Four generation modes:
+
+   a. Random Word + Number:
+      - Format: {word}{number} (e.g., "thunder4729")
+      - Use a built-in word list (100-200 common English words, no offensive words)
+      - Number: 2-6 digits (configurable)
+      - Options: capitalize first letter, add separator
+
+   b. Random Characters:
+      - Format: random alphanumeric string (e.g., "x8k2m9p4")
+      - Length: 8-20 characters (slider)
+
+   c. UUID-based:
+      - Format: UUID v4 (e.g., "a1b2c3d4-e5f6-7890-abcd-ef1234567890")
+      - Useful for unique usernames where format doesn't matter
+
+   d. Email Alias (catch-all):
+      - User configures their domain in Settings (e.g., "mydomain.com")
+      - Generates: random+@mydomain.com (e.g., "x8k2m9@mydomain.com")
+      - Requires a catch-all email setup on the domain
+
+   e. Email Alias Service (optional, API integration):
+      - Support SimpleLogin API:
+        - POST https://app.simplelogin.io/api/alias/random/new
+        - Header: Authentication: {api_key}
+      - Support AnonAddy (addy.io) API:
+        - POST https://app.addy.io/api/v1/aliases
+        - Header: Authorization: Bearer {api_key}
+      - API keys configured in Settings
+      - Generate button → creates alias → returns the alias email
+
+5. Update Settings.tsx — "Username & Alias" section:
+   - Default username format: dropdown (Word+Number, Random, UUID, Catch-all, Service)
+   - Catch-all domain: text input
+   - SimpleLogin API key: password input (optional)
+   - AnonAddy API key: password input (optional)
+
+6. Integrate username generator into EntryDetail.tsx:
+   - Small "⟳ Generate" button next to username field when creating a new login entry
+   - Opens inline popover with generator options and "Use" button
+
+7. Update PasswordGenerator.tsx:
+   - Add a tab or toggle: "Password" | "Username"
+   - Username tab shows the UsernameGenerator component
+   - This way both generators are accessible from the same component
+
+--- Part C: Entry Sorting & Search Improvements ---
+
+8. Update Vault.tsx search:
+   - Search across all decrypted fields (name, username, notes, URIs, tags)
+   - Highlight matching text in search results
+   - Show which field matched (small label: "matched in username", "matched in notes")
+
+9. Update entry sorting options:
+   - Current: name, updated_at, entry_type
+   - Add: created_at, recently used (last_copied_at — track in local store)
+   - Add: favorites first toggle (independent of sort order)
+
+10. Empty states:
+    - Empty vault: show onboarding prompt with "Import passwords" and "Create first entry" CTAs
+    - Empty trash: show "Trash is empty" with trash icon
+    - Empty archive: show "No archived items"
+    - No search results: show "No entries match your search" with suggestion to clear filters
+```
+
+---
+
+## Phase 11: Enterprise Features
+
+### Prompt 34 — SSO & SCIM Integration
+
+```
+Add Single Sign-On (SAML/OIDC) and SCIM directory provisioning for enterprise deployments.
+SSO authenticates the user but does NOT unlock the vault — the master password is still
+required for decryption (same model as Bitwarden and 1Password).
+
+Depends on: Prompt 4 (auth), Prompt 7 (admin/org).
+
+IMPORTANT: This is a PostgreSQL-only feature (enterprise/org mode).
+
+--- Part A: SSO Authentication ---
+
+1. Create migration migrations/012_sso.sql:
+
+   ALTER TABLE organizations ADD COLUMN sso_enabled BOOLEAN NOT NULL DEFAULT false;
+   ALTER TABLE organizations ADD COLUMN sso_config JSONB;
+   -- sso_config: {
+   --   provider: "saml" | "oidc",
+   --   saml: { entity_id, sso_url, certificate, name_id_format },
+   --   oidc: { issuer, client_id, client_secret_encrypted, redirect_uri, scopes },
+   --   auto_enroll: true  -- auto-add authenticated users to org
+   -- }
+
+   ALTER TABLE users ADD COLUMN sso_external_id TEXT;
+   CREATE UNIQUE INDEX idx_users_sso_external ON users(sso_external_id) WHERE sso_external_id IS NOT NULL;
+
+2. Create internal/auth/sso.go:
+   Dependencies: github.com/crewjam/saml, github.com/coreos/go-oidc/v3
+
+   SSOService struct:
+   - InitiateSAMLLogin(orgID string) → (redirectURL string, requestID string, error)
+     - Build SAML AuthnRequest, redirect to IdP SSO URL
+   - HandleSAMLCallback(orgID string, samlResponse string) → (email, externalID string, error)
+     - Parse and validate SAML Response
+     - Verify signature against stored IdP certificate
+     - Extract NameID (email) and attributes
+   - InitiateOIDCLogin(orgID string) → (redirectURL, state string, error)
+     - Build OIDC authorization URL with PKCE
+   - HandleOIDCCallback(orgID, code, state string) → (email, externalID string, error)
+     - Exchange code for tokens, verify ID token, extract claims
+
+3. SSO Login Flow:
+   a. User selects "Login with SSO" on login page
+   b. Enter organization identifier (org slug or domain)
+   c. Redirect to IdP login page
+   d. IdP authenticates, redirects back with assertion/token
+   e. Server validates assertion, finds/creates user by email
+   f. If user exists: return JWT with partial auth (SSO authenticated, vault still locked)
+   g. User enters master password to decrypt vault (SSO doesn't replace master password)
+   h. If auto_enroll and user not in org: add to org as member
+
+4. Create internal/api/sso_handler.go:
+   - GET  /api/v1/sso/{orgId}/login       — initiate SSO login (redirect to IdP)
+   - POST /api/v1/sso/{orgId}/callback     — handle SSO callback (SAML POST or OIDC redirect)
+   - POST /api/v1/sso/{orgId}/unlock       — after SSO, user sends master password to unlock vault
+
+5. Admin SSO configuration UI:
+   - Add "SSO" tab to Admin.tsx
+   - Provider selector: SAML 2.0 or OpenID Connect
+   - SAML config: Entity ID, SSO URL, IdP certificate (textarea)
+   - OIDC config: Issuer URL, Client ID, Client Secret
+   - Test connection button
+   - Enable/disable toggle
+   - Save configuration → encrypted and stored in sso_config
+
+6. Update Login.tsx:
+   - Add "Login with SSO" option below the password form
+   - SSO login prompts for organization identifier first
+   - After SSO redirect, show master password input (vault unlock step)
+
+--- Part B: SCIM Directory Provisioning ---
+
+7. Create migration: add SCIM token column to organizations:
+   ALTER TABLE organizations ADD COLUMN scim_token_hash BYTEA;
+   ALTER TABLE organizations ADD COLUMN scim_enabled BOOLEAN NOT NULL DEFAULT false;
+
+8. Create internal/api/scim_handler.go:
+   SCIM 2.0 endpoints (authenticated via bearer token from scim_token_hash):
+
+   Users:
+   - GET    /api/v1/scim/v2/Users          — list provisioned users (paginated, filtered)
+   - GET    /api/v1/scim/v2/Users/{id}     — get user by ID
+   - POST   /api/v1/scim/v2/Users          — create/provision user
+     - Creates user record + sends invitation email
+     - Schema: { userName (email), name.givenName, name.familyName, active, externalId }
+   - PUT    /api/v1/scim/v2/Users/{id}     — replace user attributes
+   - PATCH  /api/v1/scim/v2/Users/{id}     — partial update (e.g., deactivate)
+     - Deactivating a user: remove from org, revoke sessions
+   - DELETE /api/v1/scim/v2/Users/{id}     — deprovision user
+
+   Groups (optional, future):
+   - Map to collections
+   - GET/POST/PATCH/DELETE /api/v1/scim/v2/Groups
+
+   Standard SCIM responses:
+   - ListResponse: { schemas, totalResults, startIndex, itemsPerPage, Resources }
+   - SCIM error: { schemas, status, detail }
+   - Support filter parameter: filter=userName eq "user@example.com"
+
+9. SCIM auth middleware:
+   - Bearer token in Authorization header
+   - bcrypt compare against scim_token_hash in organizations table
+   - Only allow SCIM requests from the org that owns the token
+
+10. Admin SCIM configuration:
+    - "Directory Sync" tab in Admin.tsx
+    - Generate SCIM token (show once, store bcrypt hash)
+    - Show SCIM endpoint URL
+    - Enable/disable toggle
+    - Show provisioned user list with sync status
+```
+
+---
+
+### Prompt 35 — Custom Roles, Groups & SIEM Integration
+
+```
+Add custom roles with granular permissions, user groups for collection assignment,
+and SIEM integration for enterprise audit log export.
+
+Depends on: Prompt 7 (admin), Prompt 28 (collections), Prompt 34 (SSO/SCIM).
+
+IMPORTANT: PostgreSQL-only (enterprise features).
+
+--- Part A: Custom Roles ---
+
+1. Create migration migrations/013_roles_groups.sql:
+
+   CREATE TABLE roles (
+     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+     org_id UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+     name TEXT NOT NULL,
+     description TEXT,
+     permissions JSONB NOT NULL DEFAULT '[]',
+     is_builtin BOOLEAN NOT NULL DEFAULT false,
+     created_at TIMESTAMPTZ DEFAULT now()
+   );
+
+   -- Built-in roles (seeded on org creation):
+   -- { name: "Admin", permissions: ["*"], is_builtin: true }
+   -- { name: "Member", permissions: ["vault.read","vault.write","collection.read"], is_builtin: true }
+
+   CREATE TABLE groups (
+     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+     org_id UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+     name TEXT NOT NULL,
+     external_id TEXT,               -- for SCIM directory sync
+     created_at TIMESTAMPTZ DEFAULT now()
+   );
+
+   CREATE TABLE group_members (
+     group_id UUID REFERENCES groups(id) ON DELETE CASCADE,
+     user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+     PRIMARY KEY (group_id, user_id)
+   );
+
+   -- Groups can be assigned to collections
+   CREATE TABLE collection_groups (
+     collection_id UUID REFERENCES collections(id) ON DELETE CASCADE,
+     group_id UUID REFERENCES groups(id) ON DELETE CASCADE,
+     permission TEXT NOT NULL CHECK (permission IN ('read', 'write', 'manage')),
+     encrypted_key BYTEA NOT NULL,
+     PRIMARY KEY (collection_id, group_id)
+   );
+
+   -- Replace simple role TEXT in org_members with role_id
+   ALTER TABLE org_members ADD COLUMN role_id UUID REFERENCES roles(id);
+
+   CREATE UNIQUE INDEX idx_roles_org_name ON roles(org_id, name);
+   CREATE INDEX idx_groups_org ON groups(org_id);
+
+2. Permission definitions (JSONB array of permission strings):
+   - "vault.read" — read own vault entries
+   - "vault.write" — create/edit/delete own vault entries
+   - "vault.export" — export vault data
+   - "collection.read" — read collection entries
+   - "collection.write" — edit collection entries
+   - "collection.manage" — manage collection members
+   - "org.invite" — invite users to org
+   - "org.remove" — remove users from org
+   - "org.policy" — manage org policies
+   - "org.audit" — view audit logs
+   - "org.vault_access" — access other users' vaults (escrow)
+   - "org.sso" — manage SSO configuration
+   - "org.scim" — manage SCIM provisioning
+   - "*" — superadmin, all permissions
+
+3. Update internal/api/middleware.go:
+   - RequirePermission(permission string) middleware
+   - Checks user's role → role.permissions → contains permission or "*"
+   - Replace hardcoded role == "admin" checks with permission checks
+
+4. Create admin API endpoints:
+   - CRUD for roles: /api/v1/orgs/{id}/roles
+   - CRUD for groups: /api/v1/orgs/{id}/groups
+   - Manage group members: /api/v1/orgs/{id}/groups/{gid}/members
+   - Assign group to collection: /api/v1/collections/{id}/groups
+
+5. Admin UI:
+   - "Roles" tab in Admin.tsx: list roles, create custom role with permission checkboxes,
+     edit permissions, delete (cannot delete built-in roles)
+   - "Groups" tab in Admin.tsx: list groups, add/remove members, assign to collections
+   - When inviting user: select role from dropdown (not just admin/member)
+
+--- Part B: SIEM Integration ---
+
+6. Create internal/api/siem_handler.go:
+
+   Event log streaming:
+   - GET /api/v1/admin/orgs/{id}/events/export — export audit logs in structured format
+     - Query params: format (json, cef, syslog), since, until, limit
+     - JSON format: NDJSON (newline-delimited JSON), one event per line
+     - CEF format: CEF:0|LGI|Pass|1.0|{action}|{description}|{severity}|...
+     - Syslog format: RFC 5424 structured data
+
+   Webhook delivery:
+   - POST /api/v1/admin/orgs/{id}/webhooks — create webhook
+     - Body: { url, events (array of action types or "*"), secret }
+     - Secret used for HMAC-SHA256 signature verification
+   - GET    /api/v1/admin/orgs/{id}/webhooks — list webhooks
+   - DELETE /api/v1/admin/orgs/{id}/webhooks/{id} — delete webhook
+   - POST   /api/v1/admin/orgs/{id}/webhooks/{id}/test — send test event
+
+7. Webhook delivery system:
+   - When an audit log entry is created, check for matching webhooks
+   - POST to webhook URL with JSON body: { event, timestamp, actor, target, details }
+   - Header: X-LGIPass-Signature: HMAC-SHA256(body, secret)
+   - Retry: 3 attempts with exponential backoff (1s, 5s, 30s)
+   - Store delivery status in webhook_deliveries table
+
+8. Create migration for webhooks:
+   CREATE TABLE webhooks (
+     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+     org_id UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+     url TEXT NOT NULL,
+     events TEXT[] NOT NULL DEFAULT '{*}',
+     secret_hash BYTEA NOT NULL,
+     enabled BOOLEAN NOT NULL DEFAULT true,
+     created_at TIMESTAMPTZ DEFAULT now()
+   );
+
+   CREATE TABLE webhook_deliveries (
+     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+     webhook_id UUID REFERENCES webhooks(id) ON DELETE CASCADE,
+     event_id UUID REFERENCES audit_log(id) ON DELETE CASCADE,
+     status TEXT NOT NULL CHECK (status IN ('pending', 'delivered', 'failed')),
+     response_code INT,
+     attempts INT NOT NULL DEFAULT 0,
+     last_attempt_at TIMESTAMPTZ,
+     created_at TIMESTAMPTZ DEFAULT now()
+   );
+
+9. Admin UI:
+   - "Integrations" tab in Admin.tsx:
+     - Event Log Export section: format selector + date range + "Export" button
+     - Webhooks section: list webhooks, add new, test, enable/disable, delete
+     - Show recent delivery status (last 10) with response codes
+```
+
+---
+
+### Prompt 36 — Comprehensive Test Suite for New Features
+
+```
+Create tests for all features added in Prompts 23-35. Follow the existing test patterns
+in the testing/ directory.
+
+Depends on: All previous prompts in this phase.
+
+--- Part A: Go Backend Tests ---
+
+testing/vault_ux_test.go:
+- TestFavorite_SetAndUnset: set favorite → list with filter → verify
+- TestArchive_SetAndUnset: archive → verify excluded from default list → unarchive
+- TestTrash_DeleteAndRestore: delete → verify in trash → restore → verify in default list
+- TestTrash_PermanentDelete: delete → permanent delete → verify gone
+- TestTrash_AutoPurge: delete → set deleted_at to 31 days ago → purge → verify removed
+- TestClone_Entry: clone entry → verify new ID, same data, version=1
+- TestListEntries_Filters: test favorites, archived, trash filter combinations
+
+testing/send_handler_test.go:
+- TestCreateSend_Text: create text send → verify slug + encrypted data stored
+- TestAccessSend_Success: create → access via slug → verify access_count incremented
+- TestAccessSend_Expired: create with 1hr expiry → set expires_at to past → access → verify 410
+- TestAccessSend_MaxAccess: create with max_access_count=1 → access twice → verify 410
+- TestAccessSend_Password: create with password → access without password → 401
+- TestAccessSend_WithPassword: access with correct password → 200
+- TestPurgeSends: create expired sends → purge → verify deleted
+
+testing/collection_handler_test.go:
+- TestCreateCollection: create collection → verify stored
+- TestAddMember: add member with read permission → verify access
+- TestCollectionPermission_ReadOnly: read member cannot modify entries
+- TestCollectionPermission_Write: write member can add/edit entries
+- TestCollectionPermission_Manage: manage member can add/remove other members
+- TestDeleteCollection: delete → verify cascade deletes members and entry assignments
+
+testing/emergency_access_test.go:
+- TestEmergencyAccess_InviteAndAccept: invite → accept → verify status
+- TestEmergencyAccess_InitiateRecovery: initiate → verify wait period
+- TestEmergencyAccess_ApproveRecovery: approve → verify vault accessible
+- TestEmergencyAccess_RejectRecovery: reject → verify vault NOT accessible
+- TestEmergencyAccess_AutoApprove: initiate → advance time past wait_time → verify auto-approved
+- TestEmergencyAccess_Takeover: takeover → verify password reset + vault re-encrypted
+
+--- Part B: Electron Tests ---
+
+testing/electron/import.test.ts:
+- TestParseBitwardenCSV: parse sample CSV → verify entry count and fields
+- TestParse1PasswordCSV: parse sample CSV → verify mapping
+- TestParseLastPassCSV: parse sample CSV → verify grouping to folders
+- TestParseChromeCSV: parse simple format → verify all fields
+- TestParseFirefoxCSV: parse Firefox export → verify timestamps handled
+- TestDuplicateDetection: import entries → re-import same → verify duplicates detected
+
+testing/electron/password-health.test.ts:
+- TestWeakPasswordDetection: score common passwords → verify flagged as weak
+- TestStrongPasswordDetection: score complex passwords → verify flagged as strong
+- TestReusedPasswordDetection: multiple entries same password → verify grouped
+- TestOldPasswordDetection: entry with old updated_at → verify flagged
+- TestInsecureURI: http:// URI → verify flagged
+- TestHIBP_KAnonymity: verify only 5-char prefix sent (mock fetch)
+
+testing/electron/send.test.ts:
+- TestCreateSend: encrypt content → verify key in fragment only
+- TestDecryptSend: encrypt → build URL → extract key from fragment → decrypt → verify
+
+--- Part C: Extension Tests ---
+
+testing/extension/uri-matching.test.ts:
+- TestBaseDomainMatch: "github.com" matches "https://github.com/login"
+- TestHostMatch: exact hostname matching
+- TestStartsWithMatch: prefix URI matching
+- TestRegexMatch: regex pattern matching
+- TestExactMatch: full URL exact match
+- TestNeverMatch: "never" mode skips credential
+- TestMultipleURIs: credential with multiple URIs, verify any-match logic
+```

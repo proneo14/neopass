@@ -18,9 +18,9 @@ type TabId = (typeof TABS)[number]['id'];
 
 export function Admin() {
   const [activeTab, setActiveTab] = useState<TabId>('members');
-  const { orgId, orgName, token, setOrg, clearOrg } = useAuthStore();
+  const { orgId, orgName, token, role, masterKeyHex, setOrg, clearOrg } = useAuthStore();
 
-  // Refresh org info from backend on mount to ensure we have the correct org
+  // Refresh org info from backend on mount and propagate org keys to all admins
   useEffect(() => {
     if (!token) return;
     (async () => {
@@ -28,6 +28,10 @@ export function Admin() {
         const result = await window.api.admin.getMyOrg(token) as { member?: boolean; org_id?: string; org_name?: string; role?: string };
         if (result.member && result.org_id) {
           setOrg(result.org_id, result.org_name ?? '', result.role ?? 'member');
+          // Auto-propagate org keys so all admins can access vault
+          if (result.role === 'admin' && masterKeyHex) {
+            window.api.admin.propagateKeys(token, result.org_id, masterKeyHex).catch(() => {});
+          }
         } else {
           clearOrg();
         }
@@ -42,6 +46,18 @@ export function Admin() {
         <h1 className="text-xl font-semibold text-surface-100">Admin Dashboard</h1>
         <p className="text-sm text-surface-400 text-center max-w-sm">
           No organization configured. Go to <span className="text-accent-400">Settings → Organization</span> to create one.
+        </p>
+      </div>
+    );
+  }
+
+  if (role !== 'admin') {
+    return (
+      <div className="flex flex-col items-center justify-center h-full gap-4">
+        <span className="text-4xl">🔒</span>
+        <h1 className="text-xl font-semibold text-surface-100">Access Restricted</h1>
+        <p className="text-sm text-surface-400 text-center max-w-sm">
+          Only organization administrators can access this dashboard.
         </p>
       </div>
     );

@@ -348,6 +348,7 @@ func (h *ExtensionHandler) UpdateCredential(w http.ResponseWriter, r *http.Reque
 		Password string `json:"password"`
 		URI      string `json:"uri"`
 		Notes    string `json:"notes"`
+		TOTP     string `json:"totp"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
@@ -371,6 +372,7 @@ func (h *ExtensionHandler) UpdateCredential(w http.ResponseWriter, r *http.Reque
 		"password": body.Password,
 		"uri":      body.URI,
 		"notes":    body.Notes,
+		"totp":     body.TOTP,
 	})
 
 	// Encrypt

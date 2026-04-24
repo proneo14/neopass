@@ -87,6 +87,17 @@ export interface VaultLockedMessage {
   type: 'vaultLocked';
 }
 
+export interface SaveTOTPMessage {
+  type: 'saveTOTP';
+  domain: string;
+  secret: string;
+  credentialId?: string;
+}
+
+export interface ScanQRMessage {
+  type: 'scanQR';
+}
+
 export interface PasskeyCreateMessage {
   type: 'passkeyCreate';
   rpId: string;
@@ -153,6 +164,8 @@ export type ExtensionMessage =
   | SavePromptMessage
   | ShowSavePromptMessage
   | VaultLockedMessage
+  | SaveTOTPMessage
+  | ScanQRMessage
   | PasskeyCreateMessage
   | PasskeyGetMessage
   | PasskeySignMessage
@@ -175,7 +188,8 @@ export interface Credential {
  */
 export interface NativeHostRequest {
   action: 'ping' | 'getCredentials' | 'saveCredential' | 'getStatus' | 'lock'
-    | 'passkeyCreate' | 'passkeyGet' | 'passkeySign' | 'passkeyList' | 'passkeyDelete';
+    | 'passkeyCreate' | 'passkeyGet' | 'passkeySign' | 'passkeyList' | 'passkeyDelete'
+    | 'updateCredential';
   domain?: string;
   username?: string;
   encryptedPassword?: string;
@@ -188,6 +202,12 @@ export interface NativeHostRequest {
   origin?: string;
   algorithm?: number;
   allowCredentials?: string[];
+  id?: string;
+  name?: string;
+  password?: string;
+  uri?: string;
+  notes?: string;
+  totp?: string;
 }
 
 export interface NativeHostResponse {

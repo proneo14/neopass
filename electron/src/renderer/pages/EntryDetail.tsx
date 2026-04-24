@@ -1,26 +1,27 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { PasswordGenerator } from '../components/PasswordGenerator';
 import { ENTRY_TYPE_ICONS, ENTRY_TYPE_LABELS } from '../types/vault';
 import { useVaultStore } from '../store/vaultStore';
 import { useAuthStore } from '../store/authStore';
+import { generateTOTP, getTimeRemaining } from '../utils/totp';
 
 const FIELD_LABELS: Record<string, string> = {
   name: 'Name', username: 'Username', password: 'Password', uri: 'Website',
   notes: 'Notes', content: 'Content', number: 'Card Number', expiry: 'Expiry',
   cvv: 'CVV', cardholder: 'Cardholder', firstName: 'First Name', lastName: 'Last Name',
-  email: 'Email', phone: 'Phone', address: 'Address',
+  email: 'Email', phone: 'Phone', address: 'Address', totp: 'Authenticator Key',
 };
 
 /** Fixed display order per entry type (fields not listed here appear at the end). */
 const FIELD_ORDER: Record<string, string[]> = {
-  login: ['uri', 'username', 'email', 'password', 'notes'],
+  login: ['uri', 'username', 'email', 'password', 'notes', 'totp'],
   secure_note: ['content', 'notes'],
   credit_card: ['number', 'expiry', 'cvv', 'cardholder', 'notes'],
   identity: ['firstName', 'lastName', 'email', 'phone', 'address', 'notes'],
 };
 
-const SENSITIVE_FIELDS = new Set(['password', 'cvv', 'number', 'content']);
+const SENSITIVE_FIELDS = new Set(['password', 'cvv', 'number', 'content', 'totp']);
 
 function CopyButton({ value, sensitive = false }: { value: string; sensitive?: boolean }) {
   const [copied, setCopied] = useState(false);
@@ -37,6 +38,85 @@ function CopyButton({ value, sensitive = false }: { value: string; sensitive?: b
     <button onClick={handleCopy} className="text-xs text-surface-500 hover:text-accent-400 transition-colors shrink-0">
       {copied ? '✓ Copied' : 'Copy'}
     </button>
+  );
+}
+
+/** Live TOTP code display with countdown dial — refreshes every 30 s. */
+function TOTPDisplay({ secret }: { secret: string }) {
+  const [code, setCode] = useState('------');
+  const [timeRemaining, setTimeRemaining] = useState(30);
+  const [copied, setCopied] = useState(false);
+  const period = 30;
+
+  useEffect(() => {
+    let active = true;
+
+    const updateCode = async () => {
+      try {
+        const c = await generateTOTP(secret, period);
+        if (active) setCode(c);
+      } catch {
+        if (active) setCode('ERROR');
+      }
+    };
+
+    const tick = () => {
+      const rem = getTimeRemaining(period);
+      if (active) setTimeRemaining(rem);
+      // Generate new code when period rolls over
+      if (rem === period) updateCode();
+    };
+
+    updateCode();
+    tick();
+    const interval = setInterval(tick, 1000);
+    return () => { active = false; clearInterval(interval); };
+  }, [secret]);
+
+  const handleCopy = async () => {
+    await navigator.clipboard.writeText(code);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1500);
+  };
+
+  const radius = 12;
+  const circumference = 2 * Math.PI * radius;
+  const progress = timeRemaining / period;
+  const strokeDashoffset = circumference * (1 - progress);
+  const isLow = timeRemaining <= 5;
+
+  return (
+    <div className="flex items-center gap-3 py-2.5 border-b border-surface-800 last:border-0">
+      <span className="text-xs text-surface-500 w-24 shrink-0 pt-0.5">One-Time Code</span>
+      <div className="flex items-center gap-3 flex-1">
+        <span className={`text-xl font-mono font-semibold tracking-[0.25em] ${isLow ? 'text-red-400' : 'text-accent-400'}`}>
+          {code.slice(0, 3)}&nbsp;{code.slice(3)}
+        </span>
+        <svg width="30" height="30" viewBox="0 0 30 30" className="shrink-0">
+          <circle cx="15" cy="15" r={radius} fill="none" stroke="#334155" strokeWidth="2.5" />
+          <circle
+            cx="15" cy="15" r={radius}
+            fill="none"
+            stroke={isLow ? '#ef4444' : '#818cf8'}
+            strokeWidth="2.5"
+            strokeLinecap="round"
+            strokeDasharray={circumference}
+            strokeDashoffset={strokeDashoffset}
+            transform="rotate(-90 15 15)"
+            style={{ transition: 'stroke-dashoffset 1s linear' }}
+          />
+          <text x="15" y="15" textAnchor="middle" dominantBaseline="central" fontSize="9" fill={isLow ? '#ef4444' : '#94a3b8'}>
+            {timeRemaining}
+          </text>
+        </svg>
+      </div>
+      <button
+        onClick={handleCopy}
+        className="text-xs text-surface-500 hover:text-accent-400 transition-colors shrink-0"
+      >
+        {copied ? '✓ Copied' : 'Copy'}
+      </button>
+    </div>
   );
 }
 
@@ -67,11 +147,18 @@ export function EntryDetail() {
   }
 
   const entryType = vaultEntry.entry_type;
-  const [editFields, setEditFields] = useState(fields);
+  const [editFields, setEditFields] = useState(() => {
+    // Ensure all standard fields exist for this entry type so they appear in edit mode
+    const base = { ...fields };
+    for (const key of FIELD_ORDER[entryType] ?? []) {
+      if (!(key in base)) base[key] = '';
+    }
+    return base;
+  });
 
   // Fixed field display order: use the type-specific order, then any remaining keys
   const typeOrder = FIELD_ORDER[entryType] ?? [];
-  const allKeys = Object.keys(fields);
+  const allKeys = [...new Set([...Object.keys(fields), ...typeOrder])];
   const fieldOrder = [
     ...typeOrder.filter((k) => allKeys.includes(k)),
     ...allKeys.filter((k) => !typeOrder.includes(k) && k !== 'name'),
@@ -89,8 +176,14 @@ export function EntryDetail() {
   const handleSave = async () => {
     if (!id || !token || !masterKeyHex) return;
 
+    // Strip empty optional fields before persisting
+    const cleanFields: Record<string, string> = {};
+    for (const [k, v] of Object.entries(editFields)) {
+      if (v || k === 'name') cleanFields[k] = v;
+    }
+
     // Encrypt the updated fields
-    const plaintext = JSON.stringify(editFields);
+    const plaintext = JSON.stringify(cleanFields);
     const encResult = await window.api.vault.encrypt(masterKeyHex, plaintext);
     if (encResult.error) return;
 
@@ -102,7 +195,7 @@ export function EntryDetail() {
     }) as { id: string; entry_type: string; encrypted_data: string; nonce: string; version: number; folder_id: string | null; created_at: string; updated_at: string; error?: string };
 
     if (!updateResult.error) {
-      updateEntryFields(id, editFields);
+      updateEntryFields(id, cleanFields);
       updateEntry({
         ...vaultEntry,
         encrypted_data: encResult.encrypted_data,
@@ -115,7 +208,11 @@ export function EntryDetail() {
   };
 
   const handleCancel = () => {
-    setEditFields(fields);
+    const base = { ...fields };
+    for (const key of FIELD_ORDER[entryType] ?? []) {
+      if (!(key in base)) base[key] = '';
+    }
+    setEditFields(base);
     setEditing(false);
   };
 
@@ -163,10 +260,15 @@ export function EntryDetail() {
       <div className="space-y-1 bg-surface-900/50 rounded-lg p-4">
         {fieldOrder.map((key) => {
           if (key === 'name') return null;
+          // In view mode, skip rendering the raw totp field — we show TOTPDisplay instead
+          if (key === 'totp' && !editing && fields[key]) return null;
           const isSensitive = SENSITIVE_FIELDS.has(key);
           const revealed = revealedFields.has(key);
           const value = editing ? editFields[key] : fields[key];
-          const displayValue = isSensitive && !revealed ? '•'.repeat(Math.min(value.length, 20)) : value;
+          // Hide empty fields that aren't part of the type's standard layout
+          const isStandardField = (FIELD_ORDER[entryType] ?? []).includes(key);
+          if (!editing && !value && !isStandardField) return null;
+          const displayValue = isSensitive && !revealed ? '•'.repeat(Math.min((value || '').length, 20)) : (value || '');
 
           return (
             <div key={key} className="flex items-start gap-3 py-2.5 border-b border-surface-800 last:border-0">
@@ -210,6 +312,8 @@ export function EntryDetail() {
             </div>
           );
         })}
+        {/* Live TOTP code — shown when the entry has a totp secret and not editing */}
+        {!editing && fields.totp && <TOTPDisplay secret={fields.totp} />}
       </div>
 
       {/* Password generator (for login entries in edit mode) */}

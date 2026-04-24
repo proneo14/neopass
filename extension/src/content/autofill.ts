@@ -22,6 +22,37 @@ const USERNAME_HINTS =
 const _LOGIN_ACTION_HINTS =
   /login|signin|sign-in|auth|session|account|logon/i;
 
+/** URL path patterns that indicate a login / authentication page. */
+const LOGIN_PATH_HINTS =
+  /\/(log[_-]?in|sign[_-]?in|auth(enticate|orize)?|sso|session[s]?(\/new)?|logon|log[_-]?on|oauth|openid|saml|cas\/login|unlock|lock(ed)?)\b/i;
+
+/** Hostnames that are dedicated login portals. */
+const LOGIN_HOST_HINTS =
+  /^(login|signin|sign-in|auth|sso|accounts?|id|identity|passport|myaccount)\./i;
+
+/**
+ * Heuristic: is the current page likely a login / authentication page?
+ *
+ * True when any of:
+ *  1. A visible password field exists on the page
+ *  2. The URL path contains login-related keywords
+ *  3. The hostname is a known login sub-domain pattern
+ */
+function isLikelyLoginPage(): boolean {
+  // 1. Visible password field is a strong signal
+  const pw = document.querySelector<HTMLInputElement>('input[type="password"]');
+  if (pw && isVisible(pw)) return true;
+
+  // 2. URL path
+  const path = window.location.pathname + window.location.search;
+  if (LOGIN_PATH_HINTS.test(path)) return true;
+
+  // 3. Hostname
+  if (LOGIN_HOST_HINTS.test(window.location.hostname)) return true;
+
+  return false;
+}
+
 /** Track fields already processed by detectUsernameOnlyForms */
 const seenFields = new WeakSet<HTMLInputElement>();
 
@@ -111,7 +142,9 @@ export function detectLoginForms(): FormInfo[] {
 
   // If no password fields found, check for multi-step login pages
   // that only show a username/email field first.
-  if (forms.length === 0) {
+  // Only do this on pages that look like login pages (URL heuristic)
+  // to avoid false positives on random pages with email/name fields.
+  if (forms.length === 0 && isLikelyLoginPage()) {
     const usernameOnly = detectUsernameOnlyForms(domain);
     forms.push(...usernameOnly);
   }
@@ -271,6 +304,12 @@ export function showSidePanel(
   console.debug('[QPM] showSidePanel called, creds:', credentials.length, 'dismissed:', activePanelDismissed);
   if (credentials.length === 0) return;
   if (activePanelDismissed) return;
+
+  // Only show the pill on pages that look like login pages
+  if (!isLikelyLoginPage()) {
+    console.debug('[QPM] not a login page — suppressing pill');
+    return;
+  }
 
   if (activePanel) {
     const prev = activePanel.getAttribute('data-qpm-count');

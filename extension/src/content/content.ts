@@ -13,6 +13,7 @@ import {
   handleShowSavePrompt,
   type FormInfo,
 } from './autofill';
+import { detectAndPromptTOTP, isLikely2FASetupPage } from './totp-detector';
 
 // ── Passkey bridge (runs FIRST at module load) ──────────────────
 // The passkey-provider.js runs in the MAIN world (injected via manifest
@@ -39,12 +40,12 @@ window.addEventListener('message', (event: MessageEvent) => {
 });
 
 // ── In-page toast notifications from service worker ─────────────
-browserAPI.runtime.onMessage.addListener((msg: { type?: string; message?: string; icon?: string }) => {
+browserAPI.runtime.onMessage.addListener((msg: { type?: string; message?: string; icon?: string; title?: string }) => {
   if (msg?.type !== 'showToast' || !msg.message) return;
-  showInPageToast(msg.message, msg.icon);
+  showInPageToast(msg.message, msg.icon, msg.title);
 });
 
-function showInPageToast(message: string, iconUrl?: string) {
+function showInPageToast(message: string, iconUrl?: string, toastTitle?: string) {
   const container = document.createElement('div');
   container.id = 'lgipass-toast';
   container.style.cssText = `
@@ -80,7 +81,7 @@ function showInPageToast(message: string, iconUrl?: string) {
   textWrap.style.cssText = 'display: flex; flex-direction: column; gap: 1px;';
 
   const title = document.createElement('div');
-  title.textContent = 'Passkey Saved';
+  title.textContent = toastTitle ?? 'Passkey Saved';
   title.style.cssText = 'font-weight: 600; font-size: 13px; color: #a29bfe;';
   textWrap.appendChild(title);
 
@@ -314,14 +315,28 @@ function init() {
 
   scanAndAttach();
 
+  // TOTP detection: scan for TOTP secrets on 2FA setup pages
+  if (isLikely2FASetupPage()) {
+    // Initial scan after a delay to let page render fully
+    setTimeout(detectAndPromptTOTP, 2500);
+  }
+
   // Watch for dynamically added forms (SPAs)
   let debounceTimer: ReturnType<typeof setTimeout> | null = null;
+  let totpDebounceTimer: ReturnType<typeof setTimeout> | null = null;
 
   const observer = new MutationObserver(() => {
     if (debounceTimer) clearTimeout(debounceTimer);
     debounceTimer = setTimeout(() => {
       scanAndAttach();
     }, 300);
+
+    // Re-check for TOTP secrets on DOM changes (2FA pages often load dynamically)
+    // Use a longer debounce so modals/dialogs have time to fully render
+    if (isLikely2FASetupPage()) {
+      if (totpDebounceTimer) clearTimeout(totpDebounceTimer);
+      totpDebounceTimer = setTimeout(detectAndPromptTOTP, 2000);
+    }
   });
 
   observer.observe(document.body, {

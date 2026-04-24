@@ -1,4 +1,5 @@
 import type { Runtime } from 'webextension-polyfill';
+import jsQR from 'jsqr';
 import { browserAPI, extractDomain } from '../lib/browser-api';
 import type {
   ExtensionMessage,
@@ -677,6 +678,146 @@ browserAPI.runtime.onMessage.addListener(
           passkeys: response.passkeys,
           error: response.error,
         }));
+
+      case 'scanQR':
+        // Capture the visible tab and scan for QR codes containing otpauth:// URIs
+        return (async () => {
+          try {
+            // captureVisibleTab returns a data URL of the screenshot
+            const dataUrl = await browserAPI.tabs.captureVisibleTab(
+              undefined,
+              { format: 'png' }
+            );
+            if (!dataUrl) return { error: 'Failed to capture tab' };
+
+            // Decode the data URL into ImageData using OffscreenCanvas
+            const response = await fetch(dataUrl);
+            const blob = await response.blob();
+            const bitmap = await createImageBitmap(blob);
+
+            const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
+            const ctx = canvas.getContext('2d');
+            if (!ctx) return { error: 'Canvas not available' };
+
+            ctx.drawImage(bitmap, 0, 0);
+            const imageData = ctx.getImageData(0, 0, bitmap.width, bitmap.height);
+
+            // Scan the full screenshot
+            const result = jsQR(imageData.data, imageData.width, imageData.height);
+            if (result?.data) {
+              const otpauthMatch = result.data.match(/otpauth:\/\/totp\/[^\s"'<>]+/i);
+              if (otpauthMatch) {
+                try {
+                  const url = new URL(otpauthMatch[0]);
+                  const secret = url.searchParams.get('secret');
+                  if (secret) {
+                    return { secret, otpauthUri: otpauthMatch[0] };
+                  }
+                } catch { /* invalid URL */ }
+              }
+            }
+
+            // If full screenshot didn't work, try scanning sub-regions
+            // QR codes can be anywhere: center, left, right of the page
+            const w = bitmap.width;
+            const h = bitmap.height;
+            const regions = [
+              // Center region
+              { x: Math.floor(w * 0.2), y: Math.floor(h * 0.1), w: Math.floor(w * 0.6), h: Math.floor(h * 0.6) },
+              // Top-left quadrant
+              { x: 0, y: 0, w: Math.floor(w / 2), h: Math.floor(h / 2) },
+              // Top-center
+              { x: Math.floor(w * 0.25), y: 0, w: Math.floor(w * 0.5), h: Math.floor(h * 0.5) },
+              // Center of page
+              { x: Math.floor(w * 0.25), y: Math.floor(h * 0.25), w: Math.floor(w * 0.5), h: Math.floor(h * 0.5) },
+              // Left half
+              { x: 0, y: 0, w: Math.floor(w * 0.6), h: h },
+              // Right half
+              { x: Math.floor(w * 0.4), y: 0, w: Math.floor(w * 0.6), h: h },
+            ];
+            for (const r of regions) {
+              if (r.w < 50 || r.h < 50) continue;
+              const regionData = ctx.getImageData(r.x, r.y, r.w, r.h);
+              const regionResult = jsQR(regionData.data, regionData.width, regionData.height);
+              if (regionResult?.data) {
+                const match = regionResult.data.match(/otpauth:\/\/totp\/[^\s"'<>]+/i);
+                if (match) {
+                  try {
+                    const url = new URL(match[0]);
+                    const secret = url.searchParams.get('secret');
+                    if (secret) {
+                      return { secret, otpauthUri: match[0] };
+                    }
+                  } catch { /* invalid URL */ }
+                }
+              }
+            }
+
+            return { error: 'No QR code found' };
+          } catch (err) {
+            console.debug('[QPM] QR scan error:', err);
+            return { error: 'QR scan failed' };
+          }
+        })();
+
+      case 'saveTOTP':
+        // Save a TOTP secret to an existing credential.
+        // If credentialId is provided, update that entry directly.
+        // Otherwise, find the first matching credential for the domain.
+        return (async () => {
+          const domain = message.domain;
+          const secret = message.secret;
+          if (!domain || !secret) {
+            return { status: 'error', error: 'domain and secret are required' };
+          }
+
+          let targetId = message.credentialId;
+          let targetCred: Credential | undefined;
+
+          if (!targetId) {
+            // Find matching credential
+            const creds = await getCredentialsForDomain(domain);
+            if (creds.length === 0) {
+              return { status: 'error', error: 'No credentials found for this domain' };
+            }
+            targetCred = creds.find((c) => c.matched) ?? creds[0];
+            targetId = targetCred.id;
+          } else {
+            const creds = await getCredentialsForDomain(domain);
+            targetCred = creds.find((c) => c.id === targetId);
+          }
+
+          if (!targetId || !targetCred) {
+            return { status: 'error', error: 'No matching credential found' };
+          }
+
+          // Update the credential with the TOTP secret
+          const response = await sendNativeMessage({
+            action: 'updateCredential',
+            id: targetId,
+            name: targetCred.name,
+            username: targetCred.username,
+            password: targetCred.password,
+            uri: targetCred.uri,
+            notes: targetCred.notes,
+            totp: secret,
+          });
+
+          if (response.error) {
+            return { status: 'error', error: response.error };
+          }
+
+          // Show toast on the active tab
+          if (sender.tab?.id) {
+            browserAPI.tabs.sendMessage(sender.tab.id, {
+              type: 'showToast',
+              title: 'TOTP Saved',
+              message: `TOTP saved to "${targetCred.name}"`,
+            }).catch(() => {});
+          }
+
+          return { status: 'saved' };
+        })();
 
       default:
         return undefined;

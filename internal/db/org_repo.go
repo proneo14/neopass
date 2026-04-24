@@ -126,6 +126,37 @@ func (r *PgOrgRepo) GetMemberEscrow(ctx context.Context, orgID, userID string) (
 	return blob, nil
 }
 
+// GetMemberOrgKey retrieves the per-admin encrypted org key for a member. May return nil.
+func (r *PgOrgRepo) GetMemberOrgKey(ctx context.Context, orgID, userID string) ([]byte, error) {
+	var blob []byte
+	err := r.pool.QueryRow(ctx,
+		`SELECT encrypted_org_key FROM org_members WHERE org_id = $1 AND user_id = $2`,
+		orgID, userID,
+	).Scan(&blob)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return nil, fmt.Errorf("member not found")
+		}
+		return nil, fmt.Errorf("get member org key: %w", err)
+	}
+	return blob, nil
+}
+
+// SetMemberOrgKey stores the per-admin encrypted org key for a member.
+func (r *PgOrgRepo) SetMemberOrgKey(ctx context.Context, orgID, userID string, encOrgKey []byte) error {
+	tag, err := r.pool.Exec(ctx,
+		`UPDATE org_members SET encrypted_org_key = $3 WHERE org_id = $1 AND user_id = $2`,
+		orgID, userID, encOrgKey,
+	)
+	if err != nil {
+		return fmt.Errorf("set member org key: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("member not found")
+	}
+	return nil
+}
+
 // ListMembers returns all members of an organization.
 func (r *PgOrgRepo) ListMembers(ctx context.Context, orgID string) ([]OrgMember, error) {
 	rows, err := r.pool.Query(ctx,

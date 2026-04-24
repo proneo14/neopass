@@ -152,11 +152,13 @@ function ensureHelloScript(): string {
     '    $reason = $line.Substring(7)',
     '    try {',
     '      $op = [Windows.Security.Credentials.UI.UserConsentVerifier]::RequestVerificationAsync($reason)',
-      '      Start-Sleep -Milliseconds 300',
-      '      # Force-focus the Windows Hello dialog in front of everything',
-      '      foreach ($pname in @("CredentialUIBroker","consent","SecurityHealthSystray")) {',
-      '        $p = Get-Process -Name $pname -ErrorAction SilentlyContinue | Select-Object -First 1',
-      '        if ($p -and $p.MainWindowHandle -ne [IntPtr]::Zero) { [WinFocus]::ForceForeground($p.MainWindowHandle) }',
+      '      # Retry bringing the dialog to front',
+      '      for ($i = 0; $i -lt 5; $i++) {',
+      '        Start-Sleep -Milliseconds 200',
+      '        foreach ($pname in @("CredentialUIBroker","consent","SecurityHealthSystray","UserAccountBroker","LogonUI","SystemSettings")) {',
+      '          $p = Get-Process -Name $pname -ErrorAction SilentlyContinue | Select-Object -First 1',
+      '          if ($p -and $p.MainWindowHandle -ne [IntPtr]::Zero) { [WinFocus]::ForceForeground($p.MainWindowHandle); break }',
+      '        }',
       '      }',
     '      $g = $asTask.MakeGenericMethod([Windows.Security.Credentials.UI.UserConsentVerificationResult])',
     '      $t = $g.Invoke($null, @($op))',
@@ -465,9 +467,10 @@ async function promptBiometric(reason: string): Promise<void> {
   // Windows: invoke Windows Hello via UWP UserConsentVerifier
   if (process.platform === 'win32') {
     const win = BrowserWindow.getFocusedWindow() || BrowserWindow.getAllWindows()[0];
-    // Temporarily drop alwaysOnTop so Windows Hello can appear in front
     const wasOnTop = win?.isAlwaysOnTop() ?? false;
-    if (win) win.setAlwaysOnTop(false);
+    if (win) {
+      win.setAlwaysOnTop(false);
+    }
     try {
       await promptWindowsHello(reason);
     } finally {

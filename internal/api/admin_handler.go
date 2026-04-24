@@ -173,6 +173,13 @@ func (h *AdminHandler) RemoveUser(w http.ResponseWriter, r *http.Request) {
 	orgID := chi.URLParam(r, "id")
 	targetUID := chi.URLParam(r, "uid")
 
+	// Export vault entries before removal so they can be preserved
+	entries, err := h.adminService.ExportUserVault(r.Context(), targetUID)
+	if err != nil {
+		log.Warn().Err(err).Msg("failed to export vault before removing user")
+		entries = nil
+	}
+
 	if err := h.adminService.RemoveUser(r.Context(), claims.UserID, orgID, targetUID); err != nil {
 		if errors.Is(err, admin.ErrNotAdmin) {
 			writeError(w, http.StatusForbidden, "admin role required")
@@ -183,7 +190,10 @@ func (h *AdminHandler) RemoveUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]string{"status": "removed"})
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"status":  "removed",
+		"entries": entries,
+	})
 }
 
 // LeaveOrg handles POST /api/v1/admin/orgs/{id}/leave
@@ -196,13 +206,31 @@ func (h *AdminHandler) LeaveOrg(w http.ResponseWriter, r *http.Request) {
 
 	orgID := chi.URLParam(r, "id")
 
+	// Export vault entries before removing membership so client can save them locally
+	entries, err := h.adminService.ExportUserVault(r.Context(), claims.UserID)
+	if err != nil {
+		log.Warn().Err(err).Msg("failed to export vault before leaving org — proceeding anyway")
+		entries = nil
+	}
+
+	// Export passkeys too
+	passkeys, err := h.adminService.ExportUserPasskeys(r.Context(), claims.UserID)
+	if err != nil {
+		log.Warn().Err(err).Msg("failed to export passkeys before leaving org")
+		passkeys = nil
+	}
+
 	if err := h.adminService.LeaveOrg(r.Context(), claims.UserID, orgID); err != nil {
 		log.Error().Err(err).Msg("leave org failed")
 		writeError(w, http.StatusInternalServerError, "failed to leave organization")
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]string{"status": "left"})
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"status":   "left",
+		"entries":  entries,
+		"passkeys": passkeys,
+	})
 }
 
 // ListMembers handles GET /api/v1/admin/orgs/{id}/members
@@ -471,6 +499,51 @@ func (h *AdminHandler) GetAuditLog(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, entries)
+}
+
+// PropagateKeys handles POST /api/v1/admin/orgs/{id}/propagate-keys
+func (h *AdminHandler) PropagateKeys(w http.ResponseWriter, r *http.Request) {
+	claims := GetClaims(r.Context())
+	if claims == nil {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
+	orgID := chi.URLParam(r, "id")
+
+	var body struct {
+		MasterKey string `json:"master_key"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	if body.MasterKey == "" {
+		writeError(w, http.StatusBadRequest, "missing master_key")
+		return
+	}
+
+	keyBytes, err := hex.DecodeString(body.MasterKey)
+	if err != nil || len(keyBytes) != 32 {
+		writeError(w, http.StatusBadRequest, "invalid master_key")
+		return
+	}
+
+	var masterKey [32]byte
+	copy(masterKey[:], keyBytes)
+
+	if err := h.adminService.PropagateOrgKeys(r.Context(), claims.UserID, orgID, masterKey); err != nil {
+		if errors.Is(err, admin.ErrNotAdmin) {
+			writeError(w, http.StatusForbidden, "admin role required")
+			return
+		}
+		log.Error().Err(err).Msg("propagate keys failed")
+		writeError(w, http.StatusInternalServerError, "failed to propagate keys")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{"status": "keys_propagated"})
 }
 
 // GetMyOrg handles GET /api/v1/admin/my-org

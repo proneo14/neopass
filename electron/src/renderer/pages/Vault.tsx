@@ -214,6 +214,13 @@ export function Vault() {
     }
     let cancelled = false;
 
+    // Check for pending vault import from org leave
+    window.api.vault.importExport(token).then((res) => {
+      if (res.imported && res.imported > 0) {
+        console.log(`[vault] Auto-imported ${res.imported} entries from org export`);
+      }
+    }).catch(() => {});
+
     const loadVault = async () => {
       try {
         const listResult = await window.api.vault.list(token) as { error?: string } | Array<{ id: string; entry_type: string; folder_id: string | null; version: number; created_at: string; updated_at: string }>;

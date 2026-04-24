@@ -200,8 +200,11 @@ func (h *TwoFactorHandler) Share(w http.ResponseWriter, r *http.Request) {
 
 	shareID, err := h.totpService.ShareTOTP(r.Context(), claims.UserID, body.ToUserID, body.TOTPSecret, expiresIn)
 	if err != nil {
-		log.Error().Err(err).Msg("2FA share failed")
-		writeError(w, http.StatusInternalServerError, "share failed")
+		log.Error().Err(err).
+			Str("from_user", claims.UserID).
+			Str("to_user", body.ToUserID).
+			Msg("2FA share failed")
+		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 

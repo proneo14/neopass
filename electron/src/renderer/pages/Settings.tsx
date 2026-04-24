@@ -127,36 +127,164 @@ function ChangePasswordModal({ onClose }: { onClose: () => void }) {
   );
 }
 
-function TwoFactorModal({ onClose }: { onClose: () => void }) {
-  const [step, setStep] = useState<'intro' | 'verify'>('intro');
+function TwoFactorModal({ onClose, onEnabled, onDisabled, isEnabled }: { onClose: () => void; onEnabled: () => void; onDisabled: () => void; isEnabled: boolean }) {
+  const { token, masterKeyHex } = useAuthStore();
+  const [step, setStep] = useState<'intro' | 'setup' | 'verify' | 'confirm-disable'>('intro');
   const [code, setCode] = useState('');
-  const _demoQrUri = 'otpauth://totp/QuantumPM:user@example.com?secret=JBSWY3DPEHPK3PXP&issuer=QuantumPM';
-  const demoRecoveryCodes = ['A1B2C3D4', 'E5F6G7H8', 'I9J0K1L2', 'M3N4O5P6', 'Q7R8S9T0', 'U1V2W3X4', 'Y5Z6A7B8', 'C9D0E1F2'];
+  const [secret, setSecret] = useState('');
+  const [qrUri, setQrUri] = useState('');
+  const [recoveryCodes, setRecoveryCodes] = useState<string[]>([]);
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [copiedKey, setCopiedKey] = useState(false);
+  const [copiedCodes, setCopiedCodes] = useState(false);
+
+  const handleSetup = async () => {
+    if (!token || !masterKeyHex) { setError('Not logged in'); return; }
+    setLoading(true);
+    setError('');
+    try {
+      const result = await window.api.twoFactor.setup(token, masterKeyHex) as { secret?: string; qr_uri?: string; recovery_codes?: string[]; error?: string };
+      if (result.error) { setError(result.error); return; }
+      setSecret(result.secret ?? '');
+      setQrUri(result.qr_uri ?? '');
+      setRecoveryCodes(result.recovery_codes ?? []);
+      setStep('setup');
+    } catch {
+      setError('Failed to set up 2FA');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleVerify = async () => {
+    if (!token || !masterKeyHex) { setError('Not logged in'); return; }
+    if (code.length !== 6) { setError('Enter a 6-digit code'); return; }
+    setLoading(true);
+    setError('');
+    try {
+      const result = await window.api.twoFactor.verifySetup(token, code, masterKeyHex) as { status?: string; error?: string };
+      if (result.error) { setError(result.error); return; }
+      onEnabled();
+      onClose();
+    } catch {
+      setError('Verification failed');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleDisable = async () => {
+    if (!token) { setError('Not logged in'); return; }
+    setLoading(true);
+    setError('');
+    try {
+      const result = await window.api.twoFactor.disable(token) as { status?: string; error?: string };
+      if (result.error) { setError(result.error); return; }
+      onDisabled();
+      onClose();
+    } catch {
+      setError('Failed to disable 2FA');
+    } finally {
+      setLoading(false);
+    }
+  };
 
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={onClose}>
       <div className="bg-surface-800 rounded-lg p-5 w-96 shadow-2xl max-h-[80vh] overflow-auto" onClick={(e) => e.stopPropagation()}>
         <h3 className="text-sm font-semibold text-surface-100 mb-4">Two-Factor Authentication</h3>
-        {step === 'intro' ? (
+
+        {step === 'intro' && !isEnabled && (
           <div className="space-y-4">
             <p className="text-xs text-surface-400">
-              Scan this QR code with your authenticator app (e.g., Google Authenticator, Authy).
+              Protect your vault with an authenticator app. You&apos;ll need a 6-digit code from your authenticator each time you log in.
             </p>
-            <div className="bg-white rounded-lg p-4 flex items-center justify-center">
-              <div className="w-40 h-40 bg-surface-200 rounded flex items-center justify-center text-surface-600 text-xs text-center">
-                QR Code<br />placeholder
-              </div>
+            {error && <p className="text-xs text-red-400">{error}</p>}
+            <button
+              onClick={handleSetup}
+              disabled={loading}
+              className="w-full py-2 rounded-md bg-accent-600 hover:bg-accent-500 text-white text-sm font-medium transition-colors disabled:opacity-50"
+            >
+              {loading ? 'Setting up…' : 'Set Up Authenticator'}
+            </button>
+          </div>
+        )}
+
+        {step === 'intro' && isEnabled && (
+          <div className="space-y-4">
+            <div className="flex items-center gap-2 px-3 py-2 bg-green-900/30 border border-green-700/40 rounded-lg">
+              <span className="text-green-400 text-sm">✓</span>
+              <span className="text-xs text-green-300">Two-factor authentication is enabled</span>
             </div>
-            <div>
-              <p className="text-xs text-surface-500 mb-1">Manual entry key:</p>
-              <code className="text-xs text-surface-300 font-mono bg-surface-900 px-2 py-1 rounded block">
-                JBSWY3DPEHPK3PXP
+            <p className="text-xs text-surface-400">
+              Disabling 2FA will remove the extra security layer from your account.
+            </p>
+            {error && <p className="text-xs text-red-400">{error}</p>}
+            <button
+              onClick={() => setStep('confirm-disable')}
+              className="w-full py-2 rounded-md bg-red-600/20 hover:bg-red-600/30 text-red-400 text-sm font-medium transition-colors border border-red-600/30"
+            >
+              Disable Two-Factor Authentication
+            </button>
+          </div>
+        )}
+
+        {step === 'confirm-disable' && (
+          <div className="space-y-4">
+            <p className="text-xs text-red-300">
+              Are you sure you want to disable two-factor authentication? This will make your account less secure.
+            </p>
+            {error && <p className="text-xs text-red-400">{error}</p>}
+            <div className="flex gap-2">
+              <button onClick={() => setStep('intro')} className="flex-1 py-2 rounded-md bg-surface-700 text-surface-300 text-sm hover:bg-surface-600 transition-colors">
+                Cancel
+              </button>
+              <button
+                onClick={handleDisable}
+                disabled={loading}
+                className="flex-1 py-2 rounded-md bg-red-600 hover:bg-red-500 text-white text-sm font-medium transition-colors disabled:opacity-50"
+              >
+                {loading ? 'Disabling…' : 'Confirm Disable'}
+              </button>
+            </div>
+          </div>
+        )}
+
+        {step === 'setup' && (
+          <div className="space-y-4">
+            <p className="text-xs text-surface-400">
+              Enter this key in your authenticator app (Google Authenticator, Authy, etc.):
+            </p>
+            <div className="relative">
+              <code className="block text-xs text-surface-200 font-mono bg-surface-900 px-3 py-2.5 rounded break-all tracking-wider">
+                {secret}
               </code>
+              <button
+                onClick={() => { navigator.clipboard.writeText(secret); setCopiedKey(true); setTimeout(() => setCopiedKey(false), 1500); }}
+                className="absolute top-1.5 right-1.5 text-xs text-surface-500 hover:text-accent-400 transition-colors px-1.5 py-0.5 rounded bg-surface-800"
+              >
+                {copiedKey ? '✓' : 'Copy'}
+              </button>
             </div>
+            {qrUri && (
+              <details className="text-xs text-surface-500">
+                <summary className="cursor-pointer hover:text-surface-300 transition-colors">Show otpauth URI</summary>
+                <code className="block mt-1 text-[10px] text-surface-400 font-mono bg-surface-900 px-2 py-1.5 rounded break-all">{qrUri}</code>
+              </details>
+            )}
             <div>
-              <p className="text-xs text-surface-500 mb-2">Recovery codes (save these):</p>
+              <div className="flex items-center justify-between mb-2">
+                <p className="text-xs text-surface-500">Recovery codes (save these somewhere safe):</p>
+                <button
+                  onClick={() => { navigator.clipboard.writeText(recoveryCodes.join('\n')); setCopiedCodes(true); setTimeout(() => setCopiedCodes(false), 1500); }}
+                  className="text-[10px] text-surface-500 hover:text-accent-400 transition-colors"
+                >
+                  {copiedCodes ? '✓ Copied' : 'Copy all'}
+                </button>
+              </div>
               <div className="grid grid-cols-2 gap-1">
-                {demoRecoveryCodes.map((c) => (
+                {recoveryCodes.map((c) => (
                   <code key={c} className="text-xs text-surface-300 font-mono bg-surface-900 px-2 py-1 rounded text-center">{c}</code>
                 ))}
               </div>
@@ -168,9 +296,11 @@ function TwoFactorModal({ onClose }: { onClose: () => void }) {
               Next: Verify Code
             </button>
           </div>
-        ) : (
+        )}
+
+        {step === 'verify' && (
           <div className="space-y-4">
-            <p className="text-xs text-surface-400">Enter the 6-digit code from your authenticator app to verify setup.</p>
+            <p className="text-xs text-surface-400">Enter the 6-digit code from your authenticator app to complete setup.</p>
             <input
               type="text"
               inputMode="numeric"
@@ -178,18 +308,25 @@ function TwoFactorModal({ onClose }: { onClose: () => void }) {
               value={code}
               onChange={(e) => setCode(e.target.value.replace(/\D/g, ''))}
               placeholder="123456"
+              autoFocus
               className="w-full px-3 py-2 rounded-md bg-surface-900 border border-surface-600 text-surface-100 text-sm text-center tracking-widest placeholder-surface-500 focus:outline-none focus:ring-2 focus:ring-accent-500"
             />
+            {error && <p className="text-xs text-red-400">{error}</p>}
             <div className="flex gap-2">
-              <button onClick={() => setStep('intro')} className="flex-1 py-2 rounded-md bg-surface-700 text-surface-300 text-sm hover:bg-surface-600 transition-colors">
+              <button onClick={() => { setStep('setup'); setError(''); setCode(''); }} className="flex-1 py-2 rounded-md bg-surface-700 text-surface-300 text-sm hover:bg-surface-600 transition-colors">
                 Back
               </button>
-              <button onClick={onClose} className="flex-1 py-2 rounded-md bg-accent-600 hover:bg-accent-500 text-white text-sm font-medium transition-colors">
-                Verify &amp; Enable
+              <button
+                onClick={handleVerify}
+                disabled={loading || code.length !== 6}
+                className="flex-1 py-2 rounded-md bg-accent-600 hover:bg-accent-500 text-white text-sm font-medium transition-colors disabled:opacity-50"
+              >
+                {loading ? 'Verifying…' : 'Verify & Enable'}
               </button>
             </div>
           </div>
         )}
+
         <button onClick={onClose} className="mt-3 w-full py-1.5 text-xs text-surface-500 hover:text-surface-300 transition-colors">
           Cancel
         </button>
@@ -254,6 +391,7 @@ export function Settings() {
   const [showBiometricEnroll, setShowBiometricEnroll] = useState(false);
   const [showChangePw, setShowChangePw] = useState(false);
   const [show2fa, setShow2fa] = useState(false);
+  const [has2fa, setHas2fa] = useState(false);
   const [requireHWKey, setRequireHWKey] = useState(false);
   const [hwKeyLoading, setHwKeyLoading] = useState(false);
   const [hwKeys, setHwKeys] = useState<{ id: string; name: string; created_at: string; last_used_at: string; transports: string[] }[]>([]);
@@ -283,6 +421,7 @@ export function Settings() {
       window.api.security.getSettings(token)
         .then((data) => {
           if (data.require_hw_key !== undefined) setRequireHWKey(data.require_hw_key);
+          if (data.has_2fa !== undefined) setHas2fa(data.has_2fa);
         })
         .catch(() => {});
       // Fetch registered hardware keys
@@ -465,7 +604,7 @@ export function Settings() {
               className="w-full text-left px-4 py-3 rounded-md bg-surface-800 hover:bg-surface-700 text-sm text-surface-200 transition-colors flex items-center justify-between"
             >
               Two-Factor Authentication
-              <span className="text-xs text-surface-500">Not configured</span>
+              <span className={`text-xs ${has2fa ? 'text-green-400' : 'text-surface-500'}`}>{has2fa ? 'Enabled' : 'Not configured'}</span>
             </button>
           </div>
         </section>
@@ -609,10 +748,16 @@ export function Settings() {
                   onClick={async () => {
                     if (!token || !orgId) return;
                     try {
-                      const result = await window.api.admin.leaveOrg(token, orgId) as { error?: string };
+                      const result = await window.api.admin.leaveOrg(token, orgId) as { status?: string; entries?: unknown[]; error?: string };
                       if (result.error) { setOrgError(result.error); return; }
                       clearOrg();
                       setOrgError('');
+                      // Vault entries are saved locally by the main process;
+                      // they will be auto-imported when the user logs in on SQLite mode.
+                      if (result.entries && Array.isArray(result.entries) && result.entries.length > 0) {
+                        // Try immediate import if still on same backend
+                        window.api.vault.importExport(token).catch(() => {});
+                      }
                     } catch {
                       setOrgError('Failed to leave organization');
                     }
@@ -772,7 +917,7 @@ export function Settings() {
       </div>
 
       {showChangePw && <ChangePasswordModal onClose={() => setShowChangePw(false)} />}
-      {show2fa && <TwoFactorModal onClose={() => setShow2fa(false)} />}
+      {show2fa && <TwoFactorModal onClose={() => setShow2fa(false)} onEnabled={() => setHas2fa(true)} onDisabled={() => setHas2fa(false)} isEnabled={has2fa} />}
       {showOrgSetup && (
         <OrgSetupWizard
           onClose={() => setShowOrgSetup(false)}

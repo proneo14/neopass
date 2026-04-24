@@ -37,10 +37,11 @@ type DecryptedEntry struct {
 
 // Service provides admin operations.
 type Service struct {
-	orgRepo   db.OrgRepository
-	userRepo  db.UserRepository
-	vaultRepo db.VaultRepository
-	auditRepo db.AuditRepository
+	orgRepo    db.OrgRepository
+	userRepo   db.UserRepository
+	vaultRepo  db.VaultRepository
+	auditRepo  db.AuditRepository
+	passkeyRepo db.PasskeyRepository
 }
 
 // NewService creates a new admin Service.
@@ -51,6 +52,11 @@ func NewService(orgRepo db.OrgRepository, userRepo db.UserRepository, vaultRepo 
 		vaultRepo: vaultRepo,
 		auditRepo: auditRepo,
 	}
+}
+
+// SetPasskeyRepo sets the passkey repository (optional, for vault transfer).
+func (s *Service) SetPasskeyRepo(repo db.PasskeyRepository) {
+	s.passkeyRepo = repo
 }
 
 // CreateOrg creates a new organization. The caller becomes the admin.
@@ -82,6 +88,11 @@ func (s *Service) CreateOrg(ctx context.Context, adminUserID, orgName string, ad
 	// Add admin as org admin
 	if err := s.orgRepo.AddMember(ctx, org.ID, adminUserID, "admin", escrowBlob); err != nil {
 		return db.Organization{}, err
+	}
+
+	// Store the encrypted org private key for this admin (per-admin key for vault access)
+	if err := s.orgRepo.SetMemberOrgKey(ctx, org.ID, adminUserID, encOrgPrivKey); err != nil {
+		log.Warn().Err(err).Msg("failed to set creator's org key — vault access may require manual propagation")
 	}
 
 	// Audit log
@@ -186,6 +197,54 @@ func (s *Service) LeaveOrg(ctx context.Context, userID, orgID string) error {
 	return nil
 }
 
+// ExportUserVault returns all non-deleted vault entries for a user (encrypted blobs).
+// Used to export data before leaving an org so the client can store them locally.
+func (s *Service) ExportUserVault(ctx context.Context, userID string) ([]db.VaultEntry, error) {
+	return s.vaultRepo.ListEntries(ctx, userID, db.VaultFilters{})
+}
+
+// ExportUserPasskeys returns all passkeys for a user.
+func (s *Service) ExportUserPasskeys(ctx context.Context, userID string) ([]db.PasskeyCredential, error) {
+	if s.passkeyRepo == nil {
+		return nil, nil
+	}
+	return s.passkeyRepo.GetAllPasskeys(ctx, userID)
+}
+
+// PropagateOrgKeys propagates the org private key to all admins who don't have a per-admin copy.
+// Must be called by an admin who can decrypt the org private key (creator or admin with per-admin key).
+func (s *Service) PropagateOrgKeys(ctx context.Context, adminUserID, orgID string, adminMasterKey [32]byte) error {
+	if err := s.verifyAdmin(ctx, orgID, adminUserID); err != nil {
+		return err
+	}
+
+	org, err := s.orgRepo.GetOrg(ctx, orgID)
+	if err != nil {
+		return err
+	}
+
+	// Try to decrypt org private key
+	var orgPrivKey []byte
+	encAdminKey, _ := s.orgRepo.GetMemberOrgKey(ctx, orgID, adminUserID)
+	if len(encAdminKey) > 0 {
+		orgPrivKey, err = crypto.DecryptOrgPrivateKey(encAdminKey, adminMasterKey)
+	} else {
+		orgPrivKey, err = crypto.DecryptOrgPrivateKey(org.EncryptedOrgPrivateKey, adminMasterKey)
+	}
+	if err != nil {
+		return fmt.Errorf("cannot decrypt org key — only the org creator can trigger initial propagation: %w", err)
+	}
+	defer crypto.ZeroBytes(orgPrivKey)
+
+	// Save own per-admin key if not present
+	if len(encAdminKey) == 0 {
+		_ = s.orgRepo.SetMemberOrgKey(ctx, orgID, adminUserID, org.EncryptedOrgPrivateKey)
+	}
+
+	s.propagateOrgKey(ctx, orgID, orgPrivKey)
+	return nil
+}
+
 // ListMembers returns all members of an organization.
 func (s *Service) ListMembers(ctx context.Context, adminUserID, orgID string) ([]db.OrgMember, error) {
 	if err := s.verifyAdmin(ctx, orgID, adminUserID); err != nil {
@@ -208,15 +267,28 @@ func (s *Service) AccessUserVault(ctx context.Context, adminUserID, orgID, targe
 		})
 	}()
 
-	// Decrypt org private key with admin's master key
+	// Decrypt org private key — try per-admin key first, then fallback to org-level key
 	org, err := s.orgRepo.GetOrg(ctx, orgID)
 	if err != nil {
 		return nil, err
 	}
 
-	orgPrivKey, err := crypto.DecryptOrgPrivateKey(org.EncryptedOrgPrivateKey, adminMasterKey)
-	if err != nil {
-		return nil, fmt.Errorf("decrypt org private key: %w", err)
+	var orgPrivKey []byte
+	encAdminKey, _ := s.orgRepo.GetMemberOrgKey(ctx, orgID, adminUserID)
+	if len(encAdminKey) > 0 {
+		orgPrivKey, err = crypto.DecryptOrgPrivateKey(encAdminKey, adminMasterKey)
+		if err != nil {
+			return nil, fmt.Errorf("decrypt org private key: %w", err)
+		}
+	} else {
+		// Fallback: try org-level key (works only for the org creator)
+		orgPrivKey, err = crypto.DecryptOrgPrivateKey(org.EncryptedOrgPrivateKey, adminMasterKey)
+		if err != nil {
+			return nil, fmt.Errorf("decrypt org private key: org key not yet propagated to this admin")
+		}
+		// Creator succeeded — save per-admin key and propagate to other admins
+		_ = s.orgRepo.SetMemberOrgKey(ctx, orgID, adminUserID, org.EncryptedOrgPrivateKey)
+		go s.propagateOrgKey(context.Background(), orgID, orgPrivKey)
 	}
 	defer crypto.ZeroBytes(orgPrivKey)
 
@@ -273,13 +345,19 @@ func (s *Service) ChangeUserPassword(ctx context.Context, adminUserID, orgID, ta
 		return err
 	}
 
-	// Decrypt org private key
+	// Decrypt org private key — try per-admin key first
 	org, err := s.orgRepo.GetOrg(ctx, orgID)
 	if err != nil {
 		return err
 	}
 
-	orgPrivKey, err := crypto.DecryptOrgPrivateKey(org.EncryptedOrgPrivateKey, adminMasterKey)
+	var orgPrivKey []byte
+	encAdminKey, _ := s.orgRepo.GetMemberOrgKey(ctx, orgID, adminUserID)
+	if len(encAdminKey) > 0 {
+		orgPrivKey, err = crypto.DecryptOrgPrivateKey(encAdminKey, adminMasterKey)
+	} else {
+		orgPrivKey, err = crypto.DecryptOrgPrivateKey(org.EncryptedOrgPrivateKey, adminMasterKey)
+	}
 	if err != nil {
 		return fmt.Errorf("decrypt org private key: %w", err)
 	}
@@ -471,6 +549,61 @@ func (s *Service) GetAuditLog(ctx context.Context, adminUserID, orgID string, fi
 		return nil, err
 	}
 	return s.auditRepo.GetAuditLog(ctx, filters)
+}
+
+// propagateOrgKey distributes the org private key to all admins who don't have a per-admin copy.
+// It decrypts each admin's escrow to obtain their master key, then re-encrypts the org private key
+// with that admin's master key.
+func (s *Service) propagateOrgKey(ctx context.Context, orgID string, orgPrivKey []byte) {
+	members, err := s.orgRepo.ListMembers(ctx, orgID)
+	if err != nil {
+		log.Warn().Err(err).Msg("propagateOrgKey: failed to list members")
+		return
+	}
+
+	for _, m := range members {
+		if m.Role != "admin" {
+			continue
+		}
+
+		// Check if they already have a per-admin key
+		existing, _ := s.orgRepo.GetMemberOrgKey(ctx, orgID, m.UserID)
+		if len(existing) > 0 {
+			continue
+		}
+
+		// Get their escrow → decrypt to get their master key
+		escrow, err := s.orgRepo.GetMemberEscrow(ctx, orgID, m.UserID)
+		if err != nil {
+			log.Warn().Err(err).Str("user_id", m.UserID).Msg("propagateOrgKey: failed to get escrow")
+			continue
+		}
+
+		userMasterKey, err := crypto.DecryptEscrow(escrow, orgPrivKey)
+		if err != nil {
+			log.Warn().Err(err).Str("user_id", m.UserID).Msg("propagateOrgKey: failed to decrypt escrow")
+			continue
+		}
+
+		// Re-encrypt org private key with this admin's master key
+		encPrivKey, nonce, err := crypto.Encrypt(orgPrivKey, userMasterKey)
+		crypto.ZeroBytes(userMasterKey[:])
+		if err != nil {
+			log.Warn().Err(err).Str("user_id", m.UserID).Msg("propagateOrgKey: failed to encrypt org key")
+			continue
+		}
+
+		// Store as nonce || encrypted key (same format as GenerateOrgKeyPair)
+		blob := make([]byte, len(nonce)+len(encPrivKey))
+		copy(blob[:len(nonce)], nonce)
+		copy(blob[len(nonce):], encPrivKey)
+
+		if err := s.orgRepo.SetMemberOrgKey(ctx, orgID, m.UserID, blob); err != nil {
+			log.Warn().Err(err).Str("user_id", m.UserID).Msg("propagateOrgKey: failed to save key")
+		} else {
+			log.Info().Str("user_id", m.UserID).Str("org_id", orgID).Msg("propagated org key to admin")
+		}
+	}
 }
 
 // verifyAdmin checks that the user is an admin of the organization.

@@ -53,19 +53,7 @@ export function TwoFactorSharePanel({ orgId }: Props) {
     setError('');
     setSuccess('');
     try {
-      const port = await window.api.getSidecarPort();
-      const backendUrl = port ? `http://127.0.0.1:${port}` : '';
-      // Use direct fetch since we don't have an IPC for this endpoint
-      const res = await fetch(`${backendUrl || ''}/api/v1/auth/2fa/share`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({
-          to_user_id: selectedUserId,
-          totp_secret: totpSecret.trim(),
-          expires_in_minutes: expiresInMin,
-        }),
-      });
-      const result = await res.json() as { share_id?: string; error?: string };
+      const result = await window.api.admin.share2fa(token, selectedUserId, totpSecret.trim(), expiresInMin) as { share_id?: string; error?: string };
       if (result.error) {
         setError(result.error);
       } else {

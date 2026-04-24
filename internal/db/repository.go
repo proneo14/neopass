@@ -37,6 +37,8 @@ type OrgRepository interface {
 	AddMember(ctx context.Context, orgID, userID, role string, escrowBlob []byte) error
 	GetMember(ctx context.Context, orgID, userID string) (OrgMember, error)
 	GetMemberEscrow(ctx context.Context, orgID, userID string) ([]byte, error)
+	GetMemberOrgKey(ctx context.Context, orgID, userID string) ([]byte, error)
+	SetMemberOrgKey(ctx context.Context, orgID, userID string, encOrgKey []byte) error
 	ListMembers(ctx context.Context, orgID string) ([]OrgMember, error)
 	RemoveMember(ctx context.Context, orgID, userID string) error
 	UpdateEscrowBlob(ctx context.Context, orgID, userID string, escrowBlob []byte) error

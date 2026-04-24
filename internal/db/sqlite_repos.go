@@ -572,6 +572,34 @@ func (r *SQLiteOrgRepo) GetMemberEscrow(ctx context.Context, orgID, userID strin
 	return blob, nil
 }
 
+func (r *SQLiteOrgRepo) GetMemberOrgKey(ctx context.Context, orgID, userID string) ([]byte, error) {
+	var blob []byte
+	err := r.db.QueryRowContext(ctx,
+		`SELECT encrypted_org_key FROM org_members WHERE org_id = ? AND user_id = ?`, orgID, userID,
+	).Scan(&blob)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, fmt.Errorf("member not found")
+		}
+		return nil, fmt.Errorf("get member org key: %w", err)
+	}
+	return blob, nil
+}
+
+func (r *SQLiteOrgRepo) SetMemberOrgKey(ctx context.Context, orgID, userID string, encOrgKey []byte) error {
+	res, err := r.db.ExecContext(ctx,
+		`UPDATE org_members SET encrypted_org_key = ? WHERE org_id = ? AND user_id = ?`, encOrgKey, orgID, userID,
+	)
+	if err != nil {
+		return fmt.Errorf("set member org key: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return fmt.Errorf("member not found")
+	}
+	return nil
+}
+
 func (r *SQLiteOrgRepo) ListMembers(ctx context.Context, orgID string) ([]OrgMember, error) {
 	rows, err := r.db.QueryContext(ctx,
 		`SELECT om.org_id, om.user_id, u.email, om.role, om.joined_at

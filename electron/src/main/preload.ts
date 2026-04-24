@@ -87,6 +87,10 @@ const api = {
     },
     exportFile: (jsonContent: string): Promise<{ success?: boolean; cancelled?: boolean; path?: string; error?: string }> =>
       ipcRenderer.invoke('vault:exportFile', jsonContent),
+    importExport: (token: string): Promise<{ imported?: number; total?: number; error?: string }> => {
+      validateString(token, 'token');
+      return ipcRenderer.invoke('vault:importExport', token);
+    },
   },
 
   biometric: {
@@ -158,6 +162,24 @@ const api = {
     setRequireHWKey: (token: string, require: boolean): Promise<{ status?: string; error?: string }> => {
       validateString(token, 'token');
       return ipcRenderer.invoke('auth:setRequireHWKey', token, require);
+    },
+  },
+
+  twoFactor: {
+    setup: (token: string, encryptionKey: string): Promise<{ secret?: string; qr_uri?: string; recovery_codes?: string[]; error?: string }> => {
+      validateString(token, 'token');
+      validateString(encryptionKey, 'encryptionKey');
+      return ipcRenderer.invoke('auth:2fa:setup', token, encryptionKey);
+    },
+    verifySetup: (token: string, code: string, encryptionKey: string): Promise<{ status?: string; error?: string }> => {
+      validateString(token, 'token');
+      validateString(code, 'code');
+      validateString(encryptionKey, 'encryptionKey');
+      return ipcRenderer.invoke('auth:2fa:verifySetup', token, code, encryptionKey);
+    },
+    disable: (token: string): Promise<{ status?: string; error?: string }> => {
+      validateString(token, 'token');
+      return ipcRenderer.invoke('auth:2fa:disable', token);
     },
   },
 
@@ -256,6 +278,18 @@ const api = {
       validateString(token, 'token');
       validateString(orgId, 'orgId');
       return ipcRenderer.invoke('admin:getAuditLog', token, orgId, filters);
+    },
+    share2fa: (token: string, toUserId: string, totpSecret: string, expiresInMin: number): Promise<unknown> => {
+      validateString(token, 'token');
+      validateString(toUserId, 'toUserId');
+      validateString(totpSecret, 'totpSecret');
+      return ipcRenderer.invoke('admin:share2fa', token, toUserId, totpSecret, expiresInMin);
+    },
+    propagateKeys: (token: string, orgId: string, masterKey: string): Promise<unknown> => {
+      validateString(token, 'token');
+      validateString(orgId, 'orgId');
+      validateString(masterKey, 'masterKey');
+      return ipcRenderer.invoke('admin:propagateKeys', token, orgId, masterKey);
     },
   },
 

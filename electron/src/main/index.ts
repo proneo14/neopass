@@ -784,11 +784,51 @@ public class SecureClip {
     const api = getApiBase();
     if (!api) return { error: 'Backend not available' };
     try {
+      // Export passkeys before leaving
+      let passkeys: unknown[] = [];
+      try {
+        const pkRes = await fetch(`${api}/api/v1/vault/passkeys`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (pkRes.ok) {
+          const pkData = await pkRes.json();
+          if (Array.isArray(pkData)) passkeys = pkData;
+        }
+      } catch { /* ignore passkey export failure */ }
+
       const res = await fetch(`${api}/api/v1/admin/orgs/${encodeURIComponent(orgId)}/leave`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${token}` },
       });
-      return await res.json();
+      const result = await res.json() as { status?: string; entries?: unknown[]; error?: string };
+
+      if (result.error) return result;
+
+      // Save exported vault entries + passkeys locally for re-import after switching to SQLite
+      const exportPath = path.join(app.getPath('userData'), 'vault-export.json');
+      const exportData = {
+        entries: result.entries || [],
+        passkeys,
+      };
+      try {
+        fs.writeFileSync(exportPath, JSON.stringify(exportData), 'utf-8');
+        console.log(`[leaveOrg] Exported ${(result.entries || []).length} vault entries and ${passkeys.length} passkeys`);
+      } catch (e) {
+        console.error('[leaveOrg] Failed to save vault export:', e);
+      }
+
+      // Reset storage config back to SQLite
+      try {
+        const configPath = path.join(getAppDataDir(), 'config.json');
+        if (fs.existsSync(configPath)) {
+          fs.unlinkSync(configPath);
+          console.log('[leaveOrg] Removed postgres config — will restart in SQLite mode');
+        }
+      } catch (e) {
+        console.error('[leaveOrg] Failed to reset config:', e);
+      }
+
+      return result;
     } catch { return { error: 'Failed to connect to backend' }; }
   });
 
@@ -886,6 +926,101 @@ public class SecureClip {
       });
       return await res.json();
     } catch { return { error: 'Failed to connect to backend' }; }
+  });
+
+  ipcMain.handle('admin:share2fa', async (_event, token: string, toUserId: string, totpSecret: string, expiresInMin: number) => {
+    const api = getApiBase();
+    if (!api) return { error: 'Backend not available' };
+    try {
+      const res = await fetch(`${api}/api/v1/auth/2fa/share`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({
+          to_user_id: toUserId,
+          totp_secret: totpSecret,
+          expires_in_minutes: expiresInMin,
+        }),
+      });
+      return await res.json();
+    } catch { return { error: 'Failed to connect to backend' }; }
+  });
+
+  ipcMain.handle('admin:propagateKeys', async (_event, token: string, orgId: string, masterKey: string) => {
+    const api = getApiBase();
+    if (!api) return { error: 'Backend not available' };
+    try {
+      const res = await fetch(`${api}/api/v1/admin/orgs/${encodeURIComponent(orgId)}/propagate-keys`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ master_key: masterKey }),
+      });
+      return await res.json();
+    } catch { return { error: 'Failed to connect to backend' }; }
+  });
+
+  // Import vault entries and passkeys from a previous org leave export
+  ipcMain.handle('vault:importExport', async (_event, token: string) => {
+    const exportPath = path.join(app.getPath('userData'), 'vault-export.json');
+    if (!fs.existsSync(exportPath)) return { imported: 0 };
+
+    const api = getApiBase();
+    if (!api) return { error: 'Backend not available' };
+
+    try {
+      const raw = fs.readFileSync(exportPath, 'utf-8');
+      const data = JSON.parse(raw) as {
+        entries?: Array<{
+          id: string;
+          entry_type: string;
+          encrypted_data: string;
+          nonce: string;
+          folder_id?: string;
+        }>;
+        passkeys?: Array<Record<string, unknown>>;
+      };
+
+      // Handle old format (plain array) and new format ({ entries, passkeys })
+      const entries = Array.isArray(data) ? data : (data.entries || []);
+      const passkeys = Array.isArray(data) ? [] : (data.passkeys || []);
+
+      let imported = 0;
+      for (const entry of entries) {
+        try {
+          const res = await fetch(`${api}/api/v1/vault/entries`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+            body: JSON.stringify({
+              entry_type: entry.entry_type,
+              encrypted_data: entry.encrypted_data,
+              nonce: entry.nonce,
+              folder_id: entry.folder_id || null,
+            }),
+          });
+          if (res.ok) imported++;
+        } catch { /* skip failed entries */ }
+      }
+
+      // Import passkeys
+      let passkeysImported = 0;
+      for (const pk of passkeys) {
+        try {
+          const res = await fetch(`${api}/api/v1/vault/passkeys/register/finish`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+            body: JSON.stringify(pk),
+          });
+          if (res.ok) passkeysImported++;
+        } catch { /* skip */ }
+      }
+
+      // Remove export file after import
+      fs.unlinkSync(exportPath);
+      console.log(`[vault:importExport] Imported ${imported}/${entries.length} entries, ${passkeysImported}/${passkeys.length} passkeys`);
+      return { imported, total: entries.length, passkeysImported, passkeysTotal: passkeys.length };
+    } catch (e) {
+      console.error('[vault:importExport] Failed:', e);
+      return { error: 'Failed to import vault entries' };
+    }
   });
 
   ipcMain.handle('biometric:available', async () => {
@@ -1120,6 +1255,45 @@ public class SecureClip {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({ require }),
+      });
+      return await res.json();
+    } catch { return { error: 'Failed to connect to backend' }; }
+  });
+
+  // Two-factor authentication (TOTP) IPC handlers
+  ipcMain.handle('auth:2fa:setup', async (_event, token: string, encryptionKey: string) => {
+    const api = getApiBase();
+    if (!api) return { error: 'Backend not available' };
+    try {
+      const res = await fetch(`${api}/api/v1/auth/2fa/setup`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ encryption_key: encryptionKey }),
+      });
+      return await res.json();
+    } catch { return { error: 'Failed to connect to backend' }; }
+  });
+
+  ipcMain.handle('auth:2fa:verifySetup', async (_event, token: string, code: string, encryptionKey: string) => {
+    const api = getApiBase();
+    if (!api) return { error: 'Backend not available' };
+    try {
+      const res = await fetch(`${api}/api/v1/auth/2fa/verify-setup`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ code, encryption_key: encryptionKey }),
+      });
+      return await res.json();
+    } catch { return { error: 'Failed to connect to backend' }; }
+  });
+
+  ipcMain.handle('auth:2fa:disable', async (_event, token: string) => {
+    const api = getApiBase();
+    if (!api) return { error: 'Backend not available' };
+    try {
+      const res = await fetch(`${api}/api/v1/auth/2fa/disable`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
       });
       return await res.json();
     } catch { return { error: 'Failed to connect to backend' }; }

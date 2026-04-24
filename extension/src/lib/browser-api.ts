@@ -32,6 +32,16 @@ export const browserAPI = {
     sendMessage: (tabId: number, message: unknown) =>
       browser.tabs.sendMessage(tabId, message),
 
+    captureVisibleTab: (windowId?: number, options?: { format?: string; quality?: number }): Promise<string> => {
+      // Use chrome.tabs.captureVisibleTab (available in MV3 with activeTab)
+      const chromeGlobal = globalThis as unknown as { chrome?: { tabs?: { captureVisibleTab?: (windowId: number | undefined, options: object) => Promise<string> } } };
+      if (chromeGlobal.chrome?.tabs?.captureVisibleTab) {
+        return chromeGlobal.chrome.tabs.captureVisibleTab(windowId, options ?? { format: 'png' });
+      }
+      // Firefox polyfill
+      return browser.tabs.captureVisibleTab(windowId, options as browser.ExtensionTypes.ImageDetails);
+    },
+
     get onActivated() { return browser.tabs.onActivated; },
     get onUpdated() { return browser.tabs.onUpdated; },
   },

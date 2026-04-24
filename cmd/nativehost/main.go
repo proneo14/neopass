@@ -34,6 +34,7 @@ type Request struct {
 	Password string `json:"password,omitempty"`
 	URI      string `json:"uri,omitempty"`
 	Notes    string `json:"notes,omitempty"`
+	TOTP     string `json:"totp,omitempty"`
 	// For secureCopy
 	Text string `json:"text,omitempty"`
 	// For passkey operations
@@ -208,7 +209,7 @@ func handleMessage(client *SidecarClient, msg *Request) *Response {
 		if msg.ID == "" {
 			return &Response{Error: "id is required"}
 		}
-		return client.updateCredential(msg.ID, msg.Name, msg.Username, msg.Password, msg.URI, msg.Notes)
+		return client.updateCredential(msg.ID, msg.Name, msg.Username, msg.Password, msg.URI, msg.Notes, msg.TOTP)
 
 	case "secureCopy":
 		if msg.Text == "" {
@@ -364,13 +365,14 @@ func (c *SidecarClient) saveCredential(domain, username, encryptedPassword strin
 	return &Response{Status: "saved"}
 }
 
-func (c *SidecarClient) updateCredential(id, name, username, password, uri, notes string) *Response {
+func (c *SidecarClient) updateCredential(id, name, username, password, uri, notes, totp string) *Response {
 	payload, _ := json.Marshal(map[string]string{
 		"name":     name,
 		"username": username,
 		"password": password,
 		"uri":      uri,
 		"notes":    notes,
+		"totp":     totp,
 	})
 
 	resp, err := c.doRequest("PUT", "/extension/credentials/"+id, strings.NewReader(string(payload)))

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useEffect } from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../store/authStore';
 
@@ -12,13 +12,22 @@ const adminItems = [
 ];
 
 export function Sidebar() {
-  const { email, role, logout } = useAuthStore();
+  const { email, role, orgId, token, logout, setOrg } = useAuthStore();
   const navigate = useNavigate();
-  const [storageBackend, setStorageBackend] = useState<'sqlite' | 'postgres'>('sqlite');
 
+  // Ensure org info is loaded — covers race conditions where
+  // login() finishes before loadOrgAfterLogin resolves.
   useEffect(() => {
-    window.api.storage.getBackend().then(setStorageBackend).catch(() => {});
-  }, []);
+    if (!token || (orgId && role)) return;
+    (async () => {
+      try {
+        const result = await window.api.admin.getMyOrg(token) as { member?: boolean; org_id?: string; org_name?: string; role?: string };
+        if (result.member && result.org_id) {
+          setOrg(result.org_id, result.org_name ?? '', result.role ?? 'member');
+        }
+      } catch { /* ignore */ }
+    })();
+  }, [token, orgId, role]);
 
   const handleLogout = () => {
     logout();
@@ -54,7 +63,7 @@ export function Sidebar() {
           </NavLink>
         ))}
 
-        {role === 'admin' && storageBackend === 'postgres' && (
+        {role === 'admin' && orgId && (
           <>
             <div className="mx-3 mb-2" style={{ marginTop: 75 }}>
               <span className="text-[10px] font-semibold text-surface-500 uppercase tracking-widest">Organization</span>

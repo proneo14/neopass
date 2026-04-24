@@ -37,14 +37,7 @@ export function App() {
           <Route path="/vault/:id" element={<EntryDetail />} />
           <Route path="/passkeys" element={<Passkeys />} />
           <Route path="/settings" element={<Settings />} />
-          <Route
-            path="/admin"
-            element={
-              <AuthGuard requireAdmin>
-                <Admin />
-              </AuthGuard>
-            }
-          />
+          <Route path="/admin" element={<Admin />} />
         </Route>
 
         {/* Default redirect */}

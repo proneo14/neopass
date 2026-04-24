@@ -131,6 +131,7 @@ func Router(authService *auth.Service, totpService *auth.TOTPService, smsService
 				r.Put("/policy", adminHandler.SetPolicy)
 				r.Get("/invitations", adminHandler.ListInvitations)
 				r.Get("/audit", adminHandler.GetAuditLog)
+				r.Post("/propagate-keys", adminHandler.PropagateKeys)
 			})
 		})
 

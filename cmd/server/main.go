@@ -141,6 +141,7 @@ func main() {
 		syncService = syncsvc.NewService(sqlVaultRepo, syncRepo)
 
 		passkeyRepo := db.NewSQLitePasskeyRepo(sqliteDB.DB)
+		adminService.SetPasskeyRepo(passkeyRepo)
 		hwKeyRepo := db.NewSQLiteHardwareKeyRepo(sqliteDB.DB)
 		webauthnService = auth.NewWebAuthnService(auth.WebAuthnConfig{
 			RPDisplayName: "LGI Pass",
@@ -167,6 +168,7 @@ func main() {
 		syncService = syncsvc.NewService(vaultRepo, syncRepo)
 
 		passkeyRepo := db.NewPgPasskeyRepo(database.Pool)
+		adminService.SetPasskeyRepo(passkeyRepo)
 		hwKeyRepo := db.NewPgHardwareKeyRepo(database.Pool)
 		webauthnService = auth.NewWebAuthnService(auth.WebAuthnConfig{
 			RPDisplayName: "LGI Pass",
