@@ -1,6 +1,7 @@
 import React, { useEffect } from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../store/authStore';
+import { useNotificationStore } from '../store/notificationStore';
 
 const navItems = [
   { to: '/vault', label: 'Vault', icon: '🔐' },
@@ -14,6 +15,16 @@ const adminItems = [
 export function Sidebar() {
   const { email, role, orgId, token, logout, setOrg } = useAuthStore();
   const navigate = useNavigate();
+  const notifCount = useNotificationStore((s) => s.totalCount());
+  const refreshNotifications = useNotificationStore((s) => s.refresh);
+
+  // Fetch notification counts on mount and every 30s
+  useEffect(() => {
+    if (!token) return;
+    refreshNotifications();
+    const interval = setInterval(refreshNotifications, 5_000);
+    return () => clearInterval(interval);
+  }, [token, refreshNotifications]);
 
   // Ensure org info is loaded — covers race conditions where
   // login() finishes before loadOrgAfterLogin resolves.
@@ -101,7 +112,12 @@ export function Sidebar() {
           }
         >
           <span>⚙️</span>
-          <span>Settings</span>
+          <span className="flex-1">Settings</span>
+          {notifCount > 0 && (
+            <span className="flex items-center justify-center min-w-[18px] h-[18px] rounded-full bg-red-500 text-white text-[10px] font-bold px-1 animate-pulse">
+              {notifCount}
+            </span>
+          )}
         </NavLink>
       </div>
       <div className="px-3 py-3 border-t border-surface-700">

@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useAuthStore } from '../store/authStore';
 import { useVaultStore } from '../store/vaultStore';
+import { useNotificationStore } from '../store/notificationStore';
 import { PasswordGenerator } from '../components/PasswordGenerator';
 import { OrgSetupWizard } from '../components/OrgSetupWizard';
 
@@ -383,6 +384,7 @@ function BiometricEnrollModal({ onClose, onConfirm }: { onClose: () => void; onC
 export function Settings() {
   const { email, token, masterKeyHex, autoLockMinutes, setAutoLockMinutes, orgId, orgName, setOrg, clearOrg } = useAuthStore();
   const { entries, entryFields } = useVaultStore();
+  const refreshNotifications = useNotificationStore((s) => s.refresh);
   const [biometricEnabled, setBiometricEnabled] = useState(false);
   const [biometricAvailable, setBiometricAvailable] = useState(false);
   const [biometricLoading, setBiometricLoading] = useState(false);
@@ -599,6 +601,7 @@ export function Settings() {
       } else if (result.totp_secret) {
         setClaimResult({ secret: result.totp_secret, label: result.label });
         setPending2FAShares((prev) => prev.filter((s) => s.id !== shareId));
+        refreshNotifications();
       } else {
         setClaimResult({ error: 'Unexpected response from server' });
       }
@@ -934,7 +937,7 @@ export function Settings() {
                               .then((result: unknown) => {
                                 const res = result as { status?: string; error?: string };
                                 if (res.error) { setOrgError(res.error); }
-                                else { setOrg(inv.org_id, inv.org_name, inv.role); setPendingInvites([]); }
+                                else { setOrg(inv.org_id, inv.org_name, inv.role); setPendingInvites([]); refreshNotifications(); }
                               })
                               .catch(() => setOrgError('Failed to accept invitation'))
                               .finally(() => setOrgLoading(false));

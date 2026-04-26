@@ -1,8 +1,9 @@
 import React, { useEffect, useRef, useCallback } from 'react';
-import { Outlet, useNavigate } from 'react-router-dom';
+import { Outlet, useNavigate, Link } from 'react-router-dom';
 import { Sidebar } from './Sidebar';
 import { TitleBar } from './TitleBar';
 import { useAuthStore } from '../store/authStore';
+import { useNotificationStore } from '../store/notificationStore';
 
 export function Layout() {
   const navigate = useNavigate();
@@ -10,6 +11,12 @@ export function Layout() {
   const autoLockMinutes = useAuthStore((s) => s.autoLockMinutes);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastActivityRef = useRef(Date.now());
+
+  const pending2FA = useNotificationStore((s) => s.pending2FACount);
+  const pendingInvites = useNotificationStore((s) => s.pendingInviteCount);
+  const dismissed = useNotificationStore((s) => s.dismissed);
+  const dismiss = useNotificationStore((s) => s.dismiss);
+  const totalNotifs = pending2FA + pendingInvites;
 
   const resetTimer = useCallback(() => {
     lastActivityRef.current = Date.now();
@@ -38,6 +45,29 @@ export function Layout() {
       <TitleBar />
       <Sidebar />
       <main className="flex-1 overflow-auto bg-surface-950 p-6 pt-10">
+        {totalNotifs > 0 && !dismissed && (
+          <div className="mb-4 flex items-center gap-3 bg-accent-600/15 border border-accent-500/30 rounded-lg px-4 py-2.5">
+            <span className="text-accent-400 text-sm">🔔</span>
+            <span className="flex-1 text-sm text-surface-200">
+              {pending2FA > 0 && `${pending2FA} shared 2FA secret${pending2FA > 1 ? 's' : ''} waiting`}
+              {pending2FA > 0 && pendingInvites > 0 && ' · '}
+              {pendingInvites > 0 && `${pendingInvites} org invite${pendingInvites > 1 ? 's' : ''} pending`}
+            </span>
+            <Link
+              to="/settings"
+              className="text-xs bg-accent-600 hover:bg-accent-500 text-white rounded-md px-3 py-1 transition-colors"
+            >
+              View
+            </Link>
+            <button
+              onClick={dismiss}
+              className="text-surface-500 hover:text-surface-300 text-lg leading-none"
+              aria-label="Dismiss"
+            >
+              ×
+            </button>
+          </div>
+        )}
         <Outlet />
       </main>
     </div>
