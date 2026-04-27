@@ -98,6 +98,18 @@ export interface ScanQRMessage {
   type: 'scanQR';
 }
 
+export interface VerifyMasterPasswordMessage {
+  type: 'verifyMasterPassword';
+  email: string;
+  password: string;
+}
+
+export interface VerifyMasterPasswordResponseMessage {
+  type: 'verifyMasterPasswordResponse';
+  verified: boolean;
+  error?: string;
+}
+
 export interface PasskeyCreateMessage {
   type: 'passkeyCreate';
   rpId: string;
@@ -166,6 +178,8 @@ export type ExtensionMessage =
   | VaultLockedMessage
   | SaveTOTPMessage
   | ScanQRMessage
+  | VerifyMasterPasswordMessage
+  | VerifyMasterPasswordResponseMessage
   | PasskeyCreateMessage
   | PasskeyGetMessage
   | PasskeySignMessage
@@ -188,6 +202,7 @@ export interface Credential {
   notes: string;
   matched: boolean;
   is_favorite: boolean;
+  reprompt: number;
 }
 
 /**
@@ -196,10 +211,12 @@ export interface Credential {
 export interface NativeHostRequest {
   action: 'ping' | 'getCredentials' | 'saveCredential' | 'getStatus' | 'lock'
     | 'passkeyCreate' | 'passkeyGet' | 'passkeySign' | 'passkeyList' | 'passkeyDelete'
-    | 'updateCredential';
+    | 'updateCredential' | 'verifyPassword';
   domain?: string;
   username?: string;
   encryptedPassword?: string;
+  email?: string;
+  password?: string;
   rpId?: string;
   rpName?: string;
   userName?: string;
@@ -211,7 +228,6 @@ export interface NativeHostRequest {
   allowCredentials?: string[];
   id?: string;
   name?: string;
-  password?: string;
   uri?: string;
   notes?: string;
   totp?: string;
@@ -224,6 +240,7 @@ export interface NativeHostResponse {
   locked?: boolean;
   vaultCount?: number;
   error?: string;
+  verified?: boolean;
   passkeys?: PasskeyInfo[];
   assertion?: Record<string, string>;
   options?: Record<string, unknown>;

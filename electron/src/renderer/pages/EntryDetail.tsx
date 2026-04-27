@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { PasswordGenerator } from '../components/PasswordGenerator';
+import { RepromptDialog } from '../components/RepromptDialog';
 import { ENTRY_TYPE_ICONS, ENTRY_TYPE_LABELS } from '../types/vault';
 import type { LoginURI, PasswordHistoryEntry } from '../types/vault';
 import { useVaultStore } from '../store/vaultStore';
@@ -33,9 +34,9 @@ const FIELD_ORDER: Record<string, string[]> = {
 
 const SENSITIVE_FIELDS = new Set(['password', 'cvv', 'number', 'content', 'totp']);
 
-function CopyButton({ value, sensitive = false }: { value: string; sensitive?: boolean }) {
+function CopyButton({ value, sensitive = false, onBeforeCopy }: { value: string; sensitive?: boolean; onBeforeCopy?: (proceed: () => void) => void }) {
   const [copied, setCopied] = useState(false);
-  const handleCopy = async () => {
+  const doCopy = async () => {
     if (sensitive) {
       await window.api.clipboard.copySecure(value);
     } else {
@@ -43,6 +44,13 @@ function CopyButton({ value, sensitive = false }: { value: string; sensitive?: b
     }
     setCopied(true);
     setTimeout(() => setCopied(false), 1500);
+  };
+  const handleCopy = () => {
+    if (onBeforeCopy) {
+      onBeforeCopy(doCopy);
+    } else {
+      doCopy();
+    }
   };
   return (
     <button onClick={handleCopy} className="text-xs text-surface-500 hover:text-accent-400 transition-colors shrink-0">
@@ -134,7 +142,7 @@ export function EntryDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const location = useLocation();
-  const { entries, entryFields, updateEntryFields, updateEntry, removeEntry } = useVaultStore();
+  const { entries, entryFields, updateEntryFields, updateEntry, removeEntry, isRepromptApproved, approveReprompt } = useVaultStore();
   const { token, masterKeyHex } = useAuthStore();
   const [editing, setEditing] = useState(!!(location.state as { edit?: boolean } | null)?.edit);
   const [showGenerator, setShowGenerator] = useState(false);
@@ -143,10 +151,35 @@ export function EntryDetail() {
   const [confirmPermanent, setConfirmPermanent] = useState(false);
   const [showPasswordHistory, setShowPasswordHistory] = useState(false);
   const [revealedHistoryPasswords, setRevealedHistoryPasswords] = useState<Set<number>>(new Set());
+  const [showRepromptDialog, setShowRepromptDialog] = useState(false);
+  const [pendingRepromptAction, setPendingRepromptAction] = useState<(() => void) | null>(null);
 
   const vaultEntry = id ? entries.find((e) => e.id === id) : null;
   const fields = id ? entryFields[id] : null;
   const isTrash = vaultEntry?.deleted_at != null;
+
+  // Reprompt: entry-level flag stored in encrypted blob as "_reprompt"
+  const hasReprompt = fields?._reprompt === '1';
+  const repromptCleared = id ? isRepromptApproved(id) : false;
+
+  /** Require re-auth before executing an action on a reprompt-protected entry. */
+  const withReprompt = (action: () => void) => {
+    if (!hasReprompt || repromptCleared) {
+      action();
+      return;
+    }
+    setPendingRepromptAction(() => action);
+    setShowRepromptDialog(true);
+  };
+
+  const handleRepromptVerified = () => {
+    if (id) approveReprompt(id);
+    setShowRepromptDialog(false);
+    if (pendingRepromptAction) {
+      pendingRepromptAction();
+      setPendingRepromptAction(null);
+    }
+  };
 
   // Parse structured data from fields (password history, URIs)
   const passwordHistory: PasswordHistoryEntry[] = fields ? (() => {
@@ -175,6 +208,8 @@ export function EntryDetail() {
     for (const key of FIELD_ORDER[entryType] ?? []) {
       if (!(key in base)) base[key] = '';
     }
+    // Ensure reprompt flag is present
+    if (!('_reprompt' in base)) base._reprompt = '0';
     return base;
   });
 
@@ -192,12 +227,20 @@ export function EntryDetail() {
   ];
 
   const toggleReveal = (field: string) => {
-    setRevealedFields((prev) => {
-      const next = new Set(prev);
-      if (next.has(field)) next.delete(field);
-      else next.add(field);
-      return next;
-    });
+    const doToggle = () => {
+      setRevealedFields((prev) => {
+        const next = new Set(prev);
+        if (next.has(field)) next.delete(field);
+        else next.add(field);
+        return next;
+      });
+    };
+    // Gate reveal of sensitive fields behind reprompt
+    if (SENSITIVE_FIELDS.has(field) && !revealedFields.has(field)) {
+      withReprompt(doToggle);
+    } else {
+      doToggle();
+    }
   };
 
   const handleSave = async () => {
@@ -240,6 +283,8 @@ export function EntryDetail() {
         plaintextObj.passwordHistory = JSON.parse(v);
       } else if (k === '_uris') {
         plaintextObj.uris = JSON.parse(v);
+      } else if (k === '_reprompt') {
+        plaintextObj.reprompt = v === '1' ? 1 : 0;
       } else {
         plaintextObj[k] = v;
       }
@@ -274,6 +319,7 @@ export function EntryDetail() {
     for (const key of FIELD_ORDER[entryType] ?? []) {
       if (!(key in base)) base[key] = '';
     }
+    if (!('_reprompt' in base)) base._reprompt = '0';
     setEditFields(base);
     setEditURIs(uris.length > 0 ? uris : (fields.uri ? [{ uri: fields.uri, match: 'base_domain' }] : [{ uri: '', match: 'base_domain' }]));
     setEditing(false);
@@ -363,6 +409,34 @@ export function EntryDetail() {
 
       {/* Fields */}
       <div className="space-y-1 bg-surface-900/50 rounded-lg p-4">
+        {/* Reprompt toggle (edit mode) / indicator (view mode) */}
+        {editing ? (
+          <div className="flex items-center justify-between py-2.5 border-b border-surface-800">
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-surface-500">🔒</span>
+              <span className="text-xs text-surface-400">Master password re-prompt</span>
+            </div>
+            <label className="relative inline-flex items-center cursor-pointer">
+              <input
+                type="checkbox"
+                checked={editFields._reprompt === '1'}
+                onChange={(e) =>
+                  setEditFields({ ...editFields, _reprompt: e.target.checked ? '1' : '0' })
+                }
+                className="sr-only peer"
+              />
+              <div className="w-8 h-4 bg-surface-700 peer-focus:outline-none rounded-full peer peer-checked:bg-accent-500 transition-colors">
+                <div className={`w-3.5 h-3.5 bg-white rounded-full shadow transform transition-transform mt-[1px] ${editFields._reprompt === '1' ? 'translate-x-[17px]' : 'translate-x-[1px]'}`} />
+              </div>
+            </label>
+          </div>
+        ) : hasReprompt ? (
+          <div className="flex items-center gap-2 py-2 px-1 mb-1">
+            <span className="text-xs">🔒</span>
+            <span className="text-[10px] text-surface-500">Re-authentication required for sensitive fields</span>
+          </div>
+        ) : null}
+
         {fieldOrder.map((key) => {
           if (key === 'name') return null;
           // Skip internal metadata fields
@@ -496,7 +570,11 @@ export function EntryDetail() {
                     {revealed ? 'Hide' : 'Show'}
                   </button>
                 )}
-                <CopyButton value={value} sensitive={isSensitive} />
+                <CopyButton
+                  value={value}
+                  sensitive={isSensitive}
+                  onBeforeCopy={isSensitive && hasReprompt && !repromptCleared ? (proceed) => withReprompt(proceed) : undefined}
+                />
               </div>
             </div>
           );
@@ -657,6 +735,17 @@ export function EntryDetail() {
             </div>
           </div>
         </div>
+      )}
+
+      {/* Reprompt dialog */}
+      {showRepromptDialog && (
+        <RepromptDialog
+          onVerified={handleRepromptVerified}
+          onCancel={() => {
+            setShowRepromptDialog(false);
+            setPendingRepromptAction(null);
+          }}
+        />
       )}
     </div>
   );

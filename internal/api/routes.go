@@ -155,15 +155,16 @@ func Router(authService *auth.Service, totpService *auth.TOTPService, smsService
 
 // ExtensionRouter sets up routes for the browser extension native messaging bridge.
 // These endpoints are localhost-only and protected by a shared secret.
-func ExtensionRouter(vaultRepo db.VaultRepository, secret string, webauthnService *auth.WebAuthnService) chi.Router {
+func ExtensionRouter(vaultRepo db.VaultRepository, userRepo db.UserRepository, secret string, webauthnService *auth.WebAuthnService) chi.Router {
 	r := chi.NewRouter()
-	h := NewExtensionHandler(vaultRepo, secret, webauthnService)
+	h := NewExtensionHandler(vaultRepo, userRepo, secret, webauthnService)
 
 	r.Post("/session", h.PushSession)
 	r.Get("/status", h.GetStatus)
 	r.Get("/credentials", h.GetCredentials)
 	r.Post("/credentials", h.SaveCredential)
 	r.Put("/credentials/{id}", h.UpdateCredential)
+	r.Post("/verify-password", h.VerifyPassword)
 	r.Post("/lock", h.Lock)
 
 	// Passkey endpoints for native host

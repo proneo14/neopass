@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { useVaultStore } from './vaultStore';
 
 // Persist org info to localStorage, scoped per userId
 const ORG_STORAGE_PREFIX = 'lgi-pass-org-';
@@ -69,6 +70,8 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   logout: () => {
     const { userId } = get();
     saveOrgToStorage(userId, null, null, null);
+    // Clear reprompt approvals so protected entries require re-auth after login
+    useVaultStore.getState().clearRepromptApprovals();
     // Notify server to clear extension session
     window.api?.auth?.logout?.().catch(() => {});
     set({ token: null, userId: null, email: null, role: null, masterKeyHex: null, orgId: null, orgName: null, isAuthenticated: false });

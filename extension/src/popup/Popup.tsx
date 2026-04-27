@@ -13,6 +13,12 @@ type View = 'list' | 'detail' | 'passkeyDetail';
 export function Popup() {
   const [status, setStatus] = useState<AppStatus>('loading');
   const [credentials, setCredentials] = useState<Credential[]>([]);
+  const [repromptMode, setRepromptMode] = useState(false);
+  const [repromptPassword, setRepromptPassword] = useState('');
+  const [repromptError, setRepromptError] = useState('');
+  const [repromptLoading, setRepromptLoading] = useState(false);
+  const [pendingRepromptAction, setPendingRepromptAction] = useState<(() => void) | null>(null);
+  const [repromptVerified, setRepromptVerified] = useState(false);
   const [passkeys, setPasskeys] = useState<PasskeyInfo[]>([]);
   const [currentDomain, setCurrentDomain] = useState<string>('');
   const [view, setView] = useState<View>('list');
@@ -128,15 +134,56 @@ export function Popup() {
     }
   }
 
+  /** Gate an action behind reprompt verification if the credential requires it. */
+  function withReprompt(credential: Credential, action: () => void) {
+    if (!credential.reprompt) {
+      action();
+      return;
+    }
+    setPendingRepromptAction(() => action);
+    setRepromptMode(true);
+    setRepromptPassword('');
+    setRepromptError('');
+  }
+
+  async function handleRepromptSubmit() {
+    if (!repromptPassword.trim()) return;
+    setRepromptLoading(true);
+    setRepromptError('');
+    try {
+      const result = await browserAPI.runtime.sendMessage({
+        type: 'verifyMasterPassword',
+        email: '', // Server will use session email
+        password: repromptPassword,
+      }) as { verified?: boolean; error?: string };
+      if (result?.verified) {
+        setRepromptPassword('');
+        setRepromptMode(false);
+        setRepromptVerified(true);
+        if (pendingRepromptAction) {
+          pendingRepromptAction();
+          setPendingRepromptAction(null);
+        }
+      } else {
+        setRepromptError(result?.error || 'Incorrect password');
+      }
+    } catch {
+      setRepromptError('Verification failed');
+    } finally {
+      setRepromptLoading(false);
+    }
+  }
+
   async function handleFill(credential: Credential) {
-    // Fire-and-forget: background handles the fill after popup closes.
-    // Don't await — close immediately so the page regains focus.
-    browserAPI.runtime.sendMessage({
-      type: 'fillCredential',
-      username: credential.username,
-      password: credential.password,
-    });
-    window.close();
+    const doFill = () => {
+      browserAPI.runtime.sendMessage({
+        type: 'fillCredential',
+        username: credential.username,
+        password: credential.password,
+      });
+      window.close();
+    };
+    withReprompt(credential, doFill);
   }
 
   async function handleCheckStatus() {
@@ -156,7 +203,13 @@ export function Popup() {
   function handleSelectCred(cred: Credential) {
     setSelectedCred(cred);
     setShowPassword(false);
-    setView('detail');
+    setRepromptVerified(false);
+    if (cred.reprompt) {
+      // Show detail view but gate sensitive fields behind reprompt
+      setView('detail');
+    } else {
+      setView('detail');
+    }
   }
 
   function handleSelectPasskey(pk: PasskeyInfo) {
@@ -235,6 +288,7 @@ export function Popup() {
 
   // Detail view
   if (view === 'detail' && selectedCred) {
+    const needsReprompt = !!selectedCred.reprompt && !repromptVerified;
     return (
       <div className="flex flex-col h-full bg-surface-950 text-surface-100">
         {/* Header */}
@@ -247,7 +301,35 @@ export function Popup() {
           </span>
         </div>
 
-        {/* Fields */}
+        {needsReprompt ? (
+          /* Reprompt gate — hide all sensitive fields until re-authenticated */
+          <div className="flex-1 flex flex-col items-center justify-center px-6 py-8">
+            <div className="text-3xl mb-3">🔒</div>
+            <p className="text-sm text-surface-300 text-center mb-4">
+              This entry requires re-authentication to view
+            </p>
+            <form onSubmit={(e) => { e.preventDefault(); handleRepromptSubmit(); }} className="w-full max-w-[240px] space-y-2">
+              <input
+                type="password"
+                value={repromptPassword}
+                onChange={(e) => setRepromptPassword(e.target.value)}
+                placeholder="Master password"
+                autoFocus
+                className="w-full px-3 py-2 bg-surface-800 border border-surface-700 rounded text-sm text-surface-100 placeholder-surface-500 focus:outline-none focus:border-accent-500"
+              />
+              {repromptError && <p className="text-xs text-red-400">{repromptError}</p>}
+              <button
+                type="submit"
+                disabled={repromptLoading}
+                className="w-full py-2 bg-accent-500 hover:bg-accent-600 disabled:opacity-50 text-white rounded text-sm font-medium transition-colors"
+              >
+                {repromptLoading ? 'Verifying...' : 'Unlock'}
+              </button>
+            </form>
+          </div>
+        ) : (
+        /* Fields — shown after reprompt verified (or if no reprompt required) */
+        <>
         <div className="flex-1 overflow-y-auto px-4 py-3 space-y-3">
           {/* Name */}
           <div>
@@ -308,6 +390,8 @@ export function Popup() {
             Fill on Page
           </button>
         </div>
+        </>
+        )}
       </div>
     );
   }
@@ -412,7 +496,7 @@ export function Popup() {
                   >
                     <div className="flex-1 min-w-0 mr-3">
                       <p className="text-sm font-medium text-surface-100 truncate flex items-center gap-1">
-                        {cred.is_favorite && <svg className="w-3 h-3 text-amber-400 shrink-0" viewBox="0 0 20 20" fill="currentColor"><path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.286 3.957a1 1 0 00.95.69h4.162c.969 0 1.371 1.24.588 1.81l-3.37 2.448a1 1 0 00-.364 1.118l1.287 3.957c.3.921-.755 1.688-1.54 1.118l-3.37-2.448a1 1 0 00-1.176 0l-3.37 2.448c-.784.57-1.838-.197-1.539-1.118l1.287-3.957a1 1 0 00-.364-1.118L2.065 9.384c-.783-.57-.38-1.81.588-1.81h4.162a1 1 0 00.95-.69l1.284-3.957z" /></svg>}{cred.name || cred.domain}
+                        {cred.is_favorite && <svg className="w-3 h-3 text-amber-400 shrink-0" viewBox="0 0 20 20" fill="currentColor"><path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.286 3.957a1 1 0 00.95.69h4.162c.969 0 1.371 1.24.588 1.81l-3.37 2.448a1 1 0 00-.364 1.118l1.287 3.957c.3.921-.755 1.688-1.54 1.118l-3.37-2.448a1 1 0 00-1.176 0l-3.37 2.448c-.784.57-1.838-.197-1.539-1.118l1.287-3.957a1 1 0 00-.364-1.118L2.065 9.384c-.783-.57-.38-1.81.588-1.81h4.162a1 1 0 00.95-.69l1.284-3.957z" /></svg>}{!!cred.reprompt && <span className="text-[10px] text-surface-500" title="Re-prompt required">🔒</span>}{cred.name || cred.domain}
                       </p>
                       <p className="text-xs text-surface-400 truncate">
                         {cred.username}
@@ -443,7 +527,7 @@ export function Popup() {
                   >
                     <div className="flex-1 min-w-0 mr-3">
                       <p className="text-sm font-medium text-surface-100 truncate flex items-center gap-1">
-                        {cred.is_favorite && <svg className="w-3 h-3 text-amber-400 shrink-0" viewBox="0 0 20 20" fill="currentColor"><path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.286 3.957a1 1 0 00.95.69h4.162c.969 0 1.371 1.24.588 1.81l-3.37 2.448a1 1 0 00-.364 1.118l1.287 3.957c.3.921-.755 1.688-1.54 1.118l-3.37-2.448a1 1 0 00-1.176 0l-3.37 2.448c-.784.57-1.838-.197-1.539-1.118l1.287-3.957a1 1 0 00-.364-1.118L2.065 9.384c-.783-.57-.38-1.81.588-1.81h4.162a1 1 0 00.95-.69l1.284-3.957z" /></svg>}{cred.name || cred.domain}
+                        {cred.is_favorite && <svg className="w-3 h-3 text-amber-400 shrink-0" viewBox="0 0 20 20" fill="currentColor"><path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.286 3.957a1 1 0 00.95.69h4.162c.969 0 1.371 1.24.588 1.81l-3.37 2.448a1 1 0 00-.364 1.118l1.287 3.957c.3.921-.755 1.688-1.54 1.118l-3.37-2.448a1 1 0 00-1.176 0l-3.37 2.448c-.784.57-1.838-.197-1.539-1.118l1.287-3.957a1 1 0 00-.364-1.118L2.065 9.384c-.783-.57-.38-1.81.588-1.81h4.162a1 1 0 00.95-.69l1.284-3.957z" /></svg>}{!!cred.reprompt && <span className="text-[10px] text-surface-500" title="Re-prompt required">🔒</span>}{cred.name || cred.domain}
                       </p>
                       <p className="text-xs text-surface-400 truncate">
                         {cred.username}{cred.domain ? ` · ${cred.domain}` : ''}
@@ -495,6 +579,45 @@ export function Popup() {
       {notification && (
         <div className="px-4 py-2 bg-green-600/20 border-t border-green-500/30 text-green-400 text-xs text-center shrink-0">
           {notification}
+        </div>
+      )}
+
+      {/* Reprompt overlay */}
+      {repromptMode && (
+        <div className="absolute inset-0 bg-surface-950/95 flex flex-col items-center justify-center p-6 z-50">
+          <div className="text-2xl mb-3">🔒</div>
+          <h3 className="text-sm font-semibold text-surface-100 mb-1">Re-authentication Required</h3>
+          <p className="text-[10px] text-surface-400 text-center mb-4">
+            This entry requires your master password.
+          </p>
+          <form onSubmit={(e) => { e.preventDefault(); handleRepromptSubmit(); }} className="w-full max-w-[240px] space-y-2">
+            <input
+              type="password"
+              value={repromptPassword}
+              onChange={(e) => setRepromptPassword(e.target.value)}
+              autoFocus
+              placeholder="Master password"
+              className="w-full px-3 py-2 rounded-md bg-surface-800 border border-surface-700 text-surface-100 text-sm placeholder-surface-500 focus:outline-none focus:ring-2 focus:ring-accent-500"
+            />
+            {repromptError && <p className="text-[10px] text-red-400">{repromptError}</p>}
+            <button
+              type="submit"
+              disabled={repromptLoading || !repromptPassword.trim()}
+              className="w-full py-2 bg-accent-500 hover:bg-accent-600 text-white rounded-md text-sm font-medium disabled:opacity-50 transition-colors"
+            >
+              {repromptLoading ? 'Verifying…' : 'Verify'}
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setRepromptMode(false);
+                setPendingRepromptAction(null);
+              }}
+              className="w-full py-1.5 text-sm text-surface-400 hover:text-surface-200 transition-colors"
+            >
+              Cancel
+            </button>
+          </form>
         </div>
       )}
     </div>

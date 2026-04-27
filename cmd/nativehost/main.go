@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
@@ -37,6 +38,8 @@ type Request struct {
 	TOTP     string `json:"totp,omitempty"`
 	// For secureCopy
 	Text string `json:"text,omitempty"`
+	// For verifyPassword
+	Email string `json:"email,omitempty"`
 	// For passkey operations
 	RPID             string                 `json:"rpId,omitempty"`
 	RPName           string                 `json:"rpName,omitempty"`
@@ -59,6 +62,7 @@ type Response struct {
 	Locked      *bool                  `json:"locked,omitempty"`
 	VaultCount  *int                   `json:"vaultCount,omitempty"`
 	Error       string                 `json:"error,omitempty"`
+	Verified    *bool                  `json:"verified,omitempty"`
 	// Passkey response fields
 	Passkeys    []PasskeyInfo          `json:"passkeys,omitempty"`
 	Assertion   map[string]interface{} `json:"assertion,omitempty"`
@@ -87,6 +91,7 @@ type Credential struct {
 	Notes      string          `json:"notes"`
 	Matched    bool            `json:"matched"`
 	IsFavorite bool            `json:"is_favorite"`
+	Reprompt   int             `json:"reprompt"`
 }
 
 // CredentialURI represents a single URI entry with match mode.
@@ -224,6 +229,12 @@ func handleMessage(client *SidecarClient, msg *Request) *Response {
 			return &Response{Error: "text is required"}
 		}
 		return secureCopyToClipboard(msg.Text)
+
+	case "verifyPassword":
+		if msg.Password == "" {
+			return &Response{Error: "password is required"}
+		}
+		return client.verifyPassword(msg.Email, msg.Password)
 
 	case "openApp":
 		return openDesktopApp()
@@ -432,6 +443,31 @@ func (c *SidecarClient) lock() *Response {
 	defer func() { _ = resp.Body.Close() }()
 
 	return &Response{Status: "locked"}
+}
+
+func (c *SidecarClient) verifyPassword(email, password string) *Response {
+	bodyMap := map[string]string{
+		"password": password,
+	}
+	if email != "" {
+		bodyMap["email"] = email
+	}
+	bodyBytes, _ := json.Marshal(bodyMap)
+	resp, err := c.sidecarPost("/extension/verify-password", bytes.NewReader(bodyBytes))
+	if err != nil {
+		c.baseURL = ""
+		return &Response{Error: "Desktop app not running"}
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	var result struct {
+		Verified bool   `json:"verified"`
+		Error    string `json:"error,omitempty"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return &Response{Error: "failed to parse response"}
+	}
+	return &Response{Verified: &result.Verified, Error: result.Error}
 }
 
 // --- Passkey sidecar methods ---

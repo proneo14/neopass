@@ -5,6 +5,9 @@ export interface EntryFields {
   [key: string]: string;
 }
 
+/** TTL in ms for reprompt approvals (5 minutes). */
+const REPROMPT_TTL_MS = 5 * 60 * 1000;
+
 interface VaultState {
   entries: VaultEntry[];
   entryFields: Record<string, EntryFields>; // id -> decrypted field data
@@ -14,6 +17,9 @@ interface VaultState {
   selectedFolderId: string | null;
   selectedTypeFilter: string | null;
   activeFilter: 'all' | 'favorites' | 'archived' | 'trash';
+
+  /** Cache of entry IDs that have been approved for reprompt bypass, with expiry timestamps. */
+  repromptApprovals: Record<string, number>;
 
   setEntries: (entries: VaultEntry[]) => void;
   setFolders: (folders: Folder[]) => void;
@@ -26,9 +32,16 @@ interface VaultState {
   setSelectedFolderId: (id: string | null) => void;
   setSelectedTypeFilter: (type: string | null) => void;
   setActiveFilter: (filter: 'all' | 'favorites' | 'archived' | 'trash') => void;
+
+  /** Grant a 5-minute reprompt approval for a specific entry. */
+  approveReprompt: (entryId: string) => void;
+  /** Check whether an entry has a valid (non-expired) reprompt approval. */
+  isRepromptApproved: (entryId: string) => boolean;
+  /** Clear all reprompt approvals (e.g. on lock). */
+  clearRepromptApprovals: () => void;
 }
 
-export const useVaultStore = create<VaultState>((set) => ({
+export const useVaultStore = create<VaultState>((set, get) => ({
   entries: [],
   entryFields: {},
   folders: [],
@@ -37,6 +50,7 @@ export const useVaultStore = create<VaultState>((set) => ({
   selectedFolderId: null,
   selectedTypeFilter: null,
   activeFilter: 'all',
+  repromptApprovals: {},
 
   setEntries: (entries) => set({ entries }),
   setFolders: (folders) => set({ folders }),
@@ -61,4 +75,14 @@ export const useVaultStore = create<VaultState>((set) => ({
   setSelectedFolderId: (selectedFolderId) => set({ selectedFolderId }),
   setSelectedTypeFilter: (selectedTypeFilter) => set({ selectedTypeFilter }),
   setActiveFilter: (activeFilter) => set({ activeFilter }),
+
+  approveReprompt: (entryId) =>
+    set((s) => ({
+      repromptApprovals: { ...s.repromptApprovals, [entryId]: Date.now() + REPROMPT_TTL_MS },
+    })),
+  isRepromptApproved: (entryId) => {
+    const expiry = get().repromptApprovals[entryId];
+    return !!expiry && Date.now() < expiry;
+  },
+  clearRepromptApprovals: () => set({ repromptApprovals: {} }),
 }));

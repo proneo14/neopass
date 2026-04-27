@@ -2,6 +2,7 @@ package api
 
 import (
 	"crypto/sha256"
+	"crypto/sha512"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
@@ -12,17 +13,24 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/rs/zerolog/log"
+	"golang.org/x/crypto/pbkdf2"
 
 	"github.com/password-manager/password-manager/internal/auth"
 	"github.com/password-manager/password-manager/internal/crypto"
 	"github.com/password-manager/password-manager/internal/db"
 )
 
+// derivePBKDF2 derives a key using PBKDF2-SHA512, matching the Electron main process KDF.
+func derivePBKDF2(password string, salt []byte, iterations, keyLen int) []byte {
+	return pbkdf2.Key([]byte(password), salt, iterations, keyLen, sha512.New)
+}
+
 // ExtensionHandler serves local-only endpoints for the browser extension
 // via the native messaging host. Session state (JWT + master key) is pushed
 // from the Electron app after login.
 type ExtensionHandler struct {
 	vaultRepo db.VaultRepository
+	userRepo  db.UserRepository
 	secret    string // shared secret for authenticating requests from native host
 	webauthn  *auth.WebAuthnService
 
@@ -34,6 +42,7 @@ type extensionSession struct {
 	Token        string // JWT token for API calls
 	MasterKeyHex string // master key for decrypting vault entries
 	UserID       string // extracted from JWT or pushed by Electron
+	Email        string // user email for KDF salt derivation
 }
 
 type extensionCredential struct {
@@ -47,6 +56,7 @@ type extensionCredential struct {
 	Notes      string              `json:"notes"`
 	Matched    bool                `json:"matched"`
 	IsFavorite bool                `json:"is_favorite"`
+	Reprompt   int                 `json:"reprompt"`
 }
 
 type extensionURI struct {
@@ -54,9 +64,10 @@ type extensionURI struct {
 	Match string `json:"match,omitempty"`
 }
 
-func NewExtensionHandler(vaultRepo db.VaultRepository, secret string, webauthn *auth.WebAuthnService) *ExtensionHandler {
+func NewExtensionHandler(vaultRepo db.VaultRepository, userRepo db.UserRepository, secret string, webauthn *auth.WebAuthnService) *ExtensionHandler {
 	return &ExtensionHandler{
 		vaultRepo: vaultRepo,
+		userRepo:  userRepo,
 		secret:    secret,
 		webauthn:  webauthn,
 	}
@@ -84,6 +95,7 @@ func (h *ExtensionHandler) PushSession(w http.ResponseWriter, r *http.Request) {
 		Token        string `json:"token"`
 		MasterKeyHex string `json:"master_key_hex"`
 		UserID       string `json:"user_id"`
+		Email        string `json:"email"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
@@ -100,6 +112,7 @@ func (h *ExtensionHandler) PushSession(w http.ResponseWriter, r *http.Request) {
 		Token:        body.Token,
 		MasterKeyHex: body.MasterKeyHex,
 		UserID:       body.UserID,
+		Email:        body.Email,
 	}
 	h.mu.Unlock()
 
@@ -200,7 +213,8 @@ func (h *ExtensionHandler) GetCredentials(w http.ResponseWriter, r *http.Request
 				URI   string `json:"uri"`
 				Match string `json:"match,omitempty"` // base_domain, host, starts_with, regex, exact, never
 			} `json:"uris"`
-			Notes string `json:"notes"`
+			Notes    string `json:"notes"`
+			Reprompt int    `json:"reprompt"`
 		}
 		if err := json.Unmarshal(plaintext, &loginData); err != nil {
 			log.Debug().Err(err).Str("entry_id", entry.ID).Msg("[extension] unmarshal failed")
@@ -254,6 +268,7 @@ func (h *ExtensionHandler) GetCredentials(w http.ResponseWriter, r *http.Request
 			Notes:      loginData.Notes,
 			Matched:    matched,
 			IsFavorite: entry.IsFavorite,
+			Reprompt:   loginData.Reprompt,
 		})
 	}
 
@@ -444,6 +459,77 @@ func (h *ExtensionHandler) UpdateCredential(w http.ResponseWriter, r *http.Reque
 	}
 
 	writeJSON(w, http.StatusOK, map[string]string{"status": "updated"})
+}
+
+// VerifyPassword verifies the user's master password for re-prompt.
+// The extension sends the password and the server derives keys using the same
+// KDF and compares against the stored session master key.
+// POST /extension/verify-password
+// Body: { "email": "...", "password": "..." }
+// Rate-limited: 5 attempts per minute (handled by caller).
+func (h *ExtensionHandler) VerifyPassword(w http.ResponseWriter, r *http.Request) {
+	if !h.verifySecret(r) {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
+	h.mu.RLock()
+	sess := h.session
+	h.mu.RUnlock()
+
+	if sess == nil {
+		writeJSON(w, http.StatusOK, map[string]interface{}{"verified": false, "error": "vault is locked"})
+		return
+	}
+
+	var body struct {
+		Email    string `json:"email"`
+		Password string `json:"password"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	if body.Password == "" {
+		writeJSON(w, http.StatusOK, map[string]interface{}{"verified": false, "error": "password is required"})
+		return
+	}
+
+	// Resolve email: request → session → database lookup
+	email := body.Email
+	if email == "" {
+		email = sess.Email
+	}
+	if email == "" && h.userRepo != nil && sess.UserID != "" {
+		if u, err := h.userRepo.GetUserByID(r.Context(), sess.UserID); err == nil {
+			email = u.Email
+		}
+	}
+	if email == "" {
+		writeJSON(w, http.StatusOK, map[string]interface{}{"verified": false, "error": "unable to determine account email"})
+		return
+	}
+
+	// Derive master key using the same KDF as the Electron main process:
+	// salt = SHA-256(email), derived = PBKDF2(password, salt, 100000, 64, sha512)
+	// masterKeyHex = first 32 bytes as hex
+	emailHash := sha256.Sum256([]byte(email))
+	// Use Go's PBKDF2 to derive keys
+	dk := derivePBKDF2(body.Password, emailHash[:], 100000, 64)
+	derivedMasterKeyHex := hex.EncodeToString(dk[:32])
+
+	// Constant-time comparison
+	verified := len(derivedMasterKeyHex) == len(sess.MasterKeyHex)
+	if verified {
+		for i := 0; i < len(derivedMasterKeyHex) && i < len(sess.MasterKeyHex); i++ {
+			if derivedMasterKeyHex[i] != sess.MasterKeyHex[i] {
+				verified = false
+			}
+		}
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{"verified": verified})
 }
 
 // Lock clears the session state.

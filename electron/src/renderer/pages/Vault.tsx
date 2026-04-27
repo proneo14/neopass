@@ -4,6 +4,7 @@ import { useVaultStore } from '../store/vaultStore';
 import { useAuthStore } from '../store/authStore';
 import { ENTRY_TYPE_ICONS, ENTRY_TYPE_LABELS } from '../types/vault';
 import { PasswordGenerator } from '../components/PasswordGenerator';
+import { RepromptDialog } from '../components/RepromptDialog';
 import type { VaultEntry } from '../types/vault';
 
 const ENTRY_TYPES = ['login', 'secure_note', 'credit_card', 'identity'] as const;
@@ -266,14 +267,40 @@ function NewEntryModal({ entryType, onCancel, onSave }: {
 
 export function Vault() {
   const navigate = useNavigate();
-  const { entries, entryFields, addEntry, removeEntry, searchQuery, setSearchQuery, sortBy, setSortBy, selectedTypeFilter, setSelectedTypeFilter, activeFilter, updateEntry } = useVaultStore();
+  const { entries, entryFields, addEntry, removeEntry, searchQuery, setSearchQuery, sortBy, setSortBy, selectedTypeFilter, setSelectedTypeFilter, activeFilter, updateEntry, isRepromptApproved, approveReprompt } = useVaultStore();
   const { token, masterKeyHex } = useAuthStore();
   const [showAddDropdown, setShowAddDropdown] = useState(false);
   const [newEntryType, setNewEntryType] = useState<string | null>(null);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; entryId: string } | null>(null);
   const [loading, setLoading] = useState(true);
+  const [showRepromptDialog, setShowRepromptDialog] = useState(false);
+  const [pendingRepromptAction, setPendingRepromptAction] = useState<(() => void) | null>(null);
+  const [pendingRepromptEntryId, setPendingRepromptEntryId] = useState<string | null>(null);
 
   const filterTitle = activeFilter === 'favorites' ? 'Favorites' : activeFilter === 'archived' ? 'Archive' : activeFilter === 'trash' ? 'Trash' : 'Vault';
+
+  /** Require re-auth before executing an action on a reprompt-protected entry. */
+  const withReprompt = (entryId: string, action: () => void) => {
+    const fields = entryFields[entryId];
+    const hasReprompt = fields?._reprompt === '1';
+    if (!hasReprompt || isRepromptApproved(entryId)) {
+      action();
+      return;
+    }
+    setPendingRepromptEntryId(entryId);
+    setPendingRepromptAction(() => action);
+    setShowRepromptDialog(true);
+  };
+
+  const handleRepromptVerified = () => {
+    if (pendingRepromptEntryId) approveReprompt(pendingRepromptEntryId);
+    setShowRepromptDialog(false);
+    if (pendingRepromptAction) {
+      pendingRepromptAction();
+      setPendingRepromptAction(null);
+    }
+    setPendingRepromptEntryId(null);
+  };
 
   // Load entries from backend on mount, then poll every 3 seconds
   useEffect(() => {
@@ -341,6 +368,8 @@ export function Vault() {
                 fields._passwordHistory = JSON.stringify(v);
               } else if (k === 'uris') {
                 fields._uris = JSON.stringify(v);
+              } else if (k === 'reprompt') {
+                fields._reprompt = String(v === 1 || v === '1' ? '1' : '0');
               } else {
                 fields[k] = String(v ?? '');
               }
@@ -566,17 +595,20 @@ export function Vault() {
                     {ENTRY_TYPE_ICONS[entry.entry_type]}
                   </span>
                   <div className="flex-1 min-w-0">
-                    <p className="text-sm text-surface-100 truncate flex items-center gap-1">
-                      {entry.is_favorite && <svg className="w-3.5 h-3.5 text-amber-400 shrink-0" viewBox="0 0 20 20" fill="currentColor"><path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.286 3.957a1 1 0 00.95.69h4.162c.969 0 1.371 1.24.588 1.81l-3.37 2.448a1 1 0 00-.364 1.118l1.287 3.957c.3.921-.755 1.688-1.54 1.118l-3.37-2.448a1 1 0 00-1.176 0l-3.37 2.448c-.784.57-1.838-.197-1.539-1.118l1.287-3.957a1 1 0 00-.364-1.118L2.065 9.384c-.783-.57-.38-1.81.588-1.81h4.162a1 1 0 00.95-.69l1.284-3.957z" /></svg>}
+                    <p className="text-sm text-surface-100 truncate">
                       {f?.name ?? 'Untitled'}
                     </p>
                     {(f?.username || f?.email) && (
                       <p className="text-xs text-surface-500 truncate">{f.username || f.email}</p>
                     )}
                   </div>
-                  <span className="text-xs text-surface-600 shrink-0 group-hover:text-surface-400 transition-colors">
-                    {formatDate(entry.updated_at)}
-                  </span>
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    {f?._reprompt === '1' && <span className="text-surface-500 text-[11px]" title="Master password re-prompt enabled">🔒</span>}
+                    {entry.is_favorite && <svg className="w-3.5 h-3.5 text-amber-400" viewBox="0 0 20 20" fill="currentColor"><path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.286 3.957a1 1 0 00.95.69h4.162c.969 0 1.371 1.24.588 1.81l-3.37 2.448a1 1 0 00-.364 1.118l1.287 3.957c.3.921-.755 1.688-1.54 1.118l-3.37-2.448a1 1 0 00-1.176 0l-3.37 2.448c-.784.57-1.838-.197-1.539-1.118l1.287-3.957a1 1 0 00-.364-1.118L2.065 9.384c-.783-.57-.38-1.81.588-1.81h4.162a1 1 0 00.95-.69l1.284-3.957z" /></svg>}
+                    <span className="text-xs text-surface-600 group-hover:text-surface-400 transition-colors">
+                      {formatDate(entry.updated_at)}
+                    </span>
+                  </div>
                 </div>
               );
             })}
@@ -607,9 +639,12 @@ export function Vault() {
             navigator.clipboard.writeText(entryFields[contextMenu.entryId]?.username ?? '');
             setContextMenu(null);
           }}
-          onCopyPassword={async () => {
-            await window.api.clipboard.copySecure(entryFields[contextMenu.entryId]?.password ?? '');
+          onCopyPassword={() => {
+            const eid = contextMenu.entryId;
             setContextMenu(null);
+            withReprompt(eid, async () => {
+              await window.api.clipboard.copySecure(entryFields[eid]?.password ?? '');
+            });
           }}
           onToggleFavorite={async () => {
             if (token) {
@@ -729,6 +764,18 @@ export function Vault() {
             }
             removeEntry(contextMenu.entryId);
             setContextMenu(null);
+          }}
+        />
+      )}
+
+      {/* Reprompt dialog (for context menu copy password) */}
+      {showRepromptDialog && (
+        <RepromptDialog
+          onVerified={handleRepromptVerified}
+          onCancel={() => {
+            setShowRepromptDialog(false);
+            setPendingRepromptAction(null);
+            setPendingRepromptEntryId(null);
           }}
         />
       )}

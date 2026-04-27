@@ -412,6 +412,16 @@ browserAPI.runtime.onMessage.addListener(
           error: response.error,
         }));
 
+      case 'verifyMasterPassword':
+        return sendNativeMessage({
+          action: 'verifyPassword',
+          email: message.email,
+          password: message.password,
+        }).then((response) => ({
+          verified: response.verified ?? false,
+          error: response.error,
+        }));
+
       case 'fillCredential':
         // Return the async result so MV3 service worker stays alive.
         // Uses chrome.scripting.executeScript with execCommand('insertText')

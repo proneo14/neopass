@@ -208,7 +208,7 @@ func main() {
 				extSecret = hex.EncodeToString(b)
 			}
 		}
-		r.Mount("/extension", api.ExtensionRouter(vaultRepo, extSecret, webauthnService))
+		r.Mount("/extension", api.ExtensionRouter(vaultRepo, userRepo, extSecret, webauthnService))
 
 		// Write sidecar lockfile in sidecar mode
 		if cfg.SidecarMode {

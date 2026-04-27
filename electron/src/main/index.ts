@@ -186,7 +186,7 @@ function getAppDataDir(): string {
 /**
  * Push session state to the sidecar so the extension can fetch credentials.
  */
-async function pushSessionToSidecar(token: string, masterKeyHex: string, userId: string): Promise<void> {
+async function pushSessionToSidecar(token: string, masterKeyHex: string, userId: string, email?: string): Promise<void> {
   const api = getApiBase();
   if (!api) return;
   try {
@@ -197,6 +197,7 @@ async function pushSessionToSidecar(token: string, masterKeyHex: string, userId:
         token,
         master_key_hex: masterKeyHex,
         user_id: userId,
+        email: email ?? '',
       }),
     });
     console.log('[extension] session pushed to sidecar');
@@ -381,7 +382,7 @@ function registerIpcHandlers(): void {
         const jwt = (result.access_token || result.token) as string;
         const userId = result.user_id as string;
         if (jwt && userId) {
-          pushSessionToSidecar(jwt, masterKeyHex, userId);
+          pushSessionToSidecar(jwt, masterKeyHex, userId, credentials.email);
         }
       }
       return result;
@@ -642,6 +643,24 @@ function registerIpcHandlers(): void {
   });
 
   // --- Vault crypto IPC handlers ---
+
+  ipcMain.handle('vault:verifyMasterPassword', (_event, email: string, password: string, expectedMasterKeyHex: string) => {
+    try {
+      if (!email || !password || !expectedMasterKeyHex) {
+        return { verified: false, error: 'Missing parameters' };
+      }
+      const salt = nodeCrypto.createHash('sha256').update(email).digest();
+      const derived = nodeCrypto.pbkdf2Sync(password, salt, 100000, 64, 'sha512');
+      const derivedMasterKeyHex = derived.subarray(0, 32).toString('hex');
+      const verified = nodeCrypto.timingSafeEqual(
+        Buffer.from(derivedMasterKeyHex, 'hex'),
+        Buffer.from(expectedMasterKeyHex, 'hex')
+      );
+      return { verified };
+    } catch {
+      return { verified: false, error: 'Verification failed' };
+    }
+  });
 
   ipcMain.handle('vault:encrypt', (_event, masterKeyHex: string, plaintext: string) => {
     try {
@@ -1259,7 +1278,7 @@ public class SecureClip {
       const jwt = (result.access_token || result.token) as string;
       const userId = result.user_id as string;
       if (jwt && userId && creds.masterKeyHex) {
-        pushSessionToSidecar(jwt, creds.masterKeyHex, userId);
+        pushSessionToSidecar(jwt, creds.masterKeyHex, userId, creds.email);
       }
       return { ...result, email: creds.email, master_key_hex: creds.masterKeyHex ?? '' };
     } catch (err) {

@@ -120,6 +120,12 @@ const api = {
       validateString(token, 'token');
       return ipcRenderer.invoke('vault:importExport', token);
     },
+    verifyMasterPassword: (email: string, password: string, expectedMasterKeyHex: string): Promise<{ verified: boolean; error?: string }> => {
+      validateString(email, 'email');
+      validateString(password, 'password');
+      validateString(expectedMasterKeyHex, 'expectedMasterKeyHex');
+      return ipcRenderer.invoke('vault:verifyMasterPassword', email, password, expectedMasterKeyHex);
+    },
   },
 
   biometric: {
