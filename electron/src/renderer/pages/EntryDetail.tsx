@@ -2,9 +2,19 @@ import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { PasswordGenerator } from '../components/PasswordGenerator';
 import { ENTRY_TYPE_ICONS, ENTRY_TYPE_LABELS } from '../types/vault';
+import type { LoginURI, PasswordHistoryEntry } from '../types/vault';
 import { useVaultStore } from '../store/vaultStore';
 import { useAuthStore } from '../store/authStore';
 import { generateTOTP, getTimeRemaining } from '../utils/totp';
+
+const MATCH_MODES: { value: LoginURI['match']; label: string }[] = [
+  { value: 'base_domain', label: 'Base domain' },
+  { value: 'host', label: 'Host' },
+  { value: 'starts_with', label: 'Starts with' },
+  { value: 'regex', label: 'Regex' },
+  { value: 'exact', label: 'Exact' },
+  { value: 'never', label: 'Never' },
+];
 
 const FIELD_LABELS: Record<string, string> = {
   name: 'Name', username: 'Username', password: 'Password', uri: 'Website',
@@ -131,10 +141,20 @@ export function EntryDetail() {
   const [revealedFields, setRevealedFields] = useState<Set<string>>(new Set());
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [confirmPermanent, setConfirmPermanent] = useState(false);
+  const [showPasswordHistory, setShowPasswordHistory] = useState(false);
+  const [revealedHistoryPasswords, setRevealedHistoryPasswords] = useState<Set<number>>(new Set());
 
   const vaultEntry = id ? entries.find((e) => e.id === id) : null;
   const fields = id ? entryFields[id] : null;
   const isTrash = vaultEntry?.deleted_at != null;
+
+  // Parse structured data from fields (password history, URIs)
+  const passwordHistory: PasswordHistoryEntry[] = fields ? (() => {
+    try { return JSON.parse(fields._passwordHistory || '[]'); } catch { return []; }
+  })() : [];
+  const uris: LoginURI[] = fields ? (() => {
+    try { return JSON.parse(fields._uris || '[]'); } catch { return []; }
+  })() : [];
 
   if (!vaultEntry || !fields) {
     return (
@@ -157,6 +177,11 @@ export function EntryDetail() {
     }
     return base;
   });
+
+  // URIs state for editing (login entries only)
+  const [editURIs, setEditURIs] = useState<LoginURI[]>(() =>
+    uris.length > 0 ? uris : (fields.uri ? [{ uri: fields.uri, match: 'base_domain' }] : [{ uri: '', match: 'base_domain' }])
+  );
 
   // Fixed field display order: use the type-specific order, then any remaining keys
   const typeOrder = FIELD_ORDER[entryType] ?? [];
@@ -184,8 +209,43 @@ export function EntryDetail() {
       if (v || k === 'name') cleanFields[k] = v;
     }
 
-    // Encrypt the updated fields
-    const plaintext = JSON.stringify(cleanFields);
+    // Password history: if password changed on a login entry, add old one to history
+    if (entryType === 'login' && fields.password && cleanFields.password !== fields.password) {
+      const history: PasswordHistoryEntry[] = [...passwordHistory];
+      history.unshift({ password: fields.password, date: new Date().toISOString() });
+      // Keep max 10 entries
+      cleanFields._passwordHistory = JSON.stringify(history.slice(0, 10));
+    } else if (passwordHistory.length > 0) {
+      cleanFields._passwordHistory = JSON.stringify(passwordHistory);
+    }
+
+    // Multiple URIs: save the array for login entries
+    if (entryType === 'login') {
+      const validURIs = editURIs.filter(u => u.uri.trim());
+      if (validURIs.length > 0) {
+        cleanFields._uris = JSON.stringify(validURIs);
+        // Keep legacy uri field as primary for backward compatibility
+        cleanFields.uri = validURIs[0].uri;
+      }
+      // Also persist the uris array as top-level "uris" in the JSON for server-side matching
+      if (validURIs.length > 0) {
+        cleanFields._uris = JSON.stringify(validURIs);
+      }
+    }
+
+    // Rebuild the full plaintext object including structured fields
+    const plaintextObj: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(cleanFields)) {
+      if (k === '_passwordHistory') {
+        plaintextObj.passwordHistory = JSON.parse(v);
+      } else if (k === '_uris') {
+        plaintextObj.uris = JSON.parse(v);
+      } else {
+        plaintextObj[k] = v;
+      }
+    }
+
+    const plaintext = JSON.stringify(plaintextObj);
     const encResult = await window.api.vault.encrypt(masterKeyHex, plaintext);
     if (encResult.error) return;
 
@@ -215,6 +275,7 @@ export function EntryDetail() {
       if (!(key in base)) base[key] = '';
     }
     setEditFields(base);
+    setEditURIs(uris.length > 0 ? uris : (fields.uri ? [{ uri: fields.uri, match: 'base_domain' }] : [{ uri: '', match: 'base_domain' }]));
     setEditing(false);
   };
 
@@ -304,8 +365,94 @@ export function EntryDetail() {
       <div className="space-y-1 bg-surface-900/50 rounded-lg p-4">
         {fieldOrder.map((key) => {
           if (key === 'name') return null;
+          // Skip internal metadata fields
+          if (key.startsWith('_')) return null;
           // In view mode, skip rendering the raw totp field — we show TOTPDisplay instead
           if (key === 'totp' && !editing && fields[key]) return null;
+
+          // For login entries, render multi-URI section instead of single uri field
+          if (key === 'uri' && entryType === 'login') {
+            const displayURIs = uris.length > 0 ? uris : (fields.uri ? [{ uri: fields.uri, match: 'base_domain' as const }] : []);
+            return (
+              <div key="uris" className="py-2.5 border-b border-surface-800">
+                <div className="flex items-center gap-3 mb-2">
+                  <span className="text-xs text-surface-500 w-24 shrink-0">Websites</span>
+                  {editing && (
+                    <button
+                      onClick={() => setEditURIs([...editURIs, { uri: '', match: 'base_domain' }])}
+                      className="text-xs text-accent-400 hover:text-accent-300 transition-colors"
+                    >
+                      + Add URI
+                    </button>
+                  )}
+                </div>
+                {editing ? (
+                  <div className="space-y-2 ml-[108px]">
+                    {editURIs.map((u, idx) => (
+                      <div key={idx} className="flex items-center gap-2">
+                        <input
+                          type="text"
+                          value={u.uri}
+                          onChange={(e) => {
+                            const next = [...editURIs];
+                            next[idx] = { ...next[idx], uri: e.target.value };
+                            setEditURIs(next);
+                          }}
+                          placeholder="https://example.com"
+                          className="flex-1 px-2 py-1 rounded bg-surface-800 border border-surface-600 text-surface-100 text-sm focus:outline-none focus:ring-2 focus:ring-accent-500"
+                        />
+                        <select
+                          value={u.match || 'base_domain'}
+                          onChange={(e) => {
+                            const next = [...editURIs];
+                            next[idx] = { ...next[idx], match: e.target.value as LoginURI['match'] };
+                            setEditURIs(next);
+                          }}
+                          className="px-2 py-1 rounded bg-surface-800 border border-surface-600 text-surface-300 text-xs focus:outline-none focus:ring-2 focus:ring-accent-500"
+                        >
+                          {MATCH_MODES.map((m) => (
+                            <option key={m.value} value={m.value}>{m.label}</option>
+                          ))}
+                        </select>
+                        {editURIs.length > 1 && (
+                          <button
+                            onClick={() => setEditURIs(editURIs.filter((_, i) => i !== idx))}
+                            className="text-xs text-red-400 hover:text-red-300 transition-colors px-1"
+                          >
+                            ✕
+                          </button>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                ) : displayURIs.length > 0 ? (
+                  <div className="space-y-1 ml-[108px]">
+                    {displayURIs.map((u, idx) => (
+                      <div key={idx} className="flex items-center gap-2">
+                        <span className="flex-1 text-sm text-accent-400 break-all">{u.uri}</span>
+                        {u.match && u.match !== 'base_domain' && (
+                          <span className="text-[10px] text-surface-600 bg-surface-800 px-1.5 py-0.5 rounded">
+                            {MATCH_MODES.find(m => m.value === u.match)?.label ?? u.match}
+                          </span>
+                        )}
+                        <CopyButton value={u.uri} />
+                        <button
+                          onClick={() => window.api.openExternal(u.uri.startsWith('http') ? u.uri : `https://${u.uri}`)}
+                          className="text-xs text-surface-500 hover:text-accent-400 transition-colors"
+                          title="Open in browser"
+                        >
+                          ↗
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <span className="text-sm text-surface-500 ml-[108px]">—</span>
+                )}
+              </div>
+            );
+          }
+
           const isSensitive = SENSITIVE_FIELDS.has(key);
           const revealed = revealedFields.has(key);
           const value = editing ? editFields[key] : fields[key];
@@ -334,8 +481,6 @@ export function EntryDetail() {
                     className="flex-1 px-2 py-1 rounded bg-surface-800 border border-surface-600 text-surface-100 text-sm focus:outline-none focus:ring-2 focus:ring-accent-500"
                   />
                 )
-              ) : key === 'uri' ? (
-                <span className="flex-1 text-sm text-accent-400 break-all">{value}</span>
               ) : key === 'notes' || key === 'content' ? (
                 <p className="flex-1 text-sm text-surface-300 whitespace-pre-wrap break-all">{displayValue}</p>
               ) : (
@@ -359,6 +504,45 @@ export function EntryDetail() {
         {/* Live TOTP code — shown when the entry has a totp secret and not editing */}
         {!editing && fields.totp && <TOTPDisplay secret={fields.totp} />}
       </div>
+
+      {/* Password History (for login entries, view mode only) */}
+      {entryType === 'login' && !editing && passwordHistory.length > 0 && (
+        <div className="mt-4">
+          <button
+            onClick={() => setShowPasswordHistory(!showPasswordHistory)}
+            className="text-xs text-surface-500 hover:text-surface-300 transition-colors flex items-center gap-1"
+          >
+            <span className="text-[10px]">{showPasswordHistory ? '▼' : '▶'}</span>
+            Password History ({passwordHistory.length})
+          </button>
+          {showPasswordHistory && (
+            <div className="mt-2 space-y-1 bg-surface-900/50 rounded-lg p-3">
+              {passwordHistory.map((entry, idx) => (
+                <div key={idx} className="flex items-center gap-3 py-1.5 border-b border-surface-800 last:border-0">
+                  <span className="text-xs text-surface-500 w-32 shrink-0">
+                    {new Date(entry.date).toLocaleDateString()} {new Date(entry.date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                  </span>
+                  <span className="flex-1 text-sm text-surface-300 font-mono">
+                    {revealedHistoryPasswords.has(idx) ? entry.password : '•'.repeat(Math.min(entry.password.length, 20))}
+                  </span>
+                  <button
+                    onClick={() => {
+                      const next = new Set(revealedHistoryPasswords);
+                      if (next.has(idx)) next.delete(idx); else next.add(idx);
+                      setRevealedHistoryPasswords(next);
+                    }}
+                    className="text-xs text-surface-500 hover:text-surface-300 transition-colors"
+                    title={revealedHistoryPasswords.has(idx) ? 'Hide' : 'Show'}
+                  >
+                    {revealedHistoryPasswords.has(idx) ? 'Hide' : 'Show'}
+                  </button>
+                  <CopyButton value={entry.password} sensitive />
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Password generator (for login entries in edit mode) */}
       {entryType === 'login' && editing && (

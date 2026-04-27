@@ -278,6 +278,31 @@ func (s *Service) ListFolders(ctx context.Context, userID string) ([]FolderRespo
 	return out, nil
 }
 
+// CloneEntry duplicates a vault entry with version=1 and a new ID.
+// The encrypted data is copied as-is — the client is responsible for
+// decrypting, modifying the name (e.g. "Copy of …"), re-encrypting,
+// and updating the clone via UpdateEntry.
+func (s *Service) CloneEntry(ctx context.Context, userID, entryID string) (EntryResponse, error) {
+	existing, err := s.vaultRepo.GetEntry(ctx, entryID, userID)
+	if err != nil {
+		return EntryResponse{}, err
+	}
+
+	clone := db.VaultEntry{
+		UserID:        userID,
+		EntryType:     existing.EntryType,
+		EncryptedData: existing.EncryptedData,
+		Nonce:         existing.Nonce,
+		FolderID:      existing.FolderID,
+	}
+
+	created, err := s.vaultRepo.CreateEntry(ctx, clone)
+	if err != nil {
+		return EntryResponse{}, fmt.Errorf("clone entry: %w", err)
+	}
+	return toEntryResponse(created), nil
+}
+
 // DeleteFolder removes a folder.
 func (s *Service) DeleteFolder(ctx context.Context, userID, folderID string) error {
 	return s.vaultRepo.DeleteFolder(ctx, folderID, userID)

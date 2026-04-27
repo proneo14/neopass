@@ -356,6 +356,30 @@ func (h *VaultHandler) ListFolders(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, folders)
 }
 
+// CloneEntry handles POST /api/v1/vault/entries/{id}/clone
+func (h *VaultHandler) CloneEntry(w http.ResponseWriter, r *http.Request) {
+	claims := GetClaims(r.Context())
+	if claims == nil {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
+	entryID := chi.URLParam(r, "id")
+	if entryID == "" {
+		writeError(w, http.StatusBadRequest, "missing entry id")
+		return
+	}
+
+	clone, err := h.vaultService.CloneEntry(r.Context(), claims.UserID, entryID)
+	if err != nil {
+		log.Error().Err(err).Msg("clone vault entry failed")
+		writeError(w, http.StatusNotFound, "entry not found")
+		return
+	}
+
+	writeJSON(w, http.StatusCreated, clone)
+}
+
 // DeleteFolder handles DELETE /api/v1/vault/folders/{id}
 func (h *VaultHandler) DeleteFolder(w http.ResponseWriter, r *http.Request) {
 	claims := GetClaims(r.Context())

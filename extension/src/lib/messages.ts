@@ -172,6 +172,11 @@ export type ExtensionMessage =
   | PasskeyListMessage
   | PasskeyResponseMessage;
 
+export interface CredentialURI {
+  uri: string;
+  match?: 'base_domain' | 'host' | 'starts_with' | 'regex' | 'exact' | 'never';
+}
+
 export interface Credential {
   id: string;
   username: string;
@@ -179,6 +184,7 @@ export interface Credential {
   domain: string;
   name: string;
   uri: string;
+  uris?: CredentialURI[];
   notes: string;
   matched: boolean;
   is_favorite: boolean;

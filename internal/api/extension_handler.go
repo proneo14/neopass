@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"net/http"
+	"regexp"
 	"strings"
 	"sync"
 
@@ -36,15 +37,21 @@ type extensionSession struct {
 }
 
 type extensionCredential struct {
-	ID         string `json:"id"`
-	Username   string `json:"username"`
-	Password   string `json:"password"`
-	Domain     string `json:"domain"`
-	Name       string `json:"name"`
-	URI        string `json:"uri"`
-	Notes      string `json:"notes"`
-	Matched    bool   `json:"matched"`
-	IsFavorite bool   `json:"is_favorite"`
+	ID         string              `json:"id"`
+	Username   string              `json:"username"`
+	Password   string              `json:"password"`
+	Domain     string              `json:"domain"`
+	Name       string              `json:"name"`
+	URI        string              `json:"uri"`
+	URIs       []extensionURI      `json:"uris,omitempty"`
+	Notes      string              `json:"notes"`
+	Matched    bool                `json:"matched"`
+	IsFavorite bool                `json:"is_favorite"`
+}
+
+type extensionURI struct {
+	URI   string `json:"uri"`
+	Match string `json:"match,omitempty"`
 }
 
 func NewExtensionHandler(vaultRepo db.VaultRepository, secret string, webauthn *auth.WebAuthnService) *ExtensionHandler {
@@ -189,7 +196,11 @@ func (h *ExtensionHandler) GetCredentials(w http.ResponseWriter, r *http.Request
 			Username string `json:"username"`
 			Password string `json:"password"`
 			URI      string `json:"uri"`
-			Notes    string `json:"notes"`
+			URIs     []struct {
+				URI   string `json:"uri"`
+				Match string `json:"match,omitempty"` // base_domain, host, starts_with, regex, exact, never
+			} `json:"uris"`
+			Notes string `json:"notes"`
 		}
 		if err := json.Unmarshal(plaintext, &loginData); err != nil {
 			log.Debug().Err(err).Str("entry_id", entry.ID).Msg("[extension] unmarshal failed")
@@ -197,8 +208,40 @@ func (h *ExtensionHandler) GetCredentials(w http.ResponseWriter, r *http.Request
 		}
 		crypto.ZeroBytes(plaintext)
 
-		matched := domain != "" && domainMatches(loginData.URI, domain)
-		entryDomain := extractDomainFromURI(loginData.URI)
+		// Build the primary URI for display
+		primaryURI := loginData.URI
+		if len(loginData.URIs) > 0 {
+			primaryURI = loginData.URIs[0].URI
+		}
+
+		// Domain matching: check legacy uri field and uris array
+		matched := false
+		if domain != "" {
+			if len(loginData.URIs) > 0 {
+				for _, u := range loginData.URIs {
+					mode := u.Match
+					if mode == "" {
+						mode = "base_domain"
+					}
+					if mode == "never" {
+						continue
+					}
+					if uriMatchesMode(u.URI, domain, mode) {
+						matched = true
+						break
+					}
+				}
+			} else {
+				matched = domainMatches(loginData.URI, domain)
+			}
+		}
+		entryDomain := extractDomainFromURI(primaryURI)
+
+		// Convert uris to extension format
+		var extURIs []extensionURI
+		for _, u := range loginData.URIs {
+			extURIs = append(extURIs, extensionURI{URI: u.URI, Match: u.Match})
+		}
 
 		results = append(results, extensionCredential{
 			ID:         entry.ID,
@@ -206,7 +249,8 @@ func (h *ExtensionHandler) GetCredentials(w http.ResponseWriter, r *http.Request
 			Password:   loginData.Password,
 			Domain:     entryDomain,
 			Name:       loginData.Name,
-			URI:        loginData.URI,
+			URI:        primaryURI,
+			URIs:       extURIs,
 			Notes:      loginData.Notes,
 			Matched:    matched,
 			IsFavorite: entry.IsFavorite,
@@ -448,6 +492,36 @@ func domainMatches(uri, domain string) bool {
 
 	// Exact match or subdomain match
 	return uri == domain || strings.HasSuffix(uri, "."+domain)
+}
+
+// uriMatchesMode checks if a URI matches the given domain using the specified match mode.
+func uriMatchesMode(uri, domain, mode string) bool {
+	if uri == "" || domain == "" {
+		return false
+	}
+	switch mode {
+	case "base_domain":
+		return domainMatches(uri, domain)
+	case "host":
+		host := extractDomainFromURI(uri)
+		return strings.EqualFold(host, domain)
+	case "starts_with":
+		return strings.HasPrefix(strings.ToLower(uri), "https://"+strings.ToLower(domain)) ||
+			strings.HasPrefix(strings.ToLower(uri), "http://"+strings.ToLower(domain))
+	case "regex":
+		// Compile the URI as a regex pattern and test against the full URL
+		re, err := regexp.Compile(uri)
+		if err != nil {
+			return false
+		}
+		return re.MatchString("https://" + domain)
+	case "exact":
+		return strings.EqualFold(uri, "https://"+domain) || strings.EqualFold(uri, "http://"+domain)
+	case "never":
+		return false
+	default:
+		return domainMatches(uri, domain)
+	}
 }
 
 // extractDomainFromURI pulls the hostname from a URI string.

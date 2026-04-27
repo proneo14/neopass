@@ -18,12 +18,24 @@ export interface Folder {
   parent_id: string | null;
 }
 
+export interface LoginURI {
+  uri: string;
+  match?: 'base_domain' | 'host' | 'starts_with' | 'regex' | 'exact' | 'never';
+}
+
+export interface PasswordHistoryEntry {
+  password: string;
+  date: string; // ISO 8601
+}
+
 export interface LoginData {
   name: string;
   username: string;
   password: string;
   uri: string;
+  uris?: LoginURI[];
   notes: string;
+  passwordHistory?: PasswordHistoryEntry[];
 }
 
 export interface SecureNoteData {

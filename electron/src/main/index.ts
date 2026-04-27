@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, Menu, session, dialog, clipboard } from 'electron';
+import { app, BrowserWindow, ipcMain, Menu, session, dialog, clipboard, shell } from 'electron';
 import path from 'path';
 import fs from 'fs';
 import http from 'http';
@@ -307,9 +307,13 @@ function createWindow(): void {
     }
   });
 
-  // Block new window creation
+  // Block new window creation — open external URLs in the default browser
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
-    console.warn(`[security] blocked window.open to: ${url}`);
+    if (url.startsWith('https://') || url.startsWith('http://')) {
+      shell.openExternal(url);
+    } else {
+      console.warn(`[security] blocked window.open to: ${url}`);
+    }
     return { action: 'deny' };
   });
 
@@ -344,6 +348,12 @@ function createWindow(): void {
 function registerIpcHandlers(): void {
   ipcMain.handle('app:getSidecarPort', () => {
     return sidecarPort;
+  });
+
+  ipcMain.handle('app:openExternal', async (_event, url: string) => {
+    if (typeof url === 'string' && (url.startsWith('https://') || url.startsWith('http://'))) {
+      await shell.openExternal(url);
+    }
   });
 
   ipcMain.handle('auth:login', async (_event, credentials: { email: string; authHash: string }) => {
@@ -553,6 +563,20 @@ function registerIpcHandlers(): void {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({ is_favorite: isFavorite }),
+      });
+      return await res.json();
+    } catch {
+      return { error: 'Failed to connect to backend' };
+    }
+  });
+
+  ipcMain.handle('vault:clone', async (_event, token: string, entryId: string) => {
+    const api = getApiBase();
+    if (!api) return { error: 'Backend not available' };
+    try {
+      const res = await fetch(`${api}/api/v1/vault/entries/${encodeURIComponent(entryId)}/clone`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
       });
       return await res.json();
     } catch {

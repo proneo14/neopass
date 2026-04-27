@@ -25,6 +25,7 @@ function ContextMenu({
   isTrash,
   onRestore,
   onPermanentDelete,
+  onClone,
 }: {
   x: number;
   y: number;
@@ -42,17 +43,39 @@ function ContextMenu({
   isTrash: boolean;
   onRestore: () => void;
   onPermanentDelete: () => void;
+  onClone: () => void;
 }) {
+  const menuRef = React.useRef<HTMLDivElement>(null);
+  const [pos, setPos] = React.useState({ left: x, top: y });
+
   React.useEffect(() => {
     const handler = () => onClose();
     window.addEventListener('click', handler);
     return () => window.removeEventListener('click', handler);
   }, [onClose]);
 
+  React.useEffect(() => {
+    const el = menuRef.current;
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    let newTop = y;
+    let newLeft = x;
+    if (y + rect.height > window.innerHeight) {
+      newTop = Math.max(0, y - rect.height);
+    }
+    if (x + rect.width > window.innerWidth) {
+      newLeft = Math.max(0, x - rect.width);
+    }
+    if (newTop !== pos.top || newLeft !== pos.left) {
+      setPos({ left: newLeft, top: newTop });
+    }
+  }, [x, y]);
+
   return (
     <div
+      ref={menuRef}
       className="fixed bg-surface-800 border border-surface-600 rounded-md shadow-xl py-1 z-50 min-w-[160px]"
-      style={{ left: x, top: y }}
+      style={{ left: pos.left, top: pos.top }}
     >
       {isTrash ? (
         <>
@@ -90,6 +113,9 @@ function ContextMenu({
           )}
           <button onClick={onEdit} className="w-full text-left px-3 py-1.5 text-sm text-surface-200 hover:bg-surface-700 transition-colors">
             Edit
+          </button>
+          <button onClick={onClone} className="w-full text-left px-3 py-1.5 text-sm text-surface-200 hover:bg-surface-700 transition-colors">
+            Clone
           </button>
           <button onClick={onDelete} className="w-full text-left px-3 py-1.5 text-sm text-red-400 hover:bg-surface-700 transition-colors">
             Delete
@@ -307,7 +333,18 @@ export function Vault() {
           if (decResult.error || !decResult.plaintext) continue;
 
           try {
-            const fields = JSON.parse(decResult.plaintext) as Record<string, string>;
+            const parsed = JSON.parse(decResult.plaintext) as Record<string, unknown>;
+            // Extract structured data into prefixed string fields
+            const fields: Record<string, string> = {};
+            for (const [k, v] of Object.entries(parsed)) {
+              if (k === 'passwordHistory') {
+                fields._passwordHistory = JSON.stringify(v);
+              } else if (k === 'uris') {
+                fields._uris = JSON.stringify(v);
+              } else {
+                fields[k] = String(v ?? '');
+              }
+            }
             loadedEntries.push({
               id: detail.id,
               entry_type: detail.entry_type as VaultEntry['entry_type'],
@@ -385,8 +422,13 @@ export function Vault() {
   const handleSaveNewEntry = async (type: string, fields: Record<string, string>) => {
     if (!token || !masterKeyHex) return;
 
-    // Encrypt the fields
-    const plaintext = JSON.stringify(fields);
+    // Build the plaintext object, converting uri to uris array for login entries
+    const plaintextObj: Record<string, unknown> = { ...fields };
+    if (type === 'login' && fields.uri) {
+      plaintextObj.uris = [{ uri: fields.uri, match: 'base_domain' }];
+    }
+
+    const plaintext = JSON.stringify(plaintextObj);
     const encResult = await window.api.vault.encrypt(masterKeyHex, plaintext);
     if (encResult.error) return;
 
@@ -609,6 +651,76 @@ export function Vault() {
           }}
           onEdit={() => {
             navigate(`/vault/${contextMenu.entryId}`, { state: { edit: true } });
+            setContextMenu(null);
+          }}
+          onClone={async () => {
+            if (token && masterKeyHex) {
+              try {
+                const cloneResult = await window.api.vault.clone(token, contextMenu.entryId) as { id: string; entry_type: string; encrypted_data: string; nonce: string; version: number; folder_id: string | null; created_at: string; updated_at: string; error?: string };
+                if (cloneResult.error || !cloneResult.id) {
+                  console.error('[clone] clone API failed:', cloneResult.error);
+                  setContextMenu(null);
+                  return;
+                }
+                // Decrypt, modify name, re-encrypt, update
+                const decResult = await window.api.vault.decrypt(masterKeyHex, cloneResult.encrypted_data, cloneResult.nonce);
+                if (decResult.error || !decResult.plaintext) {
+                  console.error('[clone] decrypt failed:', decResult.error);
+                  setContextMenu(null);
+                  return;
+                }
+                const parsed = JSON.parse(decResult.plaintext);
+                parsed.name = `Copy of ${parsed.name || 'Untitled'}`;
+                delete parsed.passwordHistory;
+                const newPlaintext = JSON.stringify(parsed);
+                const encResult = await window.api.vault.encrypt(masterKeyHex, newPlaintext);
+                if (encResult.error) {
+                  console.error('[clone] encrypt failed:', encResult.error);
+                  setContextMenu(null);
+                  return;
+                }
+                const updateResult = await window.api.vault.update(token, cloneResult.id, {
+                  entry_type: cloneResult.entry_type,
+                  encrypted_data: encResult.encrypted_data,
+                  nonce: encResult.nonce,
+                }) as { version: number; updated_at: string; error?: string };
+                if (updateResult.error) {
+                  console.error('[clone] update failed:', updateResult.error);
+                }
+                // Build the decrypted fields for the store
+                const cloneFields: Record<string, string> = {};
+                for (const [k, v] of Object.entries(parsed)) {
+                  if (k === 'uris') {
+                    cloneFields._uris = JSON.stringify(v);
+                    if (Array.isArray(v) && v.length > 0) cloneFields.uri = (v as { uri: string }[])[0].uri;
+                  } else if (k === 'passwordHistory') {
+                    cloneFields._passwordHistory = JSON.stringify(v);
+                  } else if (typeof v === 'string') {
+                    cloneFields[k] = v;
+                  } else {
+                    cloneFields[k] = JSON.stringify(v);
+                  }
+                }
+                // Add cloned entry to the vault store so EntryDetail can find it
+                const clonedEntry: VaultEntry = {
+                  id: cloneResult.id,
+                  entry_type: cloneResult.entry_type as VaultEntry['entry_type'],
+                  encrypted_data: encResult.encrypted_data,
+                  nonce: encResult.nonce,
+                  version: updateResult.version ?? cloneResult.version,
+                  folder_id: cloneResult.folder_id ?? null,
+                  is_favorite: false,
+                  is_archived: false,
+                  deleted_at: null,
+                  created_at: cloneResult.created_at,
+                  updated_at: updateResult.updated_at ?? cloneResult.updated_at,
+                };
+                addEntry(clonedEntry, cloneFields);
+                navigate(`/vault/${cloneResult.id}`, { state: { edit: true } });
+              } catch (err) {
+                console.error('[clone] unexpected error:', err);
+              }
+            }
             setContextMenu(null);
           }}
           onDelete={async () => {

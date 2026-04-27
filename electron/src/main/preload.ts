@@ -98,6 +98,11 @@ const api = {
       validateString(token, 'token');
       return ipcRenderer.invoke('vault:purgeTrash', token);
     },
+    clone: (token: string, entryId: string): Promise<unknown> => {
+      validateString(token, 'token');
+      validateString(entryId, 'entryId');
+      return ipcRenderer.invoke('vault:clone', token, entryId);
+    },
     encrypt: (masterKeyHex: string, plaintext: string): Promise<{ encrypted_data: string; nonce: string; error?: string }> => {
       validateString(masterKeyHex, 'masterKeyHex');
       validateString(plaintext, 'plaintext');
@@ -338,6 +343,11 @@ const api = {
       validateString(databaseUrl, 'databaseUrl');
       return ipcRenderer.invoke('storage:migrateToPostgres', databaseUrl);
     },
+  },
+
+  openExternal: (url: string): Promise<void> => {
+    validateString(url, 'url');
+    return ipcRenderer.invoke('app:openExternal', url);
   },
 } as const;
 
