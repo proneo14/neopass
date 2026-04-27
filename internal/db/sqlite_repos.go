@@ -1137,3 +1137,136 @@ func nullableString(data json.RawMessage) *string {
 	s := string(data)
 	return &s
 }
+
+// ── SQLite Send Repo ─────────────────────────────────────────────────────────
+
+// SQLiteSendRepo implements SendRepository for SQLite.
+type SQLiteSendRepo struct {
+	db *sql.DB
+}
+
+// NewSQLiteSendRepo creates a new SQLiteSendRepo.
+func NewSQLiteSendRepo(db *sql.DB) *SQLiteSendRepo {
+	return &SQLiteSendRepo{db: db}
+}
+
+func (r *SQLiteSendRepo) CreateSend(ctx context.Context, send Send) (Send, error) {
+	id := newUUID()
+	now := nowUTC()
+	expiresStr := send.ExpiresAt.UTC().Format(timeFormat)
+	_, err := r.db.ExecContext(ctx,
+		`INSERT INTO sends (id, user_id, slug, send_type, encrypted_data, nonce, encrypted_name, name_nonce, password_hash, max_access_count, file_name, file_size, expires_at, disabled, hide_email, created_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)`,
+		id, send.UserID, send.Slug, send.SendType, send.EncryptedData, send.Nonce,
+		send.EncryptedName, send.NameNonce, send.PasswordHash, send.MaxAccessCount,
+		send.FileName, send.FileSize, expiresStr, boolToInt(send.HideEmail), now,
+	)
+	if err != nil {
+		return Send{}, fmt.Errorf("create send: %w", err)
+	}
+	send.ID = id
+	send.AccessCount = 0
+	send.Disabled = false
+	send.CreatedAt = parseTime(now)
+	send.HasPassword = len(send.PasswordHash) > 0
+	return send, nil
+}
+
+func (r *SQLiteSendRepo) GetSendBySlug(ctx context.Context, slug string) (Send, error) {
+	var s Send
+	var expiresStr, createdStr string
+	var disabled, hideEmail int
+	err := r.db.QueryRowContext(ctx,
+		`SELECT id, user_id, slug, send_type, encrypted_data, nonce, encrypted_name, name_nonce, password_hash, max_access_count, access_count, file_name, file_size, expires_at, disabled, hide_email, created_at
+		 FROM sends WHERE slug = ?`, slug,
+	).Scan(&s.ID, &s.UserID, &s.Slug, &s.SendType, &s.EncryptedData, &s.Nonce,
+		&s.EncryptedName, &s.NameNonce, &s.PasswordHash, &s.MaxAccessCount, &s.AccessCount,
+		&s.FileName, &s.FileSize, &expiresStr, &disabled, &hideEmail, &createdStr)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return Send{}, fmt.Errorf("send not found")
+		}
+		return Send{}, fmt.Errorf("get send by slug: %w", err)
+	}
+	s.ExpiresAt = parseTime(expiresStr)
+	s.Disabled = disabled != 0
+	s.HideEmail = hideEmail != 0
+	s.CreatedAt = parseTime(createdStr)
+	s.HasPassword = len(s.PasswordHash) > 0
+	return s, nil
+}
+
+func (r *SQLiteSendRepo) ListSends(ctx context.Context, userID string) ([]Send, error) {
+	rows, err := r.db.QueryContext(ctx,
+		`SELECT id, user_id, slug, send_type, encrypted_data, nonce, encrypted_name, name_nonce, password_hash, max_access_count, access_count, file_name, file_size, expires_at, disabled, hide_email, created_at
+		 FROM sends WHERE user_id = ? ORDER BY created_at DESC`, userID)
+	if err != nil {
+		return nil, fmt.Errorf("list sends: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var sends []Send
+	for rows.Next() {
+		var s Send
+		var expiresStr, createdStr string
+		var disabled, hideEmail int
+		if err := rows.Scan(&s.ID, &s.UserID, &s.Slug, &s.SendType, &s.EncryptedData, &s.Nonce,
+			&s.EncryptedName, &s.NameNonce, &s.PasswordHash, &s.MaxAccessCount, &s.AccessCount,
+			&s.FileName, &s.FileSize, &expiresStr, &disabled, &hideEmail, &createdStr); err != nil {
+			return nil, fmt.Errorf("scan send: %w", err)
+		}
+		s.ExpiresAt = parseTime(expiresStr)
+		s.Disabled = disabled != 0
+		s.HideEmail = hideEmail != 0
+		s.CreatedAt = parseTime(createdStr)
+		s.HasPassword = len(s.PasswordHash) > 0
+		sends = append(sends, s)
+	}
+	return sends, rows.Err()
+}
+
+func (r *SQLiteSendRepo) IncrementAccessCount(ctx context.Context, sendID string) error {
+	_, err := r.db.ExecContext(ctx,
+		`UPDATE sends SET access_count = access_count + 1 WHERE id = ?`, sendID)
+	if err != nil {
+		return fmt.Errorf("increment access count: %w", err)
+	}
+	return nil
+}
+
+func (r *SQLiteSendRepo) DeleteSend(ctx context.Context, sendID, userID string) error {
+	res, err := r.db.ExecContext(ctx,
+		`DELETE FROM sends WHERE id = ? AND user_id = ?`, sendID, userID)
+	if err != nil {
+		return fmt.Errorf("delete send: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return fmt.Errorf("send not found")
+	}
+	return nil
+}
+
+func (r *SQLiteSendRepo) DisableSend(ctx context.Context, sendID, userID string) error {
+	res, err := r.db.ExecContext(ctx,
+		`UPDATE sends SET disabled = 1 WHERE id = ? AND user_id = ?`, sendID, userID)
+	if err != nil {
+		return fmt.Errorf("disable send: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return fmt.Errorf("send not found")
+	}
+	return nil
+}
+
+func (r *SQLiteSendRepo) PurgeExpiredSends(ctx context.Context) (int, error) {
+	now := nowUTC()
+	res, err := r.db.ExecContext(ctx,
+		`DELETE FROM sends WHERE expires_at < ?`, now)
+	if err != nil {
+		return 0, fmt.Errorf("purge expired sends: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	return int(n), nil
+}

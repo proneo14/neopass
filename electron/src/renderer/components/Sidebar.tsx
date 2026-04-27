@@ -8,6 +8,7 @@ const navItems = [
   { to: '/vault', label: 'Vault', icon: '🔐' },
   { to: '/passkeys', label: 'Passkeys', icon: '🪪' },
   { to: '/health', label: 'Health', icon: '🛡️' },
+  { to: '/send', label: 'Send', icon: '📤' },
 ];
 
 const adminItems = [

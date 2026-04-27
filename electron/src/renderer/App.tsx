@@ -12,6 +12,7 @@ const Passkeys = lazy(() => import('./pages/Passkeys').then(m => ({ default: m.P
 const Admin = lazy(() => import('./pages/Admin').then(m => ({ default: m.Admin })));
 const Settings = lazy(() => import('./pages/Settings').then(m => ({ default: m.Settings })));
 const HealthReport = lazy(() => import('./pages/HealthReport').then(m => ({ default: m.HealthReport })));
+const Send = lazy(() => import('./pages/Send').then(m => ({ default: m.Send })));
 
 function PageLoader() {
   return <div className="flex items-center justify-center h-full text-slate-400">Loading…</div>;
@@ -39,6 +40,7 @@ export function App() {
           <Route path="/passkeys" element={<Passkeys />} />
           <Route path="/settings" element={<Settings />} />
           <Route path="/health" element={<HealthReport />} />
+          <Route path="/send" element={<Send />} />
           <Route path="/admin" element={<Admin />} />
         </Route>
 

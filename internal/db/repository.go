@@ -101,3 +101,36 @@ type HardwareKeyRepository interface {
 	UpdateHardwareKeySignCount(ctx context.Context, credentialID []byte, count int) error
 	DeleteHardwareKey(ctx context.Context, userID, keyID string) error
 }
+
+// Send represents a Secure Send record.
+type Send struct {
+	ID             string     `json:"id"`
+	UserID         string     `json:"user_id"`
+	Slug           string     `json:"slug"`
+	SendType       string     `json:"send_type"`
+	EncryptedData  []byte     `json:"encrypted_data"`
+	Nonce          []byte     `json:"nonce"`
+	EncryptedName  []byte     `json:"encrypted_name,omitempty"`
+	NameNonce      []byte     `json:"name_nonce,omitempty"`
+	PasswordHash   []byte     `json:"-"`
+	HasPassword    bool       `json:"has_password"`
+	MaxAccessCount *int       `json:"max_access_count,omitempty"`
+	AccessCount    int        `json:"access_count"`
+	FileName       *string    `json:"file_name,omitempty"`
+	FileSize       *int       `json:"file_size,omitempty"`
+	ExpiresAt      time.Time  `json:"expires_at"`
+	Disabled       bool       `json:"disabled"`
+	HideEmail      bool       `json:"hide_email"`
+	CreatedAt      time.Time  `json:"created_at"`
+}
+
+// SendRepository defines the interface for Secure Send database operations.
+type SendRepository interface {
+	CreateSend(ctx context.Context, send Send) (Send, error)
+	GetSendBySlug(ctx context.Context, slug string) (Send, error)
+	ListSends(ctx context.Context, userID string) ([]Send, error)
+	IncrementAccessCount(ctx context.Context, sendID string) error
+	DeleteSend(ctx context.Context, sendID, userID string) error
+	DisableSend(ctx context.Context, sendID, userID string) error
+	PurgeExpiredSends(ctx context.Context) (int, error)
+}

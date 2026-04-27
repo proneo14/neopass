@@ -18,7 +18,7 @@ import (
 // Router sets up all API v1 routes.
 // storageBackend should be "sqlite" or "postgres".
 // sqliteDB is the raw SQLite *sql.DB for migration support (nil when using postgres).
-func Router(authService *auth.Service, totpService *auth.TOTPService, smsService *auth.SMSService, vaultService *vault.Service, adminService *admin.Service, syncService *syncsvc.Service, webauthnService *auth.WebAuthnService, userRepo db.UserRepository, storageBackend string, sqliteDB *sql.DB) chi.Router {
+func Router(authService *auth.Service, totpService *auth.TOTPService, smsService *auth.SMSService, vaultService *vault.Service, adminService *admin.Service, syncService *syncsvc.Service, webauthnService *auth.WebAuthnService, userRepo db.UserRepository, sendRepo db.SendRepository, storageBackend string, sqliteDB *sql.DB) chi.Router {
 	r := chi.NewRouter()
 
 	authHandler := NewAuthHandler(authService)
@@ -30,6 +30,7 @@ func Router(authService *auth.Service, totpService *auth.TOTPService, smsService
 	}
 	syncHandler := NewSyncHandler(syncService)
 	passkeyHandler := NewPasskeyHandler(webauthnService)
+	sendHandler := NewSendHandler(sendRepo, userRepo)
 
 	// Rate limiter for auth endpoints: 5 requests per minute per IP
 	authLimiter := NewRateLimiter(5, 1*time.Minute)
@@ -148,6 +149,22 @@ func Router(authService *auth.Service, totpService *auth.TOTPService, smsService
 			r.Post("/push", syncHandler.Push)
 			r.Post("/resolve", syncHandler.Resolve)
 		})
+
+		// Secure Send routes (authenticated)
+		r.Route("/sends", func(r chi.Router) {
+			r.Post("/", sendHandler.CreateSend)
+			r.Get("/", sendHandler.ListSends)
+			r.Delete("/{id}", sendHandler.DeleteSend)
+			r.Put("/{id}/disable", sendHandler.DisableSend)
+		})
+	})
+
+	// Public send access routes (no authentication required)
+	sendAccessLimiter := NewRateLimiter(10, 1*time.Minute)
+	r.Route("/send/{slug}", func(r chi.Router) {
+		r.Use(sendAccessLimiter.RateLimit)
+		r.Get("/", sendHandler.AccessSend)
+		r.Post("/access", sendHandler.AccessSendWithPassword)
 	})
 
 	return r

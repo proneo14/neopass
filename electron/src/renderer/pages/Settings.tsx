@@ -409,6 +409,10 @@ export function Settings() {
   const [orgError, setOrgError] = useState('');
   const [storageBackend, setStorageBackend] = useState<'sqlite' | 'postgres'>('sqlite');
   const [showOrgSetup, setShowOrgSetup] = useState(false);
+  const [sendDomain, setSendDomain] = useState('');
+  const [sendDomainInput, setSendDomainInput] = useState('');
+  const [sendDomainSaving, setSendDomainSaving] = useState(false);
+  const [sendDomainMsg, setSendDomainMsg] = useState('');
   useEffect(() => {
     (async () => {
       const available = await window.api.biometric.isAvailable();
@@ -421,6 +425,8 @@ export function Settings() {
     })();
     // Fetch storage backend
     window.api.storage.getBackend().then(setStorageBackend).catch(() => {});
+    // Fetch send domain
+    window.api.send.getDomain().then((d) => { setSendDomain(d); setSendDomainInput(d); }).catch(() => {});
     // Fetch security settings (require HW key)
     if (token) {
       window.api.security.getSettings(token)
@@ -989,6 +995,55 @@ export function Settings() {
             >
               Clear Local Cache
             </button>
+          </div>
+        </section>
+
+        {/* Secure Send */}
+        <section>
+          <h2 className="text-xs font-semibold text-surface-500 uppercase tracking-wider mb-3">Secure Send</h2>
+          <div className="space-y-3 bg-surface-800 rounded-lg p-4">
+            <div>
+              <label className="block text-sm font-medium text-surface-300 mb-1">Send Domain (optional)</label>
+              <p className="text-xs text-surface-500 mb-2">
+                Set a public domain to enable link-based sharing with server-side password protection and access tracking.
+                The domain must point to your LGI Pass server.
+              </p>
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={sendDomainInput}
+                  onChange={(e) => { setSendDomainInput(e.target.value); setSendDomainMsg(''); }}
+                  placeholder="e.g. send.example.com"
+                  className="flex-1 px-3 py-2 bg-surface-900 border border-surface-600 rounded-md text-surface-100 placeholder-surface-500 focus:outline-none focus:ring-1 focus:ring-accent-500 text-sm"
+                />
+                <button
+                  disabled={sendDomainSaving}
+                  onClick={async () => {
+                    setSendDomainSaving(true);
+                    setSendDomainMsg('');
+                    try {
+                      let domain = sendDomainInput.trim();
+                      // Strip trailing slash and protocol
+                      domain = domain.replace(/\/+$/, '');
+                      if (domain && !domain.startsWith('http')) domain = 'https://' + domain;
+                      const result = await window.api.send.setDomain(domain);
+                      if (result.error) { setSendDomainMsg(result.error); }
+                      else { setSendDomain(domain); setSendDomainInput(domain); setSendDomainMsg('Saved'); }
+                    } catch { setSendDomainMsg('Failed to save'); }
+                    finally { setSendDomainSaving(false); }
+                  }}
+                  className="px-4 py-2 bg-accent-600 hover:bg-accent-500 text-white text-sm font-medium rounded-md transition-colors disabled:opacity-50"
+                >
+                  {sendDomainSaving ? 'Saving…' : 'Save'}
+                </button>
+              </div>
+              {sendDomainMsg && (
+                <p className={`text-xs mt-1 ${sendDomainMsg === 'Saved' ? 'text-green-400' : 'text-red-400'}`}>{sendDomainMsg}</p>
+              )}
+              {sendDomain && (
+                <p className="text-xs text-green-400/70 mt-1">Link sharing enabled: {sendDomain}</p>
+              )}
+            </div>
           </div>
         </section>
 

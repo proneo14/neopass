@@ -345,6 +345,39 @@ const api = {
     },
   },
 
+  send: {
+    create: (token: string, data: Record<string, unknown>): Promise<unknown> => {
+      validateString(token, 'token');
+      validateObject(data, 'data');
+      return ipcRenderer.invoke('send:create', token, data);
+    },
+    list: (token: string): Promise<unknown> => {
+      validateString(token, 'token');
+      return ipcRenderer.invoke('send:list', token);
+    },
+    delete: (token: string, sendId: string): Promise<unknown> => {
+      validateString(token, 'token');
+      validateString(sendId, 'sendId');
+      return ipcRenderer.invoke('send:delete', token, sendId);
+    },
+    disable: (token: string, sendId: string): Promise<unknown> => {
+      validateString(token, 'token');
+      validateString(sendId, 'sendId');
+      return ipcRenderer.invoke('send:disable', token, sendId);
+    },
+    saveFile: (htmlContent: string, defaultFileName: string): Promise<{ success?: boolean; cancelled?: boolean; path?: string; error?: string }> => {
+      validateString(htmlContent, 'htmlContent');
+      validateString(defaultFileName, 'defaultFileName');
+      return ipcRenderer.invoke('send:saveFile', htmlContent, defaultFileName);
+    },
+    getDomain: (): Promise<string> =>
+      ipcRenderer.invoke('send:getDomain'),
+    setDomain: (domain: string): Promise<{ success?: boolean; error?: string }> => {
+      validateString(domain, 'domain');
+      return ipcRenderer.invoke('send:setDomain', domain);
+    },
+  },
+
   storage: {
     getBackend: (): Promise<'sqlite' | 'postgres'> =>
       ipcRenderer.invoke('storage:getBackend'),

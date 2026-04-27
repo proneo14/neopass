@@ -104,6 +104,7 @@ func main() {
 	var webauthnService *auth.WebAuthnService
 	var vaultRepo db.VaultRepository
 	var userRepo db.UserRepository
+	var sendRepo db.SendRepository
 	var rawSQLiteDB *sql.DB // raw *sql.DB for migration support
 
 	if cfg.StorageBackend == "sqlite" {
@@ -130,6 +131,7 @@ func main() {
 		orgRepo := db.NewSQLiteOrgRepo(sqliteDB.DB)
 		auditRepo := db.NewSQLiteAuditRepo(sqliteDB.DB)
 		syncRepo := db.NewSQLiteSyncRepo(sqliteDB.DB)
+		sendRepo = db.NewSQLiteSendRepo(sqliteDB.DB)
 
 		var authErr error
 		authService, authErr = auth.NewService(userRepo, nil, nil, auth.ServiceConfig{}, vaultRepo, orgRepo)
@@ -158,6 +160,7 @@ func main() {
 		orgRepo := db.NewPgOrgRepo(database.Pool)
 		auditRepo := db.NewPgAuditRepo(database.Pool)
 		syncRepo := db.NewPgSyncRepo(database.Pool)
+		sendRepo = db.NewPgSendRepo(database.Pool)
 		var authErr error
 		authService, authErr = auth.NewService(userRepo, nil, nil, auth.ServiceConfig{}, vaultRepo, orgRepo)
 		if authErr != nil {
@@ -194,9 +197,12 @@ func main() {
 		})
 
 		if authService != nil {
-			r.Mount("/", api.Router(authService, totpService, smsService, vaultService, adminService, syncService, webauthnService, userRepo, cfg.StorageBackend, rawSQLiteDB))
+			r.Mount("/", api.Router(authService, totpService, smsService, vaultService, adminService, syncService, webauthnService, userRepo, sendRepo, cfg.StorageBackend, rawSQLiteDB))
 		}
 	})
+
+	// Public Secure Send receive page (serves HTML for decrypting sends in the browser)
+	r.Get("/send/{slug}", api.ServeSendReceivePage)
 
 	// Extension bridge routes (for native messaging host)
 	if vaultRepo != nil {
@@ -243,6 +249,24 @@ func main() {
 	// Graceful shutdown
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+
+	// Background goroutine: purge expired sends every hour
+	if sendRepo != nil {
+		go func() {
+			sendHandler := api.NewSendHandler(sendRepo, userRepo)
+			sendHandler.PurgeExpiredSends() // run once on startup
+			ticker := time.NewTicker(1 * time.Hour)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-ticker.C:
+					sendHandler.PurgeExpiredSends()
+				case <-ctx.Done():
+					return
+				}
+			}
+		}()
+	}
 
 	go func() {
 		log.Info().Str("addr", addr).Msg("starting server")

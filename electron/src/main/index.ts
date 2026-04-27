@@ -1618,6 +1618,101 @@ transports:r.getTransports?.()??['usb']
     });
   });
 
+  // --- Secure Send IPC handlers ---
+
+  ipcMain.handle('send:create', async (_event, token: string, data: Record<string, unknown>) => {
+    const api = getApiBase();
+    if (!api) return { error: 'Backend not available' };
+    try {
+      const res = await fetch(`${api}/api/v1/sends`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify(data),
+      });
+      return await res.json();
+    } catch { return { error: 'Failed to connect to backend' }; }
+  });
+
+  ipcMain.handle('send:list', async (_event, token: string) => {
+    const api = getApiBase();
+    if (!api) return { error: 'Backend not available' };
+    try {
+      const res = await fetch(`${api}/api/v1/sends`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      return await res.json();
+    } catch { return { error: 'Failed to connect to backend' }; }
+  });
+
+  ipcMain.handle('send:delete', async (_event, token: string, sendId: string) => {
+    const api = getApiBase();
+    if (!api) return { error: 'Backend not available' };
+    try {
+      const res = await fetch(`${api}/api/v1/sends/${encodeURIComponent(sendId)}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      return await res.json();
+    } catch { return { error: 'Failed to connect to backend' }; }
+  });
+
+  ipcMain.handle('send:disable', async (_event, token: string, sendId: string) => {
+    const api = getApiBase();
+    if (!api) return { error: 'Backend not available' };
+    try {
+      const res = await fetch(`${api}/api/v1/sends/${encodeURIComponent(sendId)}/disable`, {
+        method: 'PUT',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      return await res.json();
+    } catch { return { error: 'Failed to connect to backend' }; }
+  });
+
+  ipcMain.handle('send:saveFile', async (_event, htmlContent: string, defaultFileName: string) => {
+    const win = BrowserWindow.getFocusedWindow();
+    const result = await dialog.showSaveDialog(win!, {
+      title: 'Save Secure Send',
+      defaultPath: defaultFileName || `lgipass-send-${new Date().toISOString().slice(0, 10)}.html`,
+      filters: [{ name: 'HTML', extensions: ['html'] }],
+    });
+    if (result.canceled || !result.filePath) return { cancelled: true };
+    try {
+      fs.writeFileSync(result.filePath, htmlContent, 'utf8');
+      return { success: true, path: result.filePath };
+    } catch {
+      return { error: 'Failed to write file' };
+    }
+  });
+
+  // Send domain config IPC handlers
+  ipcMain.handle('send:getDomain', () => {
+    try {
+      const configPath = path.join(getAppDataDir(), 'config.json');
+      if (fs.existsSync(configPath)) {
+        const cfg = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+        return cfg.send_domain || '';
+      }
+    } catch { /* ignore */ }
+    return '';
+  });
+
+  ipcMain.handle('send:setDomain', (_event, domain: string) => {
+    try {
+      const configPath = path.join(getAppDataDir(), 'config.json');
+      let cfg: Record<string, unknown> = {};
+      if (fs.existsSync(configPath)) {
+        try { cfg = JSON.parse(fs.readFileSync(configPath, 'utf-8')); } catch { /* ignore */ }
+      }
+      cfg.send_domain = domain;
+      const configDir = path.dirname(configPath);
+      if (!fs.existsSync(configDir)) fs.mkdirSync(configDir, { recursive: true });
+      fs.writeFileSync(configPath, JSON.stringify(cfg, null, 2), 'utf-8');
+      return { success: true };
+    } catch {
+      return { error: 'Failed to save send domain' };
+    }
+  });
+
   // Storage backend IPC handlers
   ipcMain.handle('storage:getBackend', () => {
     if (backendUrl) return 'postgres';
