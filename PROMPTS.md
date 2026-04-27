@@ -2022,14 +2022,6 @@ Depends on: Prompt 6 (vault), Prompt 10 (UI).
    - Overall health score: large circular progress indicator (0-100%)
    - Color coded: red (<40), orange (40-70), green (>70)
 
-   Summary cards (top row):
-   - 🔴 Exposed Passwords — count of entries found in data breaches (HIBP)
-   - 🟠 Weak Passwords — count of entries with weak passwords
-   - 🟡 Reused Passwords — count of entries sharing passwords
-   - 🔵 Old Passwords — count of entries not updated in 365+ days
-   - 🟢 Missing 2FA — count of entries on TOTP-supporting sites without TOTP
-   - ⚠️ Insecure Sites — count of entries with HTTP-only URIs
-
    Click any card → expand to show the list of affected entries:
    - Entry name, username, domain
    - Severity indicator

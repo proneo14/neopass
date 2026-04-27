@@ -142,7 +142,7 @@ export function EntryDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const location = useLocation();
-  const { entries, entryFields, updateEntryFields, updateEntry, removeEntry, isRepromptApproved, approveReprompt } = useVaultStore();
+  const { entries, entryFields, updateEntryFields, updateEntry, removeEntry, isRepromptApproved, approveReprompt, healthFlags } = useVaultStore();
   const { token, masterKeyHex } = useAuthStore();
   const [editing, setEditing] = useState(!!(location.state as { edit?: boolean } | null)?.edit);
   const [showGenerator, setShowGenerator] = useState(false);
@@ -406,6 +406,41 @@ export function EntryDetail() {
           </div>
         )}
       </div>
+
+      {/* Health warnings */}
+      {id && healthFlags[id] && !editing && (
+        <div className="space-y-2">
+          {healthFlags[id].breached && (
+            <div className="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-red-500/10 border border-red-500/20">
+              <span>🔴</span>
+              <div className="flex-1">
+                <p className="text-sm text-red-400 font-medium">Password exposed in data breach</p>
+                <p className="text-xs text-red-400/70">
+                  Found in {healthFlags[id].breachCount?.toLocaleString()} breaches. Change this password immediately.
+                </p>
+              </div>
+            </div>
+          )}
+          {healthFlags[id].weak && (
+            <div className="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-orange-500/10 border border-orange-500/20">
+              <span>⚠️</span>
+              <p className="text-sm text-orange-400">Weak password — consider using a stronger, generated password</p>
+            </div>
+          )}
+          {healthFlags[id].reused && (
+            <div className="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-orange-500/10 border border-orange-500/20">
+              <span>♻️</span>
+              <p className="text-sm text-orange-400">This password is reused across multiple entries</p>
+            </div>
+          )}
+          {healthFlags[id].insecureUri && (
+            <div className="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-yellow-500/10 border border-yellow-500/20">
+              <span>🔗</span>
+              <p className="text-sm text-yellow-400">This site uses HTTP — your credentials may be sent in plain text</p>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Fields */}
       <div className="space-y-1 bg-surface-900/50 rounded-lg p-4">

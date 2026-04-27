@@ -8,6 +8,16 @@ export interface EntryFields {
 /** TTL in ms for reprompt approvals (5 minutes). */
 const REPROMPT_TTL_MS = 5 * 60 * 1000;
 
+/** Per-entry health indicators cached for the session. */
+export interface EntryHealthFlags {
+  weak?: boolean;
+  reused?: boolean;
+  breached?: boolean;
+  breachCount?: number;
+  old?: boolean;
+  insecureUri?: boolean;
+}
+
 interface VaultState {
   entries: VaultEntry[];
   entryFields: Record<string, EntryFields>; // id -> decrypted field data
@@ -20,6 +30,11 @@ interface VaultState {
 
   /** Cache of entry IDs that have been approved for reprompt bypass, with expiry timestamps. */
   repromptApprovals: Record<string, number>;
+
+  /** Per-entry health flags, populated after vault analysis. */
+  healthFlags: Record<string, EntryHealthFlags>;
+  /** Whether the health analysis has run at least once this session. */
+  healthAnalyzed: boolean;
 
   setEntries: (entries: VaultEntry[]) => void;
   setFolders: (folders: Folder[]) => void;
@@ -39,6 +54,15 @@ interface VaultState {
   isRepromptApproved: (entryId: string) => boolean;
   /** Clear all reprompt approvals (e.g. on lock). */
   clearRepromptApprovals: () => void;
+
+  /** Set health flags for entries after analysis. */
+  setHealthFlags: (flags: Record<string, EntryHealthFlags>) => void;
+  /** Merge additional health flags (e.g. breach results) into existing flags. */
+  mergeHealthFlags: (flags: Record<string, Partial<EntryHealthFlags>>) => void;
+  /** Mark health analysis as complete. */
+  setHealthAnalyzed: (v: boolean) => void;
+  /** Clear health data (e.g. on lock/logout). */
+  clearHealth: () => void;
 }
 
 export const useVaultStore = create<VaultState>((set, get) => ({
@@ -51,6 +75,8 @@ export const useVaultStore = create<VaultState>((set, get) => ({
   selectedTypeFilter: null,
   activeFilter: 'all',
   repromptApprovals: {},
+  healthFlags: {},
+  healthAnalyzed: false,
 
   setEntries: (entries) => set({ entries }),
   setFolders: (folders) => set({ folders }),
@@ -85,4 +111,16 @@ export const useVaultStore = create<VaultState>((set, get) => ({
     return !!expiry && Date.now() < expiry;
   },
   clearRepromptApprovals: () => set({ repromptApprovals: {} }),
+
+  setHealthFlags: (healthFlags) => set({ healthFlags, healthAnalyzed: true }),
+  mergeHealthFlags: (flags) =>
+    set((s) => {
+      const merged = { ...s.healthFlags };
+      for (const [id, partial] of Object.entries(flags)) {
+        merged[id] = { ...merged[id], ...partial };
+      }
+      return { healthFlags: merged };
+    }),
+  setHealthAnalyzed: (healthAnalyzed) => set({ healthAnalyzed }),
+  clearHealth: () => set({ healthFlags: {}, healthAnalyzed: false }),
 }));

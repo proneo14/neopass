@@ -72,6 +72,8 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     saveOrgToStorage(userId, null, null, null);
     // Clear reprompt approvals so protected entries require re-auth after login
     useVaultStore.getState().clearRepromptApprovals();
+    // Clear health analysis data
+    useVaultStore.getState().clearHealth();
     // Notify server to clear extension session
     window.api?.auth?.logout?.().catch(() => {});
     set({ token: null, userId: null, email: null, role: null, masterKeyHex: null, orgId: null, orgName: null, isAuthenticated: false });

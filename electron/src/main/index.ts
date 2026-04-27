@@ -289,7 +289,7 @@ function createWindow(): void {
       responseHeaders: {
         ...details.responseHeaders,
         'Content-Security-Policy': [
-          "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self' http://localhost:* http://127.0.0.1:*",
+          "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self' http://localhost:* http://127.0.0.1:* https://api.pwnedpasswords.com",
         ],
       },
     });
@@ -639,6 +639,27 @@ function registerIpcHandlers(): void {
       return await res.json();
     } catch {
       return { error: 'Failed to connect to backend' };
+    }
+  });
+
+  // --- HIBP password breach check (runs from main process to avoid renderer CORS/CSP issues) ---
+
+  ipcMain.handle('hibp:checkRange', async (_event, hashPrefix: string) => {
+    try {
+      if (!hashPrefix || hashPrefix.length !== 5) {
+        return { error: 'Invalid hash prefix' };
+      }
+      const { net } = require('electron');
+      const resp = await net.fetch(`https://api.pwnedpasswords.com/range/${encodeURIComponent(hashPrefix)}`, {
+        headers: { 'Add-Padding': 'true' },
+      });
+      if (!resp.ok) {
+        return { error: `HIBP API returned ${resp.status}` };
+      }
+      const text = await resp.text();
+      return { data: text };
+    } catch (err: unknown) {
+      return { error: err instanceof Error ? err.message : 'HIBP request failed' };
     }
   });
 

@@ -7,6 +7,7 @@ import { useVaultStore } from '../store/vaultStore';
 const navItems = [
   { to: '/vault', label: 'Vault', icon: '🔐' },
   { to: '/passkeys', label: 'Passkeys', icon: '🪪' },
+  { to: '/health', label: 'Health', icon: '🛡️' },
 ];
 
 const adminItems = [
@@ -20,6 +21,10 @@ export function Sidebar() {
   const refreshNotifications = useNotificationStore((s) => s.refresh);
   const activeFilter = useVaultStore((s) => s.activeFilter);
   const setActiveFilter = useVaultStore((s) => s.setActiveFilter);
+  const healthFlags = useVaultStore((s) => s.healthFlags);
+  const healthIssueCount = Object.values(healthFlags).filter(
+    (f) => f.weak || f.breached || f.reused
+  ).length;
 
   // Fetch notification counts on mount and every 30s
   useEffect(() => {
@@ -67,14 +72,19 @@ export function Sidebar() {
             onClick={() => { if (item.to === '/vault') setActiveFilter('all'); }}
             className={({ isActive }) =>
               `flex items-center gap-3 px-3 py-2 rounded-md text-sm transition-colors ${
-                isActive && activeFilter === 'all'
+                isActive && (item.to !== '/vault' || activeFilter === 'all')
                   ? 'bg-accent-600/20 text-accent-400'
                   : 'text-surface-300 hover:bg-surface-800 hover:text-surface-100'
               }`
             }
           >
             <span>{item.icon}</span>
-            <span>{item.label}</span>
+            <span className="flex-1">{item.label}</span>
+            {item.to === '/health' && healthIssueCount > 0 && (
+              <span className="flex items-center justify-center min-w-[18px] h-[18px] rounded-full bg-orange-500 text-white text-[10px] font-bold px-1">
+                {healthIssueCount}
+              </span>
+            )}
           </NavLink>
         ))}
 

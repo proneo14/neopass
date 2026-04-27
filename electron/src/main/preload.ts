@@ -128,6 +128,13 @@ const api = {
     },
   },
 
+  hibp: {
+    checkRange: (hashPrefix: string): Promise<{ data?: string; error?: string }> => {
+      validateString(hashPrefix, 'hashPrefix');
+      return ipcRenderer.invoke('hibp:checkRange', hashPrefix);
+    },
+  },
+
   biometric: {
     isAvailable: (): Promise<boolean> => ipcRenderer.invoke('biometric:available'),
     isConfigured: (): Promise<boolean> => ipcRenderer.invoke('biometric:configured'),

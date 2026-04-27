@@ -11,6 +11,7 @@ const EntryDetail = lazy(() => import('./pages/EntryDetail').then(m => ({ defaul
 const Passkeys = lazy(() => import('./pages/Passkeys').then(m => ({ default: m.Passkeys })));
 const Admin = lazy(() => import('./pages/Admin').then(m => ({ default: m.Admin })));
 const Settings = lazy(() => import('./pages/Settings').then(m => ({ default: m.Settings })));
+const HealthReport = lazy(() => import('./pages/HealthReport').then(m => ({ default: m.HealthReport })));
 
 function PageLoader() {
   return <div className="flex items-center justify-center h-full text-slate-400">Loading…</div>;
@@ -37,6 +38,7 @@ export function App() {
           <Route path="/vault/:id" element={<EntryDetail />} />
           <Route path="/passkeys" element={<Passkeys />} />
           <Route path="/settings" element={<Settings />} />
+          <Route path="/health" element={<HealthReport />} />
           <Route path="/admin" element={<Admin />} />
         </Route>
 
