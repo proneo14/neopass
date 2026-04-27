@@ -181,6 +181,7 @@ export interface Credential {
   uri: string;
   notes: string;
   matched: boolean;
+  is_favorite: boolean;
 }
 
 /**

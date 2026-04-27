@@ -467,11 +467,13 @@ function registerIpcHandlers(): void {
     }
   });
 
-  ipcMain.handle('vault:list', async (_event, token: string) => {
+  ipcMain.handle('vault:list', async (_event, token: string, filter?: string) => {
     const api = getApiBase();
     if (!api) return { error: 'Backend not available' };
     try {
-      const res = await fetch(`${api}/api/v1/vault/entries`, {
+      let url = `${api}/api/v1/vault/entries`;
+      if (filter) url += `?${filter}`;
+      const res = await fetch(url, {
         headers: { Authorization: `Bearer ${token}` },
       });
       return await res.json();
@@ -535,6 +537,78 @@ function registerIpcHandlers(): void {
     try {
       const res = await fetch(`${api}/api/v1/vault/entries/${encodeURIComponent(entryId)}`, {
         method: 'DELETE',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      return await res.json();
+    } catch {
+      return { error: 'Failed to connect to backend' };
+    }
+  });
+
+  ipcMain.handle('vault:setFavorite', async (_event, token: string, entryId: string, isFavorite: boolean) => {
+    const api = getApiBase();
+    if (!api) return { error: 'Backend not available' };
+    try {
+      const res = await fetch(`${api}/api/v1/vault/entries/${encodeURIComponent(entryId)}/favorite`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ is_favorite: isFavorite }),
+      });
+      return await res.json();
+    } catch {
+      return { error: 'Failed to connect to backend' };
+    }
+  });
+
+  ipcMain.handle('vault:setArchived', async (_event, token: string, entryId: string, isArchived: boolean) => {
+    const api = getApiBase();
+    if (!api) return { error: 'Backend not available' };
+    try {
+      const res = await fetch(`${api}/api/v1/vault/entries/${encodeURIComponent(entryId)}/archive`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ is_archived: isArchived }),
+      });
+      return await res.json();
+    } catch {
+      return { error: 'Failed to connect to backend' };
+    }
+  });
+
+  ipcMain.handle('vault:restore', async (_event, token: string, entryId: string) => {
+    const api = getApiBase();
+    if (!api) return { error: 'Backend not available' };
+    try {
+      const res = await fetch(`${api}/api/v1/vault/entries/${encodeURIComponent(entryId)}/restore`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      return await res.json();
+    } catch {
+      return { error: 'Failed to connect to backend' };
+    }
+  });
+
+  ipcMain.handle('vault:permanentDelete', async (_event, token: string, entryId: string) => {
+    const api = getApiBase();
+    if (!api) return { error: 'Backend not available' };
+    try {
+      const res = await fetch(`${api}/api/v1/vault/entries/${encodeURIComponent(entryId)}/permanent`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      return await res.json();
+    } catch {
+      return { error: 'Failed to connect to backend' };
+    }
+  });
+
+  ipcMain.handle('vault:purgeTrash', async (_event, token: string) => {
+    const api = getApiBase();
+    if (!api) return { error: 'Backend not available' };
+    try {
+      const res = await fetch(`${api}/api/v1/vault/trash/purge`, {
+        method: 'POST',
         headers: { Authorization: `Bearer ${token}` },
       });
       return await res.json();

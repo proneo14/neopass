@@ -153,6 +153,30 @@ func (r *SQLiteUserRepo) SetRequireHWKey(ctx context.Context, userID string, req
 
 // ── SQLite Vault Repo ────────────────────────────────────────────────────────
 
+const sqliteVaultColumns = `id, user_id, org_id, entry_type, encrypted_data, nonce, version, folder_id, is_deleted, is_favorite, is_archived, deleted_at, created_at, updated_at`
+
+func scanSQLiteVaultEntry(row interface{ Scan(dest ...interface{}) error }) (VaultEntry, error) {
+	var e VaultEntry
+	var createdStr, updatedStr string
+	var isDeleted, isFavorite, isArchived int
+	var deletedAtStr sql.NullString
+	err := row.Scan(&e.ID, &e.UserID, &e.OrgID, &e.EntryType, &e.EncryptedData, &e.Nonce,
+		&e.Version, &e.FolderID, &isDeleted, &isFavorite, &isArchived, &deletedAtStr, &createdStr, &updatedStr)
+	if err != nil {
+		return VaultEntry{}, err
+	}
+	e.IsDeleted = isDeleted != 0
+	e.IsFavorite = isFavorite != 0
+	e.IsArchived = isArchived != 0
+	if deletedAtStr.Valid {
+		t := parseTime(deletedAtStr.String)
+		e.DeletedAt = &t
+	}
+	e.CreatedAt = parseTime(createdStr)
+	e.UpdatedAt = parseTime(updatedStr)
+	return e, nil
+}
+
 // SQLiteVaultRepo implements VaultRepository for SQLite.
 type SQLiteVaultRepo struct {
 	db *sql.DB
@@ -169,8 +193,8 @@ func (r *SQLiteVaultRepo) CreateEntry(ctx context.Context, entry VaultEntry) (Va
 	}
 	now := nowUTC()
 	_, err := r.db.ExecContext(ctx,
-		`INSERT INTO vault_entries (id, user_id, org_id, entry_type, encrypted_data, nonce, version, folder_id, is_deleted, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?, 1, ?, 0, ?, ?)`,
+		`INSERT INTO vault_entries (id, user_id, org_id, entry_type, encrypted_data, nonce, version, folder_id, is_deleted, is_favorite, is_archived, deleted_at, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, 1, ?, 0, 0, 0, NULL, ?, ?)`,
 		entry.ID, entry.UserID, entry.OrgID, entry.EntryType, entry.EncryptedData, entry.Nonce, entry.FolderID, now, now,
 	)
 	if err != nil {
@@ -183,30 +207,29 @@ func (r *SQLiteVaultRepo) CreateEntry(ctx context.Context, entry VaultEntry) (Va
 }
 
 func (r *SQLiteVaultRepo) GetEntry(ctx context.Context, entryID, userID string) (VaultEntry, error) {
-	var e VaultEntry
-	var createdStr, updatedStr string
-	var isDeleted int
-	err := r.db.QueryRowContext(ctx,
-		`SELECT id, user_id, org_id, entry_type, encrypted_data, nonce, version, folder_id, is_deleted, created_at, updated_at
-		 FROM vault_entries WHERE id = ? AND user_id = ? AND is_deleted = 0`,
+	e, err := scanSQLiteVaultEntry(r.db.QueryRowContext(ctx,
+		`SELECT `+sqliteVaultColumns+`
+		 FROM vault_entries WHERE id = ? AND user_id = ?`,
 		entryID, userID,
-	).Scan(&e.ID, &e.UserID, &e.OrgID, &e.EntryType, &e.EncryptedData, &e.Nonce,
-		&e.Version, &e.FolderID, &isDeleted, &createdStr, &updatedStr)
+	))
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return VaultEntry{}, fmt.Errorf("vault entry not found")
 		}
 		return VaultEntry{}, fmt.Errorf("get vault entry: %w", err)
 	}
-	e.IsDeleted = isDeleted != 0
-	e.CreatedAt = parseTime(createdStr)
-	e.UpdatedAt = parseTime(updatedStr)
 	return e, nil
 }
 
 func (r *SQLiteVaultRepo) ListEntries(ctx context.Context, userID string, filters VaultFilters) ([]VaultEntry, error) {
-	query := `SELECT id, user_id, org_id, entry_type, encrypted_data, nonce, version, folder_id, is_deleted, created_at, updated_at
-	          FROM vault_entries WHERE user_id = ? AND is_deleted = 0`
+	var baseFilter string
+	if filters.InTrash {
+		baseFilter = " AND is_deleted = 1"
+	} else {
+		baseFilter = " AND is_deleted = 0"
+	}
+	query := `SELECT ` + sqliteVaultColumns + `
+	          FROM vault_entries WHERE user_id = ?` + baseFilter
 	args := []interface{}{userID}
 
 	if filters.EntryType != "" {
@@ -221,6 +244,16 @@ func (r *SQLiteVaultRepo) ListEntries(ctx context.Context, userID string, filter
 		query += " AND updated_at > ?"
 		args = append(args, filters.UpdatedSince.UTC().Format(timeFormat))
 	}
+	if filters.IsFavorite != nil && *filters.IsFavorite {
+		query += " AND is_favorite = 1"
+	}
+	if filters.IsArchived != nil {
+		if *filters.IsArchived {
+			query += " AND is_archived = 1"
+		} else {
+			query += " AND is_archived = 0"
+		}
+	}
 	query += " ORDER BY updated_at DESC"
 
 	rows, err := r.db.QueryContext(ctx, query, args...)
@@ -231,16 +264,10 @@ func (r *SQLiteVaultRepo) ListEntries(ctx context.Context, userID string, filter
 
 	var entries []VaultEntry
 	for rows.Next() {
-		var e VaultEntry
-		var createdStr, updatedStr string
-		var isDeleted int
-		if err := rows.Scan(&e.ID, &e.UserID, &e.OrgID, &e.EntryType, &e.EncryptedData, &e.Nonce,
-			&e.Version, &e.FolderID, &isDeleted, &createdStr, &updatedStr); err != nil {
+		e, err := scanSQLiteVaultEntry(rows)
+		if err != nil {
 			return nil, fmt.Errorf("scan vault entry: %w", err)
 		}
-		e.IsDeleted = isDeleted != 0
-		e.CreatedAt = parseTime(createdStr)
-		e.UpdatedAt = parseTime(updatedStr)
 		entries = append(entries, e)
 	}
 	return entries, rows.Err()
@@ -284,9 +311,10 @@ func (r *SQLiteVaultRepo) UpdateEntryVersioned(ctx context.Context, entry VaultE
 }
 
 func (r *SQLiteVaultRepo) DeleteEntry(ctx context.Context, entryID, userID string) error {
+	now := nowUTC()
 	res, err := r.db.ExecContext(ctx,
-		`UPDATE vault_entries SET is_deleted = 1, version = version + 1 WHERE id = ? AND user_id = ? AND is_deleted = 0`,
-		entryID, userID,
+		`UPDATE vault_entries SET is_deleted = 1, deleted_at = ?, version = version + 1, updated_at = ? WHERE id = ? AND user_id = ? AND is_deleted = 0`,
+		now, now, entryID, userID,
 	)
 	if err != nil {
 		return fmt.Errorf("delete vault entry: %w", err)
@@ -300,7 +328,7 @@ func (r *SQLiteVaultRepo) DeleteEntry(ctx context.Context, entryID, userID strin
 
 func (r *SQLiteVaultRepo) ListEntriesForSync(ctx context.Context, userID string, since time.Time) ([]VaultEntry, error) {
 	rows, err := r.db.QueryContext(ctx,
-		`SELECT id, user_id, org_id, entry_type, encrypted_data, nonce, version, folder_id, is_deleted, created_at, updated_at
+		`SELECT `+sqliteVaultColumns+`
 		 FROM vault_entries WHERE user_id = ? AND updated_at > ? ORDER BY updated_at ASC`,
 		userID, since.UTC().Format(timeFormat),
 	)
@@ -311,39 +339,25 @@ func (r *SQLiteVaultRepo) ListEntriesForSync(ctx context.Context, userID string,
 
 	var entries []VaultEntry
 	for rows.Next() {
-		var e VaultEntry
-		var createdStr, updatedStr string
-		var isDeleted int
-		if err := rows.Scan(&e.ID, &e.UserID, &e.OrgID, &e.EntryType, &e.EncryptedData, &e.Nonce,
-			&e.Version, &e.FolderID, &isDeleted, &createdStr, &updatedStr); err != nil {
+		e, err := scanSQLiteVaultEntry(rows)
+		if err != nil {
 			return nil, fmt.Errorf("scan sync entry: %w", err)
 		}
-		e.IsDeleted = isDeleted != 0
-		e.CreatedAt = parseTime(createdStr)
-		e.UpdatedAt = parseTime(updatedStr)
 		entries = append(entries, e)
 	}
 	return entries, rows.Err()
 }
 
 func (r *SQLiteVaultRepo) GetEntryByID(ctx context.Context, entryID string) (VaultEntry, error) {
-	var e VaultEntry
-	var createdStr, updatedStr string
-	var isDeleted int
-	err := r.db.QueryRowContext(ctx,
-		`SELECT id, user_id, org_id, entry_type, encrypted_data, nonce, version, folder_id, is_deleted, created_at, updated_at
-		 FROM vault_entries WHERE id = ?`, entryID,
-	).Scan(&e.ID, &e.UserID, &e.OrgID, &e.EntryType, &e.EncryptedData, &e.Nonce,
-		&e.Version, &e.FolderID, &isDeleted, &createdStr, &updatedStr)
+	e, err := scanSQLiteVaultEntry(r.db.QueryRowContext(ctx,
+		`SELECT `+sqliteVaultColumns+` FROM vault_entries WHERE id = ?`, entryID,
+	))
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return VaultEntry{}, fmt.Errorf("vault entry not found")
 		}
 		return VaultEntry{}, fmt.Errorf("get entry by id: %w", err)
 	}
-	e.IsDeleted = isDeleted != 0
-	e.CreatedAt = parseTime(createdStr)
-	e.UpdatedAt = parseTime(updatedStr)
 	return e, nil
 }
 
@@ -390,6 +404,81 @@ func (r *SQLiteVaultRepo) DeleteFolder(ctx context.Context, folderID, userID str
 		return fmt.Errorf("folder not found")
 	}
 	return nil
+}
+
+func (r *SQLiteVaultRepo) SetFavorite(ctx context.Context, entryID, userID string, favorite bool) error {
+	now := nowUTC()
+	res, err := r.db.ExecContext(ctx,
+		`UPDATE vault_entries SET is_favorite = ?, updated_at = ? WHERE id = ? AND user_id = ? AND is_deleted = 0`,
+		boolToInt(favorite), now, entryID, userID,
+	)
+	if err != nil {
+		return fmt.Errorf("set favorite: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return fmt.Errorf("vault entry not found")
+	}
+	return nil
+}
+
+func (r *SQLiteVaultRepo) SetArchived(ctx context.Context, entryID, userID string, archived bool) error {
+	now := nowUTC()
+	res, err := r.db.ExecContext(ctx,
+		`UPDATE vault_entries SET is_archived = ?, updated_at = ? WHERE id = ? AND user_id = ? AND is_deleted = 0`,
+		boolToInt(archived), now, entryID, userID,
+	)
+	if err != nil {
+		return fmt.Errorf("set archived: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return fmt.Errorf("vault entry not found")
+	}
+	return nil
+}
+
+func (r *SQLiteVaultRepo) RestoreEntry(ctx context.Context, entryID, userID string) error {
+	now := nowUTC()
+	res, err := r.db.ExecContext(ctx,
+		`UPDATE vault_entries SET is_deleted = 0, deleted_at = NULL, version = version + 1, updated_at = ? WHERE id = ? AND user_id = ? AND is_deleted = 1`,
+		now, entryID, userID,
+	)
+	if err != nil {
+		return fmt.Errorf("restore entry: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return fmt.Errorf("vault entry not found in trash")
+	}
+	return nil
+}
+
+func (r *SQLiteVaultRepo) PermanentDeleteEntry(ctx context.Context, entryID, userID string) error {
+	res, err := r.db.ExecContext(ctx,
+		`DELETE FROM vault_entries WHERE id = ? AND user_id = ? AND is_deleted = 1`,
+		entryID, userID,
+	)
+	if err != nil {
+		return fmt.Errorf("permanent delete entry: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return fmt.Errorf("vault entry not found in trash")
+	}
+	return nil
+}
+
+func (r *SQLiteVaultRepo) PurgeExpiredTrash(ctx context.Context, userID string, olderThan time.Time) (int, error) {
+	res, err := r.db.ExecContext(ctx,
+		`DELETE FROM vault_entries WHERE user_id = ? AND is_deleted = 1 AND deleted_at < ?`,
+		userID, olderThan.UTC().Format(timeFormat),
+	)
+	if err != nil {
+		return 0, fmt.Errorf("purge expired trash: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	return int(n), nil
 }
 
 // ── SQLite Audit Repo ────────────────────────────────────────────────────────

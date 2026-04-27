@@ -12,14 +12,17 @@ import (
 
 // SyncEntry is a vault entry in sync wire format.
 type SyncEntry struct {
-	ID            string    `json:"id"`
-	EntryType     string    `json:"entry_type"`
-	EncryptedData string    `json:"encrypted_data"` // hex-encoded
-	Nonce         string    `json:"nonce"`           // hex-encoded
-	Version       int       `json:"version"`
-	FolderID      *string   `json:"folder_id,omitempty"`
-	IsDeleted     bool      `json:"is_deleted"`
-	UpdatedAt     time.Time `json:"updated_at"`
+	ID            string     `json:"id"`
+	EntryType     string     `json:"entry_type"`
+	EncryptedData string     `json:"encrypted_data"` // hex-encoded
+	Nonce         string     `json:"nonce"`           // hex-encoded
+	Version       int        `json:"version"`
+	FolderID      *string    `json:"folder_id,omitempty"`
+	IsDeleted     bool       `json:"is_deleted"`
+	IsFavorite    bool       `json:"is_favorite"`
+	IsArchived    bool       `json:"is_archived"`
+	DeletedAt     *time.Time `json:"deleted_at,omitempty"`
+	UpdatedAt     time.Time  `json:"updated_at"`
 }
 
 // SyncResponse is returned from a pull operation.
@@ -283,6 +286,9 @@ func toSyncEntry(e db.VaultEntry) SyncEntry {
 		Version:       e.Version,
 		FolderID:      e.FolderID,
 		IsDeleted:     e.IsDeleted,
+		IsFavorite:    e.IsFavorite,
+		IsArchived:    e.IsArchived,
+		DeletedAt:     e.DeletedAt,
 		UpdatedAt:     e.UpdatedAt,
 	}
 }

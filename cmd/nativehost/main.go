@@ -77,14 +77,15 @@ type PasskeyInfo struct {
 
 // Credential represents a single credential returned by the sidecar.
 type Credential struct {
-	ID       string `json:"id"`
-	Username string `json:"username"`
-	Password string `json:"password"`
-	Domain   string `json:"domain"`
-	Name     string `json:"name"`
-	URI      string `json:"uri"`
-	Notes    string `json:"notes"`
-	Matched  bool   `json:"matched"`
+	ID         string `json:"id"`
+	Username   string `json:"username"`
+	Password   string `json:"password"`
+	Domain     string `json:"domain"`
+	Name       string `json:"name"`
+	URI        string `json:"uri"`
+	Notes      string `json:"notes"`
+	Matched    bool   `json:"matched"`
+	IsFavorite bool   `json:"is_favorite"`
 }
 
 // SidecarClient communicates with the Electron Go sidecar via local HTTP.

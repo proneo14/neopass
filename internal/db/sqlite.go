@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 
 	"github.com/rs/zerolog/log"
 
@@ -145,8 +146,14 @@ func (s *SQLiteDB) RunMigrations(ctx context.Context, migrationsDir string) erro
 			return fmt.Errorf("read migration %s: %w", mf.name, err)
 		}
 
-		if _, err := s.DB.ExecContext(ctx, string(content)); err != nil {
-			return fmt.Errorf("execute migration %s: %w", mf.name, err)
+		// Split multi-statement SQL and execute each statement individually.
+		// modernc.org/sqlite's ExecContext only executes the first statement
+		// in a multi-statement string, so we must split them.
+		stmts := splitSQLStatements(string(content))
+		for _, stmt := range stmts {
+			if _, err := s.DB.ExecContext(ctx, stmt); err != nil {
+				return fmt.Errorf("execute migration %s: %w", mf.name, err)
+			}
 		}
 		if _, err := s.DB.ExecContext(ctx,
 			"INSERT OR IGNORE INTO schema_migrations (version) VALUES (?)", mf.name,
@@ -156,4 +163,26 @@ func (s *SQLiteDB) RunMigrations(ctx context.Context, migrationsDir string) erro
 		log.Info().Str("migration", mf.name).Msg("applied sqlite migration")
 	}
 	return nil
+}
+
+// splitSQLStatements splits a SQL string into individual statements,
+// stripping comments and empty lines.
+func splitSQLStatements(sql string) []string {
+	var stmts []string
+	for _, part := range strings.Split(sql, ";") {
+		// Remove comment-only lines and whitespace
+		var lines []string
+		for _, line := range strings.Split(part, "\n") {
+			trimmed := strings.TrimSpace(line)
+			if trimmed == "" || strings.HasPrefix(trimmed, "--") {
+				continue
+			}
+			lines = append(lines, line)
+		}
+		stmt := strings.TrimSpace(strings.Join(lines, "\n"))
+		if stmt != "" {
+			stmts = append(stmts, stmt)
+		}
+	}
+	return stmts
 }

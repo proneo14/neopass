@@ -17,6 +17,14 @@ function ContextMenu({
   onEdit,
   onDelete,
   hasCredentials,
+  isFavorite,
+  onToggleFavorite,
+  onArchive,
+  onUnarchive,
+  isArchived,
+  isTrash,
+  onRestore,
+  onPermanentDelete,
 }: {
   x: number;
   y: number;
@@ -26,6 +34,14 @@ function ContextMenu({
   onEdit: () => void;
   onDelete: () => void;
   hasCredentials: boolean;
+  isFavorite: boolean;
+  onToggleFavorite: () => void;
+  onArchive: () => void;
+  onUnarchive: () => void;
+  isArchived: boolean;
+  isTrash: boolean;
+  onRestore: () => void;
+  onPermanentDelete: () => void;
 }) {
   React.useEffect(() => {
     const handler = () => onClose();
@@ -38,23 +54,48 @@ function ContextMenu({
       className="fixed bg-surface-800 border border-surface-600 rounded-md shadow-xl py-1 z-50 min-w-[160px]"
       style={{ left: x, top: y }}
     >
-      {hasCredentials && (
+      {isTrash ? (
         <>
-          <button onClick={onCopyUsername} className="w-full text-left px-3 py-1.5 text-sm text-surface-200 hover:bg-surface-700 transition-colors">
-            Copy username
+          <button onClick={onRestore} className="w-full text-left px-3 py-1.5 text-sm text-surface-200 hover:bg-surface-700 transition-colors">
+            Restore
           </button>
-          <button onClick={onCopyPassword} className="w-full text-left px-3 py-1.5 text-sm text-surface-200 hover:bg-surface-700 transition-colors">
-            Copy password
+          <button onClick={onPermanentDelete} className="w-full text-left px-3 py-1.5 text-sm text-red-400 hover:bg-surface-700 transition-colors">
+            Delete forever
           </button>
-          <div className="border-t border-surface-700 my-1" />
+        </>
+      ) : (
+        <>
+          {hasCredentials && (
+            <>
+              <button onClick={onCopyUsername} className="w-full text-left px-3 py-1.5 text-sm text-surface-200 hover:bg-surface-700 transition-colors">
+                Copy username
+              </button>
+              <button onClick={onCopyPassword} className="w-full text-left px-3 py-1.5 text-sm text-surface-200 hover:bg-surface-700 transition-colors">
+                Copy password
+              </button>
+              <div className="border-t border-surface-700 my-1" />
+            </>
+          )}
+          <button onClick={onToggleFavorite} className="w-full text-left px-3 py-1.5 text-sm text-surface-200 hover:bg-surface-700 transition-colors">
+            {isFavorite ? 'Remove favorite' : 'Add to favorites'}
+          </button>
+          {isArchived ? (
+            <button onClick={onUnarchive} className="w-full text-left px-3 py-1.5 text-sm text-surface-200 hover:bg-surface-700 transition-colors">
+              Unarchive
+            </button>
+          ) : (
+            <button onClick={onArchive} className="w-full text-left px-3 py-1.5 text-sm text-surface-200 hover:bg-surface-700 transition-colors">
+              Archive
+            </button>
+          )}
+          <button onClick={onEdit} className="w-full text-left px-3 py-1.5 text-sm text-surface-200 hover:bg-surface-700 transition-colors">
+            Edit
+          </button>
+          <button onClick={onDelete} className="w-full text-left px-3 py-1.5 text-sm text-red-400 hover:bg-surface-700 transition-colors">
+            Delete
+          </button>
         </>
       )}
-      <button onClick={onEdit} className="w-full text-left px-3 py-1.5 text-sm text-surface-200 hover:bg-surface-700 transition-colors">
-        Edit
-      </button>
-      <button onClick={onDelete} className="w-full text-left px-3 py-1.5 text-sm text-red-400 hover:bg-surface-700 transition-colors">
-        Delete
-      </button>
     </div>
   );
 }
@@ -199,12 +240,14 @@ function NewEntryModal({ entryType, onCancel, onSave }: {
 
 export function Vault() {
   const navigate = useNavigate();
-  const { entries, entryFields, addEntry, removeEntry, searchQuery, setSearchQuery, sortBy, setSortBy, selectedTypeFilter, setSelectedTypeFilter } = useVaultStore();
+  const { entries, entryFields, addEntry, removeEntry, searchQuery, setSearchQuery, sortBy, setSortBy, selectedTypeFilter, setSelectedTypeFilter, activeFilter, updateEntry } = useVaultStore();
   const { token, masterKeyHex } = useAuthStore();
   const [showAddDropdown, setShowAddDropdown] = useState(false);
   const [newEntryType, setNewEntryType] = useState<string | null>(null);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; entryId: string } | null>(null);
   const [loading, setLoading] = useState(true);
+
+  const filterTitle = activeFilter === 'favorites' ? 'Favorites' : activeFilter === 'archived' ? 'Archive' : activeFilter === 'trash' ? 'Trash' : 'Vault';
 
   // Load entries from backend on mount, then poll every 3 seconds
   useEffect(() => {
@@ -213,6 +256,7 @@ export function Vault() {
       return;
     }
     let cancelled = false;
+    setLoading(true);
 
     // Check for pending vault import from org leave
     window.api.vault.importExport(token).then((res) => {
@@ -223,9 +267,19 @@ export function Vault() {
 
     const loadVault = async () => {
       try {
-        const listResult = await window.api.vault.list(token) as { error?: string } | Array<{ id: string; entry_type: string; folder_id: string | null; version: number; created_at: string; updated_at: string }>;
+        // Build query params based on active filter
+        let filterParam: string | undefined;
+        if (activeFilter === 'favorites') filterParam = 'favorite=true';
+        else if (activeFilter === 'archived') filterParam = 'filter=archived';
+        else if (activeFilter === 'trash') filterParam = 'filter=trash';
+
+        const listResult = await window.api.vault.list(token, filterParam) as { error?: string } | Array<{ id: string; entry_type: string; folder_id: string | null; version: number; is_favorite?: boolean; is_archived?: boolean; deleted_at?: string | null; created_at: string; updated_at: string }>;
         if (!Array.isArray(listResult)) {
           console.error('[vault] list returned non-array:', listResult);
+          // Clear entries so stale data from a previous filter doesn't persist
+          if (!cancelled) {
+            useVaultStore.getState().setEntries([]);
+          }
           return;
         }
         if (cancelled) return;
@@ -261,6 +315,9 @@ export function Vault() {
               nonce: detail.nonce,
               version: detail.version,
               folder_id: detail.folder_id ?? null,
+              is_favorite: (detail as Record<string, unknown>).is_favorite as boolean ?? false,
+              is_archived: (detail as Record<string, unknown>).is_archived as boolean ?? false,
+              deleted_at: (detail as Record<string, unknown>).deleted_at as string | null ?? null,
               created_at: detail.created_at,
               updated_at: detail.updated_at,
             });
@@ -283,7 +340,7 @@ export function Vault() {
     const interval = setInterval(loadVault, 3000);
 
     return () => { cancelled = true; clearInterval(interval); };
-  }, [token, masterKeyHex]);
+  }, [token, masterKeyHex, activeFilter]);
 
 
 
@@ -349,6 +406,9 @@ export function Vault() {
       nonce: createResult.nonce,
       version: createResult.version,
       folder_id: createResult.folder_id ?? null,
+      is_favorite: false,
+      is_archived: false,
+      deleted_at: null,
       created_at: createResult.created_at,
       updated_at: createResult.updated_at,
     };
@@ -371,18 +431,20 @@ export function Vault() {
     <div className="h-full flex flex-col">
       {/* Header */}
       <div className="flex items-center justify-between mb-4">
-        <h1 className="text-lg font-semibold text-surface-100">Vault</h1>
-        <div className="relative">
-          <button
-            onClick={() => setShowAddDropdown(!showAddDropdown)}
-            className="px-3 py-1.5 rounded-md bg-accent-600 hover:bg-accent-500 text-white text-sm font-medium transition-colors"
-          >
-            + Add Entry
-          </button>
-          {showAddDropdown && (
-            <AddEntryDropdown onClose={() => setShowAddDropdown(false)} onSelect={handleAddEntry} />
-          )}
-        </div>
+        <h1 className="text-lg font-semibold text-surface-100">{filterTitle}</h1>
+        {activeFilter !== 'trash' && (
+          <div className="relative">
+            <button
+              onClick={() => setShowAddDropdown(!showAddDropdown)}
+              className="px-3 py-1.5 rounded-md bg-accent-600 hover:bg-accent-500 text-white text-sm font-medium transition-colors"
+            >
+              + Add Entry
+            </button>
+            {showAddDropdown && (
+              <AddEntryDropdown onClose={() => setShowAddDropdown(false)} onSelect={handleAddEntry} />
+            )}
+          </div>
+        )}
       </div>
 
       {/* Search + Filters */}
@@ -462,7 +524,8 @@ export function Vault() {
                     {ENTRY_TYPE_ICONS[entry.entry_type]}
                   </span>
                   <div className="flex-1 min-w-0">
-                    <p className="text-sm text-surface-100 truncate">
+                    <p className="text-sm text-surface-100 truncate flex items-center gap-1">
+                      {entry.is_favorite && <svg className="w-3.5 h-3.5 text-amber-400 shrink-0" viewBox="0 0 20 20" fill="currentColor"><path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.286 3.957a1 1 0 00.95.69h4.162c.969 0 1.371 1.24.588 1.81l-3.37 2.448a1 1 0 00-.364 1.118l1.287 3.957c.3.921-.755 1.688-1.54 1.118l-3.37-2.448a1 1 0 00-1.176 0l-3.37 2.448c-.784.57-1.838-.197-1.539-1.118l1.287-3.957a1 1 0 00-.364-1.118L2.065 9.384c-.783-.57-.38-1.81.588-1.81h4.162a1 1 0 00.95-.69l1.284-3.957z" /></svg>}
                       {f?.name ?? 'Untitled'}
                     </p>
                     {(f?.username || f?.email) && (
@@ -494,6 +557,9 @@ export function Vault() {
           x={contextMenu.x}
           y={contextMenu.y}
           hasCredentials={entries.find((e) => e.id === contextMenu.entryId)?.entry_type === 'login'}
+          isFavorite={entries.find((e) => e.id === contextMenu.entryId)?.is_favorite ?? false}
+          isArchived={activeFilter === 'archived'}
+          isTrash={activeFilter === 'trash'}
           onClose={() => setContextMenu(null)}
           onCopyUsername={() => {
             navigator.clipboard.writeText(entryFields[contextMenu.entryId]?.username ?? '');
@@ -501,6 +567,44 @@ export function Vault() {
           }}
           onCopyPassword={async () => {
             await window.api.clipboard.copySecure(entryFields[contextMenu.entryId]?.password ?? '');
+            setContextMenu(null);
+          }}
+          onToggleFavorite={async () => {
+            if (token) {
+              const entry = entries.find((e) => e.id === contextMenu.entryId);
+              if (entry) {
+                await window.api.vault.setFavorite(token, contextMenu.entryId, !entry.is_favorite);
+                updateEntry({ ...entry, is_favorite: !entry.is_favorite });
+              }
+            }
+            setContextMenu(null);
+          }}
+          onArchive={async () => {
+            if (token) {
+              await window.api.vault.setArchived(token, contextMenu.entryId, true);
+              removeEntry(contextMenu.entryId);
+            }
+            setContextMenu(null);
+          }}
+          onUnarchive={async () => {
+            if (token) {
+              await window.api.vault.setArchived(token, contextMenu.entryId, false);
+              removeEntry(contextMenu.entryId);
+            }
+            setContextMenu(null);
+          }}
+          onRestore={async () => {
+            if (token) {
+              await window.api.vault.restore(token, contextMenu.entryId);
+              removeEntry(contextMenu.entryId);
+            }
+            setContextMenu(null);
+          }}
+          onPermanentDelete={async () => {
+            if (token) {
+              await window.api.vault.permanentDelete(token, contextMenu.entryId);
+              removeEntry(contextMenu.entryId);
+            }
             setContextMenu(null);
           }}
           onEdit={() => {

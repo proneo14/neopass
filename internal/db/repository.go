@@ -28,6 +28,11 @@ type VaultRepository interface {
 	CreateFolder(ctx context.Context, folder Folder) (Folder, error)
 	ListFolders(ctx context.Context, userID string) ([]Folder, error)
 	DeleteFolder(ctx context.Context, folderID, userID string) error
+	SetFavorite(ctx context.Context, entryID, userID string, favorite bool) error
+	SetArchived(ctx context.Context, entryID, userID string, archived bool) error
+	RestoreEntry(ctx context.Context, entryID, userID string) error
+	PermanentDeleteEntry(ctx context.Context, entryID, userID string) error
+	PurgeExpiredTrash(ctx context.Context, userID string, olderThan time.Time) (int, error)
 }
 
 // OrgRepository defines the interface for organization database operations.

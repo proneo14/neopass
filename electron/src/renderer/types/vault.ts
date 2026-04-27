@@ -5,6 +5,9 @@ export interface VaultEntry {
   nonce: string;
   version: number;
   folder_id: string | null;
+  is_favorite: boolean;
+  is_archived: boolean;
+  deleted_at: string | null;
   created_at: string;
   updated_at: string;
 }

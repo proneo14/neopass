@@ -72,6 +72,23 @@ func (h *VaultHandler) ListEntries(w http.ResponseWriter, r *http.Request) {
 		filters.UpdatedSince = &t
 	}
 
+	if fav := r.URL.Query().Get("favorite"); fav == "true" {
+		t := true
+		filters.IsFavorite = &t
+	}
+
+	switch r.URL.Query().Get("filter") {
+	case "archived":
+		t := true
+		filters.IsArchived = &t
+	case "trash":
+		filters.InTrash = true
+	case "":
+		// default: exclude archived entries
+		f := false
+		filters.IsArchived = &f
+	}
+
 	entries, err := h.vaultService.ListEntries(r.Context(), claims.UserID, filters)
 	if err != nil {
 		log.Error().Err(err).Msg("list vault entries failed")
@@ -164,6 +181,128 @@ func (h *VaultHandler) DeleteEntry(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
+}
+
+// SetFavorite handles PUT /api/v1/vault/entries/{id}/favorite
+func (h *VaultHandler) SetFavorite(w http.ResponseWriter, r *http.Request) {
+	claims := GetClaims(r.Context())
+	if claims == nil {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
+	entryID := chi.URLParam(r, "id")
+	if entryID == "" {
+		writeError(w, http.StatusBadRequest, "missing entry id")
+		return
+	}
+
+	var req struct {
+		IsFavorite bool `json:"is_favorite"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	if err := h.vaultService.SetFavorite(r.Context(), claims.UserID, entryID, req.IsFavorite); err != nil {
+		writeError(w, http.StatusNotFound, "entry not found")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{"status": "updated", "is_favorite": req.IsFavorite})
+}
+
+// SetArchived handles PUT /api/v1/vault/entries/{id}/archive
+func (h *VaultHandler) SetArchived(w http.ResponseWriter, r *http.Request) {
+	claims := GetClaims(r.Context())
+	if claims == nil {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
+	entryID := chi.URLParam(r, "id")
+	if entryID == "" {
+		writeError(w, http.StatusBadRequest, "missing entry id")
+		return
+	}
+
+	var req struct {
+		IsArchived bool `json:"is_archived"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	if err := h.vaultService.SetArchived(r.Context(), claims.UserID, entryID, req.IsArchived); err != nil {
+		writeError(w, http.StatusNotFound, "entry not found")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{"status": "updated", "is_archived": req.IsArchived})
+}
+
+// RestoreEntry handles POST /api/v1/vault/entries/{id}/restore
+func (h *VaultHandler) RestoreEntry(w http.ResponseWriter, r *http.Request) {
+	claims := GetClaims(r.Context())
+	if claims == nil {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
+	entryID := chi.URLParam(r, "id")
+	if entryID == "" {
+		writeError(w, http.StatusBadRequest, "missing entry id")
+		return
+	}
+
+	if err := h.vaultService.RestoreEntry(r.Context(), claims.UserID, entryID); err != nil {
+		writeError(w, http.StatusNotFound, "entry not found in trash")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{"status": "restored"})
+}
+
+// PermanentDeleteEntry handles DELETE /api/v1/vault/entries/{id}/permanent
+func (h *VaultHandler) PermanentDeleteEntry(w http.ResponseWriter, r *http.Request) {
+	claims := GetClaims(r.Context())
+	if claims == nil {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
+	entryID := chi.URLParam(r, "id")
+	if entryID == "" {
+		writeError(w, http.StatusBadRequest, "missing entry id")
+		return
+	}
+
+	if err := h.vaultService.PermanentDeleteEntry(r.Context(), claims.UserID, entryID); err != nil {
+		writeError(w, http.StatusNotFound, "entry not found in trash")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{"status": "permanently_deleted"})
+}
+
+// PurgeTrash handles POST /api/v1/vault/trash/purge
+func (h *VaultHandler) PurgeTrash(w http.ResponseWriter, r *http.Request) {
+	claims := GetClaims(r.Context())
+	if claims == nil {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
+	purged, err := h.vaultService.PurgeExpiredTrash(r.Context(), claims.UserID)
+	if err != nil {
+		log.Error().Err(err).Msg("purge trash failed")
+		writeError(w, http.StatusInternalServerError, "failed to purge trash")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{"status": "purged", "count": purged})
 }
 
 // CreateFolder handles POST /api/v1/vault/folders

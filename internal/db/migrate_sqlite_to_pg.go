@@ -152,7 +152,7 @@ func MigrateSQLiteToPg(ctx context.Context, sqliteDB *sql.DB, pgPool *pgxpool.Po
 
 	// 5. Vault Entries
 	rows, err = sqliteDB.QueryContext(ctx,
-		`SELECT id, user_id, org_id, entry_type, encrypted_data, nonce, version, folder_id, is_deleted, created_at, updated_at
+		`SELECT id, user_id, org_id, entry_type, encrypted_data, nonce, version, folder_id, is_deleted, is_favorite, is_archived, deleted_at, created_at, updated_at
 		 FROM vault_entries`)
 	if err != nil {
 		return result, fmt.Errorf("query sqlite vault_entries: %w", err)
@@ -161,16 +161,22 @@ func MigrateSQLiteToPg(ctx context.Context, sqliteDB *sql.DB, pgPool *pgxpool.Po
 		var id, userID, entryType, createdStr, updatedStr string
 		var orgID, folderID *string
 		var encData, nonce []byte
-		var version, isDeleted int
-		if err := rows.Scan(&id, &userID, &orgID, &entryType, &encData, &nonce, &version, &folderID, &isDeleted, &createdStr, &updatedStr); err != nil {
+		var version, isDeleted, isFavorite, isArchived int
+		var deletedAtStr *string
+		if err := rows.Scan(&id, &userID, &orgID, &entryType, &encData, &nonce, &version, &folderID, &isDeleted, &isFavorite, &isArchived, &deletedAtStr, &createdStr, &updatedStr); err != nil {
 			_ = rows.Close()
 			return result, fmt.Errorf("scan sqlite vault_entry: %w", err)
 		}
+		var deletedAtPg interface{}
+		if deletedAtStr != nil {
+			deletedAtPg = parseTimePg(*deletedAtStr)
+		}
 		if _, err := tx.Exec(ctx,
-			`INSERT INTO vault_entries (id, user_id, org_id, entry_type, encrypted_data, nonce, version, folder_id, is_deleted, created_at, updated_at)
-			 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+			`INSERT INTO vault_entries (id, user_id, org_id, entry_type, encrypted_data, nonce, version, folder_id, is_deleted, is_favorite, is_archived, deleted_at, created_at, updated_at)
+			 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
 			 ON CONFLICT (id) DO NOTHING`,
 			id, userID, orgID, entryType, encData, nonce, version, folderID, isDeleted != 0,
+			isFavorite != 0, isArchived != 0, deletedAtPg,
 			parseTimePg(createdStr), parseTimePg(updatedStr),
 		); err != nil {
 			_ = rows.Close()

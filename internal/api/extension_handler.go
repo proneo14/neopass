@@ -36,14 +36,15 @@ type extensionSession struct {
 }
 
 type extensionCredential struct {
-	ID       string `json:"id"`
-	Username string `json:"username"`
-	Password string `json:"password"`
-	Domain   string `json:"domain"`
-	Name     string `json:"name"`
-	URI      string `json:"uri"`
-	Notes    string `json:"notes"`
-	Matched  bool   `json:"matched"`
+	ID         string `json:"id"`
+	Username   string `json:"username"`
+	Password   string `json:"password"`
+	Domain     string `json:"domain"`
+	Name       string `json:"name"`
+	URI        string `json:"uri"`
+	Notes      string `json:"notes"`
+	Matched    bool   `json:"matched"`
+	IsFavorite bool   `json:"is_favorite"`
 }
 
 func NewExtensionHandler(vaultRepo db.VaultRepository, secret string, webauthn *auth.WebAuthnService) *ExtensionHandler {
@@ -200,14 +201,15 @@ func (h *ExtensionHandler) GetCredentials(w http.ResponseWriter, r *http.Request
 		entryDomain := extractDomainFromURI(loginData.URI)
 
 		results = append(results, extensionCredential{
-			ID:       entry.ID,
-			Username: loginData.Username,
-			Password: loginData.Password,
-			Domain:   entryDomain,
-			Name:     loginData.Name,
-			URI:      loginData.URI,
-			Notes:    loginData.Notes,
-			Matched:  matched,
+			ID:         entry.ID,
+			Username:   loginData.Username,
+			Password:   loginData.Password,
+			Domain:     entryDomain,
+			Name:       loginData.Name,
+			URI:        loginData.URI,
+			Notes:      loginData.Notes,
+			Matched:    matched,
+			IsFavorite: entry.IsFavorite,
 		})
 	}
 

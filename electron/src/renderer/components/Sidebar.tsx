@@ -2,6 +2,7 @@ import React, { useEffect } from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../store/authStore';
 import { useNotificationStore } from '../store/notificationStore';
+import { useVaultStore } from '../store/vaultStore';
 
 const navItems = [
   { to: '/vault', label: 'Vault', icon: '🔐' },
@@ -17,6 +18,8 @@ export function Sidebar() {
   const navigate = useNavigate();
   const notifCount = useNotificationStore((s) => s.totalCount());
   const refreshNotifications = useNotificationStore((s) => s.refresh);
+  const activeFilter = useVaultStore((s) => s.activeFilter);
+  const setActiveFilter = useVaultStore((s) => s.setActiveFilter);
 
   // Fetch notification counts on mount and every 30s
   useEffect(() => {
@@ -61,9 +64,10 @@ export function Sidebar() {
           <NavLink
             key={item.to}
             to={item.to}
+            onClick={() => { if (item.to === '/vault') setActiveFilter('all'); }}
             className={({ isActive }) =>
               `flex items-center gap-3 px-3 py-2 rounded-md text-sm transition-colors ${
-                isActive
+                isActive && activeFilter === 'all'
                   ? 'bg-accent-600/20 text-accent-400'
                   : 'text-surface-300 hover:bg-surface-800 hover:text-surface-100'
               }`
@@ -72,6 +76,29 @@ export function Sidebar() {
             <span>{item.icon}</span>
             <span>{item.label}</span>
           </NavLink>
+        ))}
+
+        {/* Vault filters */}
+        <div className="mx-3 mt-4 mb-2">
+          <span className="text-[10px] font-semibold text-surface-500 uppercase tracking-widest">Filters</span>
+        </div>
+        {[
+          { key: 'favorites' as const, label: 'Favorites', icon: '★' },
+          { key: 'archived' as const, label: 'Archive', icon: '📦' },
+          { key: 'trash' as const, label: 'Trash', icon: '🗑️' },
+        ].map((item) => (
+          <button
+            key={item.key}
+            onClick={() => { setActiveFilter(item.key); navigate('/vault'); }}
+            className={`w-full flex items-center gap-3 px-3 py-2 rounded-md text-sm transition-colors ${
+              activeFilter === item.key
+                ? 'bg-accent-600/20 text-accent-400'
+                : 'text-surface-300 hover:bg-surface-800 hover:text-surface-100'
+            }`}
+          >
+            <span>{item.icon}</span>
+            <span>{item.label}</span>
+          </button>
         ))}
 
         {role === 'admin' && orgId && (

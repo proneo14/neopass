@@ -130,9 +130,11 @@ export function EntryDetail() {
   const [showGenerator, setShowGenerator] = useState(false);
   const [revealedFields, setRevealedFields] = useState<Set<string>>(new Set());
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [confirmPermanent, setConfirmPermanent] = useState(false);
 
   const vaultEntry = id ? entries.find((e) => e.id === id) : null;
   const fields = id ? entryFields[id] : null;
+  const isTrash = vaultEntry?.deleted_at != null;
 
   if (!vaultEntry || !fields) {
     return (
@@ -234,10 +236,52 @@ export function EntryDetail() {
         <span className="text-2xl">{ENTRY_TYPE_ICONS[entryType]}</span>
         <div>
           <h1 className="text-lg font-semibold text-surface-100">{fields.name}</h1>
-          <span className="text-xs text-surface-500">{ENTRY_TYPE_LABELS[entryType]}</span>
+          <span className="text-xs text-surface-500">
+            {ENTRY_TYPE_LABELS[entryType]}
+            {vaultEntry.is_archived && ' · Archived'}
+            {isTrash && ' · In Trash'}
+          </span>
         </div>
         <div className="flex-1" />
-        {!editing ? (
+        {!isTrash && (
+          <button
+            onClick={async () => {
+              if (token && id) {
+                const newFav = !vaultEntry.is_favorite;
+                await window.api.vault.setFavorite(token, id, newFav);
+                updateEntry({ ...vaultEntry, is_favorite: newFav });
+              }
+            }}
+            className="p-1.5 rounded-md hover:bg-surface-800 transition-colors"
+            title={vaultEntry.is_favorite ? 'Remove from favorites' : 'Add to favorites'}
+          >
+            <svg className={`w-5 h-5 ${vaultEntry.is_favorite ? 'text-amber-400' : 'text-surface-500 hover:text-surface-300'}`} viewBox="0 0 20 20" fill={vaultEntry.is_favorite ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth={vaultEntry.is_favorite ? 0 : 1.5}>
+              <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.286 3.957a1 1 0 00.95.69h4.162c.969 0 1.371 1.24.588 1.81l-3.37 2.448a1 1 0 00-.364 1.118l1.287 3.957c.3.921-.755 1.688-1.54 1.118l-3.37-2.448a1 1 0 00-1.176 0l-3.37 2.448c-.784.57-1.838-.197-1.539-1.118l1.287-3.957a1 1 0 00-.364-1.118L2.065 9.384c-.783-.57-.38-1.81.588-1.81h4.162a1 1 0 00.95-.69l1.284-3.957z" />
+            </svg>
+          </button>
+        )}
+        {isTrash ? (
+          <div className="flex gap-2">
+            <button
+              onClick={async () => {
+                if (token && id) {
+                  await window.api.vault.restore(token, id);
+                  removeEntry(id);
+                  navigate('/vault');
+                }
+              }}
+              className="px-3 py-1.5 rounded-md bg-accent-600 hover:bg-accent-500 text-white text-sm font-medium transition-colors"
+            >
+              Restore
+            </button>
+            <button
+              onClick={() => setConfirmPermanent(true)}
+              className="px-3 py-1.5 rounded-md bg-red-600 hover:bg-red-500 text-white text-sm font-medium transition-colors"
+            >
+              Delete Forever
+            </button>
+          </div>
+        ) : !editing ? (
           <button
             onClick={() => setEditing(true)}
             className="px-3 py-1.5 rounded-md bg-surface-800 hover:bg-surface-700 text-surface-300 text-sm transition-colors"
@@ -339,39 +383,97 @@ export function EntryDetail() {
         <span>Modified: {formatDate(vaultEntry.updated_at)}</span>
       </div>
 
-      {/* Delete */}
-      <div className="mt-6 pt-4 border-t border-surface-800">
-        {!confirmDelete ? (
-          <button
-            onClick={() => setConfirmDelete(true)}
-            className="text-sm text-red-400 hover:text-red-300 transition-colors"
-          >
-            Delete entry
-          </button>
-        ) : (
-          <div className="flex items-center gap-3">
-            <span className="text-sm text-red-400">Delete this entry?</span>
+      {/* Delete / Archive */}
+      {!isTrash && (
+        <div className="mt-6 pt-4 border-t border-surface-800 flex items-center gap-4">
+          {!vaultEntry.is_archived ? (
             <button
               onClick={async () => {
                 if (token && id) {
-                  await window.api.vault.delete(token, id);
+                  await window.api.vault.setArchived(token, id, true);
                   removeEntry(id);
                   navigate('/vault');
                 }
               }}
-              className="px-3 py-1 rounded-md bg-red-600 hover:bg-red-500 text-white text-sm font-medium transition-colors"
+              className="text-sm text-surface-400 hover:text-surface-200 transition-colors"
             >
-              Confirm
+              Archive
             </button>
+          ) : (
             <button
-              onClick={() => setConfirmDelete(false)}
-              className="px-3 py-1 rounded-md bg-surface-800 hover:bg-surface-700 text-surface-400 text-sm transition-colors"
+              onClick={async () => {
+                if (token && id) {
+                  await window.api.vault.setArchived(token, id, false);
+                  updateEntry({ ...vaultEntry, is_archived: false });
+                }
+              }}
+              className="text-sm text-accent-400 hover:text-accent-300 transition-colors"
             >
-              Cancel
+              Unarchive
             </button>
+          )}
+          {!confirmDelete ? (
+            <button
+              onClick={() => setConfirmDelete(true)}
+              className="text-sm text-red-400 hover:text-red-300 transition-colors"
+            >
+              Delete entry
+            </button>
+          ) : (
+            <div className="flex items-center gap-3">
+              <span className="text-sm text-red-400">Move to trash?</span>
+              <button
+                onClick={async () => {
+                  if (token && id) {
+                    await window.api.vault.delete(token, id);
+                    removeEntry(id);
+                    navigate('/vault');
+                  }
+                }}
+                className="px-3 py-1 rounded-md bg-red-600 hover:bg-red-500 text-white text-sm font-medium transition-colors"
+              >
+                Confirm
+              </button>
+              <button
+                onClick={() => setConfirmDelete(false)}
+                className="px-3 py-1 rounded-md bg-surface-800 hover:bg-surface-700 text-surface-400 text-sm transition-colors"
+              >
+                Cancel
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Permanent delete confirmation for trash items */}
+      {confirmPermanent && (
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
+          <div className="bg-surface-900 rounded-lg p-6 max-w-sm shadow-2xl">
+            <h3 className="text-sm font-semibold text-surface-100 mb-2">Delete Forever?</h3>
+            <p className="text-xs text-surface-400 mb-4">This entry will be permanently deleted and cannot be recovered.</p>
+            <div className="flex gap-2">
+              <button
+                onClick={() => setConfirmPermanent(false)}
+                className="flex-1 py-2 rounded-md bg-surface-800 text-surface-400 text-sm hover:bg-surface-700 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={async () => {
+                  if (token && id) {
+                    await window.api.vault.permanentDelete(token, id);
+                    removeEntry(id);
+                    navigate('/vault');
+                  }
+                }}
+                className="flex-1 py-2 rounded-md bg-red-600 hover:bg-red-500 text-white text-sm font-medium transition-colors"
+              >
+                Delete Forever
+              </button>
+            </div>
           </div>
-        )}
-      </div>
+        </div>
+      )}
     </div>
   );
 }

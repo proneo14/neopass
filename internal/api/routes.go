@@ -79,6 +79,11 @@ func Router(authService *auth.Service, totpService *auth.TOTPService, smsService
 			r.Get("/entries/{id}", vaultHandler.GetEntry)
 			r.Put("/entries/{id}", vaultHandler.UpdateEntry)
 			r.Delete("/entries/{id}", vaultHandler.DeleteEntry)
+			r.Put("/entries/{id}/favorite", vaultHandler.SetFavorite)
+			r.Put("/entries/{id}/archive", vaultHandler.SetArchived)
+			r.Post("/entries/{id}/restore", vaultHandler.RestoreEntry)
+			r.Delete("/entries/{id}/permanent", vaultHandler.PermanentDeleteEntry)
+			r.Post("/trash/purge", vaultHandler.PurgeTrash)
 
 			r.Post("/folders", vaultHandler.CreateFolder)
 			r.Get("/folders", vaultHandler.ListFolders)

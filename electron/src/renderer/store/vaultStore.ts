@@ -13,6 +13,7 @@ interface VaultState {
   sortBy: 'name' | 'updated_at' | 'entry_type';
   selectedFolderId: string | null;
   selectedTypeFilter: string | null;
+  activeFilter: 'all' | 'favorites' | 'archived' | 'trash';
 
   setEntries: (entries: VaultEntry[]) => void;
   setFolders: (folders: Folder[]) => void;
@@ -24,6 +25,7 @@ interface VaultState {
   setSortBy: (sort: 'name' | 'updated_at' | 'entry_type') => void;
   setSelectedFolderId: (id: string | null) => void;
   setSelectedTypeFilter: (type: string | null) => void;
+  setActiveFilter: (filter: 'all' | 'favorites' | 'archived' | 'trash') => void;
 }
 
 export const useVaultStore = create<VaultState>((set) => ({
@@ -34,6 +36,7 @@ export const useVaultStore = create<VaultState>((set) => ({
   sortBy: 'updated_at',
   selectedFolderId: null,
   selectedTypeFilter: null,
+  activeFilter: 'all',
 
   setEntries: (entries) => set({ entries }),
   setFolders: (folders) => set({ folders }),
@@ -57,4 +60,5 @@ export const useVaultStore = create<VaultState>((set) => ({
   setSortBy: (sortBy) => set({ sortBy }),
   setSelectedFolderId: (selectedFolderId) => set({ selectedFolderId }),
   setSelectedTypeFilter: (selectedTypeFilter) => set({ selectedTypeFilter }),
+  setActiveFilter: (activeFilter) => set({ activeFilter }),
 }));

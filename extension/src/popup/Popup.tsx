@@ -358,6 +358,12 @@ export function Popup() {
   const matchedCreds = credentials.filter((c) => c.matched);
   const otherCreds = credentials.filter((c) => !c.matched);
 
+  // Sort favorites first within each group
+  const sortFavFirst = (a: Credential, b: Credential) =>
+    (b.is_favorite ? 1 : 0) - (a.is_favorite ? 1 : 0);
+  matchedCreds.sort(sortFavFirst);
+  otherCreds.sort(sortFavFirst);
+
   // Unlocked state
   return (
     <div className="flex flex-col h-full bg-surface-950 text-surface-100">
@@ -405,8 +411,8 @@ export function Popup() {
                     className="flex items-center justify-between px-4 py-2.5 hover:bg-surface-900 transition-colors cursor-pointer group"
                   >
                     <div className="flex-1 min-w-0 mr-3">
-                      <p className="text-sm font-medium text-surface-100 truncate">
-                        {cred.name || cred.domain}
+                      <p className="text-sm font-medium text-surface-100 truncate flex items-center gap-1">
+                        {cred.is_favorite && <svg className="w-3 h-3 text-amber-400 shrink-0" viewBox="0 0 20 20" fill="currentColor"><path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.286 3.957a1 1 0 00.95.69h4.162c.969 0 1.371 1.24.588 1.81l-3.37 2.448a1 1 0 00-.364 1.118l1.287 3.957c.3.921-.755 1.688-1.54 1.118l-3.37-2.448a1 1 0 00-1.176 0l-3.37 2.448c-.784.57-1.838-.197-1.539-1.118l1.287-3.957a1 1 0 00-.364-1.118L2.065 9.384c-.783-.57-.38-1.81.588-1.81h4.162a1 1 0 00.95-.69l1.284-3.957z" /></svg>}{cred.name || cred.domain}
                       </p>
                       <p className="text-xs text-surface-400 truncate">
                         {cred.username}
@@ -436,8 +442,8 @@ export function Popup() {
                     className="flex items-center justify-between px-4 py-2.5 hover:bg-surface-900 transition-colors cursor-pointer group"
                   >
                     <div className="flex-1 min-w-0 mr-3">
-                      <p className="text-sm font-medium text-surface-100 truncate">
-                        {cred.name || cred.domain}
+                      <p className="text-sm font-medium text-surface-100 truncate flex items-center gap-1">
+                        {cred.is_favorite && <svg className="w-3 h-3 text-amber-400 shrink-0" viewBox="0 0 20 20" fill="currentColor"><path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.286 3.957a1 1 0 00.95.69h4.162c.969 0 1.371 1.24.588 1.81l-3.37 2.448a1 1 0 00-.364 1.118l1.287 3.957c.3.921-.755 1.688-1.54 1.118l-3.37-2.448a1 1 0 00-1.176 0l-3.37 2.448c-.784.57-1.838-.197-1.539-1.118l1.287-3.957a1 1 0 00-.364-1.118L2.065 9.384c-.783-.57-.38-1.81.588-1.81h4.162a1 1 0 00.95-.69l1.284-3.957z" /></svg>}{cred.name || cred.domain}
                       </p>
                       <p className="text-xs text-surface-400 truncate">
                         {cred.username}{cred.domain ? ` · ${cred.domain}` : ''}

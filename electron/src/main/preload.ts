@@ -49,9 +49,9 @@ const api = {
   },
 
   vault: {
-    list: (token: string): Promise<unknown> => {
+    list: (token: string, filter?: string): Promise<unknown> => {
       validateString(token, 'token');
-      return ipcRenderer.invoke('vault:list', token);
+      return ipcRenderer.invoke('vault:list', token, filter);
     },
     get: (token: string, entryId: string): Promise<unknown> => {
       validateString(token, 'token');
@@ -73,6 +73,30 @@ const api = {
       validateString(token, 'token');
       validateString(entryId, 'entryId');
       return ipcRenderer.invoke('vault:delete', token, entryId);
+    },
+    setFavorite: (token: string, entryId: string, isFavorite: boolean): Promise<unknown> => {
+      validateString(token, 'token');
+      validateString(entryId, 'entryId');
+      return ipcRenderer.invoke('vault:setFavorite', token, entryId, isFavorite);
+    },
+    setArchived: (token: string, entryId: string, isArchived: boolean): Promise<unknown> => {
+      validateString(token, 'token');
+      validateString(entryId, 'entryId');
+      return ipcRenderer.invoke('vault:setArchived', token, entryId, isArchived);
+    },
+    restore: (token: string, entryId: string): Promise<unknown> => {
+      validateString(token, 'token');
+      validateString(entryId, 'entryId');
+      return ipcRenderer.invoke('vault:restore', token, entryId);
+    },
+    permanentDelete: (token: string, entryId: string): Promise<unknown> => {
+      validateString(token, 'token');
+      validateString(entryId, 'entryId');
+      return ipcRenderer.invoke('vault:permanentDelete', token, entryId);
+    },
+    purgeTrash: (token: string): Promise<unknown> => {
+      validateString(token, 'token');
+      return ipcRenderer.invoke('vault:purgeTrash', token);
     },
     encrypt: (masterKeyHex: string, plaintext: string): Promise<{ encrypted_data: string; nonce: string; error?: string }> => {
       validateString(masterKeyHex, 'masterKeyHex');
