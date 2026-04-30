@@ -280,6 +280,17 @@ func (s *Service) RefreshToken(ctx context.Context, refreshTokenStr string) (Tok
 		return TokenResponse{}, ErrInvalidToken
 	}
 
+	// Check if the user's tokens have been revoked (e.g. after takeover)
+	user, err := s.userRepo.GetUserByID(ctx, claims.UserID)
+	if err != nil {
+		return TokenResponse{}, ErrInvalidToken
+	}
+	if user.TokensRevokedAt != nil && claims.IssuedAt != nil {
+		if claims.IssuedAt.Time.Before(*user.TokensRevokedAt) {
+			return TokenResponse{}, ErrInvalidToken
+		}
+	}
+
 	accessToken, err := s.generateAccessToken(claims.UserID, claims.OrgID, claims.Role)
 	if err != nil {
 		return TokenResponse{}, err

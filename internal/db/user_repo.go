@@ -22,6 +22,7 @@ type User struct {
 	EncryptedPrivateKey []byte          `json:"-"`
 	Has2FA              bool            `json:"has_2fa"`
 	RequireHWKey        bool            `json:"require_hw_key"`
+	TokensRevokedAt     *time.Time      `json:"tokens_revoked_at,omitempty"`
 	CreatedAt           time.Time       `json:"created_at"`
 	UpdatedAt           time.Time       `json:"updated_at"`
 }
@@ -73,13 +74,14 @@ func (r *PgUserRepo) GetUserByEmail(ctx context.Context, email string) (User, er
 		SELECT u.id, u.email, u.auth_hash, u.salt, u.kdf_params,
 		       u.public_key, u.encrypted_private_key, u.created_at, u.updated_at,
 		       EXISTS(SELECT 1 FROM totp_secrets t WHERE t.user_id = u.id AND t.verified = true) AS has_2fa,
-		       COALESCE(u.require_hw_key, false)
+		       COALESCE(u.require_hw_key, false),
+		       u.tokens_revoked_at
 		FROM users u
 		WHERE u.email = $1
 	`, email).Scan(
 		&u.ID, &u.Email, &u.AuthHash, &u.Salt, &u.KDFParams,
 		&u.PublicKey, &u.EncryptedPrivateKey, &u.CreatedAt, &u.UpdatedAt,
-		&u.Has2FA, &u.RequireHWKey,
+		&u.Has2FA, &u.RequireHWKey, &u.TokensRevokedAt,
 	)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -97,13 +99,14 @@ func (r *PgUserRepo) GetUserByID(ctx context.Context, id string) (User, error) {
 		SELECT u.id, u.email, u.auth_hash, u.salt, u.kdf_params,
 		       u.public_key, u.encrypted_private_key, u.created_at, u.updated_at,
 		       EXISTS(SELECT 1 FROM totp_secrets t WHERE t.user_id = u.id AND t.verified = true) AS has_2fa,
-		       COALESCE(u.require_hw_key, false)
+		       COALESCE(u.require_hw_key, false),
+		       u.tokens_revoked_at
 		FROM users u
 		WHERE u.id = $1
 	`, id).Scan(
 		&u.ID, &u.Email, &u.AuthHash, &u.Salt, &u.KDFParams,
 		&u.PublicKey, &u.EncryptedPrivateKey, &u.CreatedAt, &u.UpdatedAt,
-		&u.Has2FA, &u.RequireHWKey,
+		&u.Has2FA, &u.RequireHWKey, &u.TokensRevokedAt,
 	)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -144,6 +147,20 @@ func (r *PgUserRepo) SetRequireHWKey(ctx context.Context, userID string, require
 	`, userID, require)
 	if err != nil {
 		return fmt.Errorf("set require_hw_key: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("user not found")
+	}
+	return nil
+}
+
+// RevokeUserTokens sets tokens_revoked_at to now, invalidating all existing JWTs for this user.
+func (r *PgUserRepo) RevokeUserTokens(ctx context.Context, userID string) error {
+	tag, err := r.pool.Exec(ctx, `
+		UPDATE users SET tokens_revoked_at = now() WHERE id = $1
+	`, userID)
+	if err != nil {
+		return fmt.Errorf("revoke user tokens: %w", err)
 	}
 	if tag.RowsAffected() == 0 {
 		return fmt.Errorf("user not found")

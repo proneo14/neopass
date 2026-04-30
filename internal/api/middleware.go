@@ -13,6 +13,7 @@ import (
 	"github.com/rs/zerolog/log"
 
 	"github.com/password-manager/password-manager/internal/auth"
+	"github.com/password-manager/password-manager/internal/db"
 )
 
 // MaxRequestBodySize is the maximum allowed request body (1 MB).
@@ -32,7 +33,7 @@ func GetClaims(ctx context.Context) *auth.Claims {
 }
 
 // AuthMiddleware validates JWT tokens on protected routes and injects claims into context.
-func AuthMiddleware(authService *auth.Service) func(http.Handler) http.Handler {
+func AuthMiddleware(authService *auth.Service, userRepo db.UserRepository) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			tokenStr := extractBearerToken(r)
@@ -51,6 +52,19 @@ func AuthMiddleware(authService *auth.Service) func(http.Handler) http.Handler {
 			if claims.Is2FA {
 				writeError(w, http.StatusForbidden, "2fa verification required")
 				return
+			}
+
+			// Check if the user's tokens have been revoked (e.g. after emergency takeover)
+			if claims.IssuedAt != nil {
+				user, err := userRepo.GetUserByID(r.Context(), claims.UserID)
+				if err != nil {
+					writeError(w, http.StatusUnauthorized, "invalid or expired token")
+					return
+				}
+				if user.TokensRevokedAt != nil && claims.IssuedAt.Time.Before(*user.TokensRevokedAt) {
+					writeError(w, http.StatusUnauthorized, "session revoked")
+					return
+				}
 			}
 
 			ctx := context.WithValue(r.Context(), UserContextKey, claims)

@@ -453,7 +453,7 @@ export async function verifyBiometric(): Promise<void> {
  * Trigger the OS biometric prompt (Windows Hello / Touch ID).
  * Throws if the user cancels or the prompt is unavailable.
  */
-async function promptBiometric(reason: string): Promise<void> {
+export async function promptBiometric(reason: string): Promise<void> {
   // macOS: use Electron's built-in Touch ID prompt
   if (typeof systemPreferences.promptTouchID === 'function') {
     try {

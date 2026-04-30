@@ -4,6 +4,7 @@ import { useVaultStore } from '../store/vaultStore';
 import { useNotificationStore } from '../store/notificationStore';
 import { PasswordGenerator } from '../components/PasswordGenerator';
 import { OrgSetupWizard } from '../components/OrgSetupWizard';
+import { EmergencyAccessSection } from '../components/EmergencyAccessSection';
 
 type AutoLockOption = '1' | '5' | '15' | '30' | '60' | 'never';
 
@@ -997,6 +998,9 @@ export function Settings() {
             </button>
           </div>
         </section>
+
+        {/* Emergency Access */}
+        <EmergencyAccessSection />
 
         {/* Secure Send */}
         <section>

@@ -18,7 +18,7 @@ import (
 // Router sets up all API v1 routes.
 // storageBackend should be "sqlite" or "postgres".
 // sqliteDB is the raw SQLite *sql.DB for migration support (nil when using postgres).
-func Router(authService *auth.Service, totpService *auth.TOTPService, smsService *auth.SMSService, vaultService *vault.Service, adminService *admin.Service, syncService *syncsvc.Service, webauthnService *auth.WebAuthnService, userRepo db.UserRepository, sendRepo db.SendRepository, collectionRepo db.CollectionRepository, orgRepo db.OrgRepository, auditRepo db.AuditRepository, storageBackend string, sqliteDB *sql.DB) chi.Router {
+func Router(authService *auth.Service, totpService *auth.TOTPService, smsService *auth.SMSService, vaultService *vault.Service, adminService *admin.Service, syncService *syncsvc.Service, webauthnService *auth.WebAuthnService, userRepo db.UserRepository, vaultRepo db.VaultRepository, sendRepo db.SendRepository, collectionRepo db.CollectionRepository, orgRepo db.OrgRepository, auditRepo db.AuditRepository, eaRepo db.EmergencyAccessRepository, storageBackend string, sqliteDB *sql.DB) chi.Router {
 	r := chi.NewRouter()
 
 	authHandler := NewAuthHandler(authService)
@@ -32,6 +32,7 @@ func Router(authService *auth.Service, totpService *auth.TOTPService, smsService
 	passkeyHandler := NewPasskeyHandler(webauthnService)
 	sendHandler := NewSendHandler(sendRepo, userRepo)
 	collectionHandler := NewCollectionHandler(collectionRepo, orgRepo, userRepo, auditRepo)
+	emergencyHandler := NewEmergencyAccessHandler(eaRepo, userRepo, vaultRepo, auditRepo, orgRepo, collectionRepo)
 
 	// Rate limiter for public auth endpoints: 10 requests per minute per IP
 	authLimiter := NewRateLimiter(10, 1*time.Minute)
@@ -54,7 +55,7 @@ func Router(authService *auth.Service, totpService *auth.TOTPService, smsService
 
 	// Protected routes
 	r.Group(func(r chi.Router) {
-		r.Use(AuthMiddleware(authService))
+		r.Use(AuthMiddleware(authService, userRepo))
 
 		// Password change (self-service)
 		r.Post("/auth/change-password", authHandler.ChangePassword)
@@ -180,6 +181,22 @@ func Router(authService *auth.Service, totpService *auth.TOTPService, smsService
 			r.Get("/", sendHandler.ListSends)
 			r.Delete("/{id}", sendHandler.DeleteSend)
 			r.Put("/{id}/disable", sendHandler.DisableSend)
+		})
+
+		// Emergency Access routes
+		r.Route("/emergency-access", func(r chi.Router) {
+			r.Post("/invite", emergencyHandler.Invite)
+			r.Get("/granted", emergencyHandler.ListGranted)
+			r.Get("/trusted", emergencyHandler.ListTrusted)
+			r.Post("/{id}/accept", emergencyHandler.Accept)
+			r.Get("/{id}/public-key", emergencyHandler.GetGranteePublicKey)
+			r.Post("/{id}/confirm", emergencyHandler.Confirm)
+			r.Post("/{id}/initiate", emergencyHandler.Initiate)
+			r.Post("/{id}/approve", emergencyHandler.Approve)
+			r.Post("/{id}/reject", emergencyHandler.Reject)
+			r.Get("/{id}/vault", emergencyHandler.GetVault)
+			r.Post("/{id}/takeover", emergencyHandler.Takeover)
+			r.Delete("/{id}", emergencyHandler.Delete)
 		})
 	})
 

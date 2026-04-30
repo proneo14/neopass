@@ -40,6 +40,15 @@ export function Layout() {
     };
   }, [autoLockMinutes, resetTimer]);
 
+  // Force-logout when the server revokes tokens (e.g. after emergency takeover)
+  useEffect(() => {
+    const cleanup = (window as any).api?.onForceLogout?.(() => {
+      logout();
+      navigate('/login');
+    });
+    return () => { cleanup?.(); };
+  }, [logout, navigate]);
+
   return (
     <div className="flex h-screen w-screen overflow-hidden dark">
       <TitleBar />

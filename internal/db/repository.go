@@ -13,6 +13,7 @@ type UserRepository interface {
 	GetUserByID(ctx context.Context, id string) (User, error)
 	UpdateUserKeys(ctx context.Context, id string, authHash, salt, publicKey, encryptedPrivateKey []byte) error
 	SetRequireHWKey(ctx context.Context, userID string, require bool) error
+	RevokeUserTokens(ctx context.Context, userID string) error
 }
 
 // VaultRepository defines the interface for vault entry database operations.
@@ -191,4 +192,37 @@ type CollectionRepository interface {
 	RemoveEntryFromCollection(ctx context.Context, collectionID, entryID string) error
 	GetCollectionEntries(ctx context.Context, collectionID string) ([]CollectionEntryData, error)
 	GetEntryCollections(ctx context.Context, entryID string, userID string) ([]CollectionWithPermission, error)
+}
+
+// EmergencyAccess represents an emergency access grant between two users.
+type EmergencyAccess struct {
+	ID                  string     `json:"id"`
+	GrantorID           string     `json:"grantor_id"`
+	GranteeID           *string    `json:"grantee_id,omitempty"`
+	GranteeEmail        string     `json:"grantee_email"`
+	GrantorEmail        string     `json:"grantor_email,omitempty"`
+	Status              string     `json:"status"`
+	AccessType          string     `json:"access_type"`
+	WaitTimeDays        int        `json:"wait_time_days"`
+	EncryptedKey        []byte     `json:"encrypted_key,omitempty"`
+	KeyNonce            []byte     `json:"key_nonce,omitempty"`
+	RecoveryInitiatedAt *time.Time `json:"recovery_initiated_at,omitempty"`
+	CreatedAt           time.Time  `json:"created_at"`
+	UpdatedAt           time.Time  `json:"updated_at"`
+}
+
+// EmergencyAccessRepository defines the interface for emergency access database operations.
+type EmergencyAccessRepository interface {
+	CreateEmergencyAccess(ctx context.Context, ea EmergencyAccess) (EmergencyAccess, error)
+	GetEmergencyAccess(ctx context.Context, id string) (EmergencyAccess, error)
+	ListGrantedAccess(ctx context.Context, grantorID string) ([]EmergencyAccess, error)
+	ListTrustedBy(ctx context.Context, granteeID string) ([]EmergencyAccess, error)
+	UpdateStatus(ctx context.Context, id, status string) error
+	SetEncryptedKey(ctx context.Context, id string, encryptedKey, nonce []byte) error
+	InitiateRecovery(ctx context.Context, id string) error
+	DeleteEmergencyAccess(ctx context.Context, id string) error
+	GetAutoApproveEligible(ctx context.Context) ([]EmergencyAccess, error)
+	SetGranteeID(ctx context.Context, id, granteeID string) error
+	ListByGranteeEmail(ctx context.Context, email string) ([]EmergencyAccess, error)
+	AutoApproveExpired(ctx context.Context) (int, error)
 }

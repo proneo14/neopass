@@ -151,6 +151,20 @@ func (r *SQLiteUserRepo) SetRequireHWKey(ctx context.Context, userID string, req
 	return nil
 }
 
+// RevokeUserTokens sets tokens_revoked_at to now, invalidating all existing JWTs for this user.
+func (r *SQLiteUserRepo) RevokeUserTokens(ctx context.Context, userID string) error {
+	r.db.ExecContext(ctx, `ALTER TABLE users ADD COLUMN tokens_revoked_at TEXT`) //nolint:errcheck
+	res, err := r.db.ExecContext(ctx, `UPDATE users SET tokens_revoked_at = datetime('now') WHERE id = ?`, userID)
+	if err != nil {
+		return fmt.Errorf("revoke user tokens: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return fmt.Errorf("user not found")
+	}
+	return nil
+}
+
 // ── SQLite Vault Repo ────────────────────────────────────────────────────────
 
 const sqliteVaultColumns = `id, user_id, org_id, entry_type, encrypted_data, nonce, version, folder_id, is_deleted, is_favorite, is_archived, deleted_at, created_at, updated_at`
@@ -1325,4 +1339,210 @@ func (r *SQLiteCollectionRepo) GetCollectionEntries(ctx context.Context, collID 
 }
 func (r *SQLiteCollectionRepo) GetEntryCollections(ctx context.Context, entryID string, userID string) ([]CollectionWithPermission, error) {
 	return nil, errCollectionsNotSupported
+}
+
+// ── SQLite Emergency Access Repo ─────────────────────────────────────────────
+
+// SQLiteEmergencyAccessRepo implements EmergencyAccessRepository for SQLite.
+type SQLiteEmergencyAccessRepo struct {
+	db *sql.DB
+}
+
+// NewSQLiteEmergencyAccessRepo creates a new SQLiteEmergencyAccessRepo.
+func NewSQLiteEmergencyAccessRepo(db *sql.DB) *SQLiteEmergencyAccessRepo {
+	return &SQLiteEmergencyAccessRepo{db: db}
+}
+
+func (r *SQLiteEmergencyAccessRepo) CreateEmergencyAccess(ctx context.Context, ea EmergencyAccess) (EmergencyAccess, error) {
+	id := newUUID()
+	now := nowUTC()
+	_, err := r.db.ExecContext(ctx,
+		`INSERT INTO emergency_access (id, grantor_id, grantee_id, grantee_email, status, access_type, wait_time_days, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		id, ea.GrantorID, ea.GranteeID, ea.GranteeEmail, ea.Status, ea.AccessType, ea.WaitTimeDays, now, now,
+	)
+	if err != nil {
+		return EmergencyAccess{}, fmt.Errorf("create emergency access: %w", err)
+	}
+	ea.ID = id
+	ea.CreatedAt = parseTime(now)
+	ea.UpdatedAt = parseTime(now)
+	return ea, nil
+}
+
+func (r *SQLiteEmergencyAccessRepo) GetEmergencyAccess(ctx context.Context, id string) (EmergencyAccess, error) {
+	var ea EmergencyAccess
+	var createdStr, updatedStr string
+	var recoveryStr sql.NullString
+	err := r.db.QueryRowContext(ctx,
+		`SELECT id, grantor_id, grantee_id, grantee_email, status, access_type, wait_time_days,
+		        encrypted_key, key_nonce, recovery_initiated_at, created_at, updated_at
+		 FROM emergency_access WHERE id = ?`, id,
+	).Scan(&ea.ID, &ea.GrantorID, &ea.GranteeID, &ea.GranteeEmail, &ea.Status,
+		&ea.AccessType, &ea.WaitTimeDays, &ea.EncryptedKey, &ea.KeyNonce,
+		&recoveryStr, &createdStr, &updatedStr)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return EmergencyAccess{}, fmt.Errorf("emergency access not found")
+		}
+		return EmergencyAccess{}, fmt.Errorf("get emergency access: %w", err)
+	}
+	ea.CreatedAt = parseTime(createdStr)
+	ea.UpdatedAt = parseTime(updatedStr)
+	if recoveryStr.Valid {
+		t := parseTime(recoveryStr.String)
+		ea.RecoveryInitiatedAt = &t
+	}
+	return ea, nil
+}
+
+func (r *SQLiteEmergencyAccessRepo) scanEARows(rows *sql.Rows) ([]EmergencyAccess, error) {
+	var results []EmergencyAccess
+	for rows.Next() {
+		var ea EmergencyAccess
+		var createdStr, updatedStr string
+		var recoveryStr sql.NullString
+		if err := rows.Scan(&ea.ID, &ea.GrantorID, &ea.GranteeID, &ea.GranteeEmail, &ea.Status,
+			&ea.AccessType, &ea.WaitTimeDays, &ea.EncryptedKey, &ea.KeyNonce,
+			&recoveryStr, &createdStr, &updatedStr); err != nil {
+			return nil, fmt.Errorf("scan emergency access: %w", err)
+		}
+		ea.CreatedAt = parseTime(createdStr)
+		ea.UpdatedAt = parseTime(updatedStr)
+		if recoveryStr.Valid {
+			t := parseTime(recoveryStr.String)
+			ea.RecoveryInitiatedAt = &t
+		}
+		results = append(results, ea)
+	}
+	return results, rows.Err()
+}
+
+func (r *SQLiteEmergencyAccessRepo) ListGrantedAccess(ctx context.Context, grantorID string) ([]EmergencyAccess, error) {
+	rows, err := r.db.QueryContext(ctx,
+		`SELECT id, grantor_id, grantee_id, grantee_email, status, access_type, wait_time_days,
+		        encrypted_key, key_nonce, recovery_initiated_at, created_at, updated_at
+		 FROM emergency_access WHERE grantor_id = ? ORDER BY created_at DESC`, grantorID)
+	if err != nil {
+		return nil, fmt.Errorf("list granted access: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	return r.scanEARows(rows)
+}
+
+func (r *SQLiteEmergencyAccessRepo) ListTrustedBy(ctx context.Context, granteeID string) ([]EmergencyAccess, error) {
+	rows, err := r.db.QueryContext(ctx,
+		`SELECT id, grantor_id, grantee_id, grantee_email, status, access_type, wait_time_days,
+		        encrypted_key, key_nonce, recovery_initiated_at, created_at, updated_at
+		 FROM emergency_access WHERE grantee_id = ? ORDER BY created_at DESC`, granteeID)
+	if err != nil {
+		return nil, fmt.Errorf("list trusted by: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	return r.scanEARows(rows)
+}
+
+func (r *SQLiteEmergencyAccessRepo) UpdateStatus(ctx context.Context, id, status string) error {
+	now := nowUTC()
+	res, err := r.db.ExecContext(ctx,
+		`UPDATE emergency_access SET status = ?, updated_at = ? WHERE id = ?`, status, now, id)
+	if err != nil {
+		return fmt.Errorf("update emergency access status: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return fmt.Errorf("emergency access not found")
+	}
+	return nil
+}
+
+func (r *SQLiteEmergencyAccessRepo) SetEncryptedKey(ctx context.Context, id string, encryptedKey, nonce []byte) error {
+	now := nowUTC()
+	res, err := r.db.ExecContext(ctx,
+		`UPDATE emergency_access SET encrypted_key = ?, key_nonce = ?, updated_at = ? WHERE id = ?`,
+		encryptedKey, nonce, now, id)
+	if err != nil {
+		return fmt.Errorf("set encrypted key: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return fmt.Errorf("emergency access not found")
+	}
+	return nil
+}
+
+func (r *SQLiteEmergencyAccessRepo) InitiateRecovery(ctx context.Context, id string) error {
+	now := nowUTC()
+	res, err := r.db.ExecContext(ctx,
+		`UPDATE emergency_access SET status = 'recovery_initiated', recovery_initiated_at = ?, updated_at = ?
+		 WHERE id = ? AND status IN ('accepted', 'recovery_rejected')`, now, now, id)
+	if err != nil {
+		return fmt.Errorf("initiate recovery: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return fmt.Errorf("emergency access not found or not in eligible status")
+	}
+	return nil
+}
+
+func (r *SQLiteEmergencyAccessRepo) DeleteEmergencyAccess(ctx context.Context, id string) error {
+	res, err := r.db.ExecContext(ctx,
+		`DELETE FROM emergency_access WHERE id = ?`, id)
+	if err != nil {
+		return fmt.Errorf("delete emergency access: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return fmt.Errorf("emergency access not found")
+	}
+	return nil
+}
+
+func (r *SQLiteEmergencyAccessRepo) GetAutoApproveEligible(ctx context.Context) ([]EmergencyAccess, error) {
+	rows, err := r.db.QueryContext(ctx,
+		`SELECT id, grantor_id, grantee_id, grantee_email, status, access_type, wait_time_days,
+		        encrypted_key, key_nonce, recovery_initiated_at, created_at, updated_at
+		 FROM emergency_access
+		 WHERE status = 'recovery_initiated'
+		   AND datetime(recovery_initiated_at, '+' || wait_time_days || ' days') <= datetime('now')`)
+	if err != nil {
+		return nil, fmt.Errorf("get auto-approve eligible: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	return r.scanEARows(rows)
+}
+
+func (r *SQLiteEmergencyAccessRepo) SetGranteeID(ctx context.Context, id, granteeID string) error {
+	_, err := r.db.ExecContext(ctx,
+		`UPDATE emergency_access SET grantee_id = ?, updated_at = datetime('now') WHERE id = ?`,
+		granteeID, id)
+	if err != nil {
+		return fmt.Errorf("set grantee id: %w", err)
+	}
+	return nil
+}
+
+func (r *SQLiteEmergencyAccessRepo) ListByGranteeEmail(ctx context.Context, email string) ([]EmergencyAccess, error) {
+	rows, err := r.db.QueryContext(ctx,
+		`SELECT id, grantor_id, grantee_id, grantee_email, status, access_type, wait_time_days,
+		        encrypted_key, key_nonce, recovery_initiated_at, created_at, updated_at
+		 FROM emergency_access WHERE grantee_email = ?`, email)
+	if err != nil {
+		return nil, fmt.Errorf("list by grantee email: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	return r.scanEARows(rows)
+}
+
+func (r *SQLiteEmergencyAccessRepo) AutoApproveExpired(ctx context.Context) (int, error) {
+	res, err := r.db.ExecContext(ctx,
+		`UPDATE emergency_access SET status = 'recovery_approved', updated_at = datetime('now')
+		 WHERE status = 'recovery_initiated'
+		   AND datetime(recovery_initiated_at, '+' || wait_time_days || ' days') <= datetime('now')`)
+	if err != nil {
+		return 0, fmt.Errorf("auto approve expired: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	return int(n), nil
 }

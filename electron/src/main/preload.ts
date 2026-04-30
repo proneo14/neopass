@@ -378,6 +378,102 @@ const api = {
     },
   },
 
+  emergencyAccess: {
+    invite: (token: string, data: Record<string, unknown>): Promise<unknown> => {
+      validateString(token, 'token');
+      validateObject(data, 'data');
+      return ipcRenderer.invoke('emergency:invite', token, data);
+    },
+    listGranted: (token: string): Promise<unknown> => {
+      validateString(token, 'token');
+      return ipcRenderer.invoke('emergency:listGranted', token);
+    },
+    listTrusted: (token: string): Promise<unknown> => {
+      validateString(token, 'token');
+      return ipcRenderer.invoke('emergency:listTrusted', token);
+    },
+    accept: (token: string, eaId: string): Promise<unknown> => {
+      validateString(token, 'token');
+      validateString(eaId, 'eaId');
+      return ipcRenderer.invoke('emergency:accept', token, eaId);
+    },
+    confirm: (token: string, eaId: string, data: Record<string, unknown>): Promise<unknown> => {
+      validateString(token, 'token');
+      validateString(eaId, 'eaId');
+      validateObject(data, 'data');
+      return ipcRenderer.invoke('emergency:confirm', token, eaId, data);
+    },
+    initiate: (token: string, eaId: string): Promise<unknown> => {
+      validateString(token, 'token');
+      validateString(eaId, 'eaId');
+      return ipcRenderer.invoke('emergency:initiate', token, eaId);
+    },
+    approve: (token: string, eaId: string): Promise<unknown> => {
+      validateString(token, 'token');
+      validateString(eaId, 'eaId');
+      return ipcRenderer.invoke('emergency:approve', token, eaId);
+    },
+    reject: (token: string, eaId: string): Promise<unknown> => {
+      validateString(token, 'token');
+      validateString(eaId, 'eaId');
+      return ipcRenderer.invoke('emergency:reject', token, eaId);
+    },
+    getVault: (token: string, eaId: string): Promise<unknown> => {
+      validateString(token, 'token');
+      validateString(eaId, 'eaId');
+      return ipcRenderer.invoke('emergency:getVault', token, eaId);
+    },
+    takeover: (token: string, eaId: string, data: Record<string, unknown>): Promise<unknown> => {
+      validateString(token, 'token');
+      validateString(eaId, 'eaId');
+      validateObject(data, 'data');
+      return ipcRenderer.invoke('emergency:takeover', token, eaId, data);
+    },
+    performTakeover: (token: string, eaId: string, masterKeyHex: string, grantorEmail: string, newPassword: string): Promise<unknown> => {
+      validateString(token, 'token');
+      validateString(eaId, 'eaId');
+      validateString(masterKeyHex, 'masterKeyHex');
+      validateString(grantorEmail, 'grantorEmail');
+      validateString(newPassword, 'newPassword');
+      return ipcRenderer.invoke('emergency:performTakeover', token, eaId, masterKeyHex, grantorEmail, newPassword);
+    },
+    delete: (token: string, eaId: string): Promise<unknown> => {
+      validateString(token, 'token');
+      validateString(eaId, 'eaId');
+      return ipcRenderer.invoke('emergency:delete', token, eaId);
+    },
+    getPublicKey: (token: string, eaId: string): Promise<unknown> => {
+      validateString(token, 'token');
+      validateString(eaId, 'eaId');
+      return ipcRenderer.invoke('emergency:getPublicKey', token, eaId);
+    },
+    autoConfirm: (token: string, eaId: string, masterKeyHex: string): Promise<unknown> => {
+      validateString(token, 'token');
+      validateString(eaId, 'eaId');
+      validateString(masterKeyHex, 'masterKeyHex');
+      return ipcRenderer.invoke('emergency:autoConfirm', token, eaId, masterKeyHex);
+    },
+    decryptVault: (token: string, eaId: string, masterKeyHex: string): Promise<unknown> => {
+      validateString(token, 'token');
+      validateString(eaId, 'eaId');
+      validateString(masterKeyHex, 'masterKeyHex');
+      return ipcRenderer.invoke('emergency:decryptVault', token, eaId, masterKeyHex);
+    },
+  },
+
+  crypto: {
+    x25519Encrypt: (plaintextHex: string, recipientPubKeyHex: string): Promise<{ encrypted?: string; error?: string }> => {
+      validateString(plaintextHex, 'plaintextHex');
+      validateString(recipientPubKeyHex, 'recipientPubKeyHex');
+      return ipcRenderer.invoke('crypto:x25519Encrypt', plaintextHex, recipientPubKeyHex);
+    },
+    x25519Decrypt: (blobHex: string, privateKeyDerHex: string): Promise<{ plaintext?: string; error?: string }> => {
+      validateString(blobHex, 'blobHex');
+      validateString(privateKeyDerHex, 'privateKeyDerHex');
+      return ipcRenderer.invoke('crypto:x25519Decrypt', blobHex, privateKeyDerHex);
+    },
+  },
+
   collections: {
     create: (token: string, orgId: string, data: Record<string, unknown>): Promise<unknown> => {
       validateString(token, 'token');
@@ -474,6 +570,13 @@ const api = {
   openExternal: (url: string): Promise<void> => {
     validateString(url, 'url');
     return ipcRenderer.invoke('app:openExternal', url);
+  },
+
+  /** Register a callback for force-logout events (e.g. after emergency takeover). */
+  onForceLogout: (callback: () => void): (() => void) => {
+    const handler = () => callback();
+    ipcRenderer.on('force-logout', handler);
+    return () => { ipcRenderer.removeListener('force-logout', handler); };
   },
 } as const;
 

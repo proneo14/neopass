@@ -12,6 +12,7 @@ import {
   verifyBiometric,
   disableBiometric,
   warmUpBiometric,
+  promptBiometric,
 } from './biometric';
 
 let mainWindow: BrowserWindow | null = null;
@@ -27,6 +28,16 @@ const isDev = process.env.NODE_ENV === 'development';
 
 // API server URL: use BACKEND_URL env or try sidecar
 const backendUrl = process.env.BACKEND_URL || '';
+
+/**
+ * Notify the renderer to force-logout (e.g. after emergency takeover revokes tokens).
+ */
+function emitForceLogout(): void {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('force-logout');
+    console.log('[auth] emitted force-logout to renderer');
+  }
+}
 
 function getApiBase(): string {
   if (backendUrl) return backendUrl;
@@ -384,6 +395,18 @@ function registerIpcHandlers(): void {
         if (jwt && userId) {
           pushSessionToSidecar(jwt, masterKeyHex, userId, credentials.email);
         }
+        // Auto-update biometric credentials so biometric unlock uses the current master key
+        try {
+          const credentialsJson = JSON.stringify({
+            email: credentials.email,
+            authHash: authHashHex,
+            masterKeyHex,
+          });
+          await enableBiometric(credentialsJson);
+          console.log('[ipc] biometric credentials updated after manual login');
+        } catch {
+          // Biometric not available or not configured — ignore
+        }
       }
       return result;
     } catch {
@@ -487,6 +510,7 @@ function registerIpcHandlers(): void {
       const res = await fetch(url, {
         headers: { Authorization: `Bearer ${token}` },
       });
+      if (res.status === 401) { emitForceLogout(); return { error: 'session_revoked' }; }
       return await res.json();
     } catch {
       return { error: 'Failed to connect to backend' };
@@ -500,6 +524,7 @@ function registerIpcHandlers(): void {
       const res = await fetch(`${api}/api/v1/vault/entries/${encodeURIComponent(entryId)}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
+      if (res.status === 401) { emitForceLogout(); return { error: 'session_revoked' }; }
       return await res.json();
     } catch {
       return { error: 'Failed to connect to backend' };
@@ -1265,6 +1290,10 @@ public class SecureClip {
         authHash: authHashHex,
         masterKeyHex,
       });
+
+      // Prompt fingerprint/Windows Hello before saving credentials
+      await promptBiometric('set up biometric unlock');
+
       await enableBiometric(credentialsJson);
 
       // Zero the derived buffer
@@ -1879,6 +1908,477 @@ transports:r.getTransports?.()??['usb']
       return { success: true };
     } catch {
       return { error: 'Failed to save send domain' };
+    }
+  });
+
+  // --- Emergency Access IPC handlers ---
+
+  ipcMain.handle('emergency:invite', async (_event, token: string, data: Record<string, unknown>) => {
+    const api = getApiBase();
+    if (!api) return { error: 'Backend not available' };
+    try {
+      const res = await fetch(`${api}/api/v1/emergency-access/invite`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify(data),
+      });
+      return await res.json();
+    } catch { return { error: 'Failed to connect to backend' }; }
+  });
+
+  ipcMain.handle('emergency:listGranted', async (_event, token: string) => {
+    const api = getApiBase();
+    if (!api) return { error: 'Backend not available' };
+    try {
+      const res = await fetch(`${api}/api/v1/emergency-access/granted`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      return await res.json();
+    } catch { return { error: 'Failed to connect to backend' }; }
+  });
+
+  ipcMain.handle('emergency:listTrusted', async (_event, token: string) => {
+    const api = getApiBase();
+    if (!api) return { error: 'Backend not available' };
+    try {
+      const res = await fetch(`${api}/api/v1/emergency-access/trusted`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      return await res.json();
+    } catch { return { error: 'Failed to connect to backend' }; }
+  });
+
+  ipcMain.handle('emergency:accept', async (_event, token: string, eaId: string) => {
+    const api = getApiBase();
+    if (!api) return { error: 'Backend not available' };
+    try {
+      const res = await fetch(`${api}/api/v1/emergency-access/${encodeURIComponent(eaId)}/accept`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      return await res.json();
+    } catch { return { error: 'Failed to connect to backend' }; }
+  });
+
+  ipcMain.handle('emergency:confirm', async (_event, token: string, eaId: string, data: Record<string, unknown>) => {
+    const api = getApiBase();
+    if (!api) return { error: 'Backend not available' };
+    try {
+      const res = await fetch(`${api}/api/v1/emergency-access/${encodeURIComponent(eaId)}/confirm`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify(data),
+      });
+      return await res.json();
+    } catch { return { error: 'Failed to connect to backend' }; }
+  });
+
+  ipcMain.handle('emergency:initiate', async (_event, token: string, eaId: string) => {
+    const api = getApiBase();
+    if (!api) return { error: 'Backend not available' };
+    try {
+      const res = await fetch(`${api}/api/v1/emergency-access/${encodeURIComponent(eaId)}/initiate`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      return await res.json();
+    } catch { return { error: 'Failed to connect to backend' }; }
+  });
+
+  ipcMain.handle('emergency:approve', async (_event, token: string, eaId: string) => {
+    const api = getApiBase();
+    if (!api) return { error: 'Backend not available' };
+    try {
+      const res = await fetch(`${api}/api/v1/emergency-access/${encodeURIComponent(eaId)}/approve`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      return await res.json();
+    } catch { return { error: 'Failed to connect to backend' }; }
+  });
+
+  ipcMain.handle('emergency:reject', async (_event, token: string, eaId: string) => {
+    const api = getApiBase();
+    if (!api) return { error: 'Backend not available' };
+    try {
+      const res = await fetch(`${api}/api/v1/emergency-access/${encodeURIComponent(eaId)}/reject`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      return await res.json();
+    } catch { return { error: 'Failed to connect to backend' }; }
+  });
+
+  ipcMain.handle('emergency:getVault', async (_event, token: string, eaId: string) => {
+    const api = getApiBase();
+    if (!api) return { error: 'Backend not available' };
+    try {
+      const res = await fetch(`${api}/api/v1/emergency-access/${encodeURIComponent(eaId)}/vault`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      return await res.json();
+    } catch { return { error: 'Failed to connect to backend' }; }
+  });
+
+  ipcMain.handle('emergency:takeover', async (_event, token: string, eaId: string, data: Record<string, unknown>) => {
+    const api = getApiBase();
+    if (!api) return { error: 'Backend not available' };
+    try {
+      const res = await fetch(`${api}/api/v1/emergency-access/${encodeURIComponent(eaId)}/takeover`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify(data),
+      });
+      return await res.json();
+    } catch { return { error: 'Failed to connect to backend' }; }
+  });
+
+  // Full takeover: decrypt grantor's vault, re-encrypt with new password, POST takeover
+  ipcMain.handle('emergency:performTakeover', async (_event, token: string, eaId: string, myMasterKeyHex: string, grantorEmail: string, newPassword: string) => {
+    const api = getApiBase();
+    if (!api) return { error: 'Backend not available' };
+    try {
+      // 1. Decrypt grantor's vault (same as decryptVault IPC)
+      const vaultRes = await fetch(`${api}/api/v1/emergency-access/${encodeURIComponent(eaId)}/vault`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const vaultData = await vaultRes.json() as { entries?: Array<Record<string, unknown>>; encrypted_key?: string; error?: string };
+      if (vaultData.error) return { error: vaultData.error };
+      if (!vaultData.encrypted_key) return { error: 'Key exchange not completed — grantor must log in first' };
+
+      // 2. Get own private key and decrypt grantor's master key
+      const settingsRes = await fetch(`${api}/api/v1/auth/security-settings`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const settings = await settingsRes.json() as { encrypted_private_key?: string; error?: string };
+      if (!settings.encrypted_private_key) return { error: 'Cannot access your private key' };
+
+      const masterKey = Buffer.from(myMasterKeyHex, 'hex');
+      const encPrivKey = Buffer.from(settings.encrypted_private_key, 'hex');
+      const iv = encPrivKey.subarray(0, 12);
+      const authTag = encPrivKey.subarray(encPrivKey.length - 16);
+      const privCiphertext = encPrivKey.subarray(12, encPrivKey.length - 16);
+      const privDecipher = nodeCrypto.createDecipheriv('aes-256-gcm', masterKey, iv);
+      privDecipher.setAuthTag(authTag);
+      const privateKeyDer = Buffer.concat([privDecipher.update(privCiphertext), privDecipher.final()]);
+
+      // X25519 decrypt grantor's master key
+      const blob = Buffer.from(vaultData.encrypted_key, 'hex');
+      const ephPubRaw = blob.subarray(0, 32);
+      const blobNonce = blob.subarray(32, 44);
+      const blobCiphertext = blob.subarray(44);
+
+      const privateKey = nodeCrypto.createPrivateKey({ key: privateKeyDer, format: 'der', type: 'pkcs8' });
+      const spkiPrefix = Buffer.from('302a300506032b656e032100', 'hex');
+      const ephPubDer = Buffer.concat([spkiPrefix, ephPubRaw]);
+      const ephPub = nodeCrypto.createPublicKey({ key: ephPubDer, format: 'der', type: 'spki' });
+
+      const sharedSecret = nodeCrypto.diffieHellman({ privateKey, publicKey: ephPub });
+      const decKey = nodeCrypto.createHmac('sha256', sharedSecret).update('x25519-emergency').digest();
+
+      const blobAuthTag = blobCiphertext.subarray(blobCiphertext.length - 16);
+      const blobEncData = blobCiphertext.subarray(0, blobCiphertext.length - 16);
+      const blobDecipher = nodeCrypto.createDecipheriv('aes-256-gcm', decKey, blobNonce);
+      blobDecipher.setAuthTag(blobAuthTag);
+      const grantorMasterKey = Buffer.concat([blobDecipher.update(blobEncData), blobDecipher.final()]);
+
+      // 3. Decrypt all vault entries with grantor's master key
+      const entries = vaultData.entries || [];
+      const decryptedEntries: Array<{ id: string; plaintext: Buffer; nonce: string }> = [];
+      for (const entry of entries) {
+        try {
+          const entryData = Buffer.from(entry.encrypted_data as string, 'hex');
+          const entryNonce = Buffer.from(entry.nonce as string, 'hex');
+          const entryAuthTag = entryData.subarray(entryData.length - 16);
+          const entryCiphertext = entryData.subarray(0, entryData.length - 16);
+          const entryDecipher = nodeCrypto.createDecipheriv('aes-256-gcm', grantorMasterKey, entryNonce);
+          entryDecipher.setAuthTag(entryAuthTag);
+          const decrypted = Buffer.concat([entryDecipher.update(entryCiphertext), entryDecipher.final()]);
+          decryptedEntries.push({ id: entry.id as string, plaintext: decrypted, nonce: entry.nonce as string });
+        } catch {
+          // Skip entries that can't be decrypted
+        }
+      }
+
+      // 4. Derive new master key and auth hash from new password
+      const newSalt = nodeCrypto.createHash('sha256').update(grantorEmail).digest();
+      const newDerived = nodeCrypto.pbkdf2Sync(newPassword, newSalt, 100000, 64, 'sha512');
+      const newMasterKey = newDerived.subarray(0, 32);
+      const newAuthHash = newDerived.subarray(32, 64);
+
+      // 5. Generate new X25519 key pair for grantor
+      const newKeyPair = nodeCrypto.generateKeyPairSync('x25519');
+      const newPublicKeyBuf = newKeyPair.publicKey.export({ type: 'spki', format: 'der' });
+      const newPrivateKeyBuf = newKeyPair.privateKey.export({ type: 'pkcs8', format: 'der' });
+
+      // Encrypt new private key with new master key
+      const newIv = nodeCrypto.randomBytes(12);
+      const newCipher = nodeCrypto.createCipheriv('aes-256-gcm', newMasterKey, newIv);
+      const newEncPrivKey = Buffer.concat([newIv, newCipher.update(newPrivateKeyBuf), newCipher.final(), newCipher.getAuthTag()]);
+
+      // 6. Re-encrypt all entries with new master key
+      const reEncrypted: Array<{ id: string; encrypted_data: string; nonce: string }> = [];
+      for (const entry of decryptedEntries) {
+        const reNonce = nodeCrypto.randomBytes(12);
+        const reCipher = nodeCrypto.createCipheriv('aes-256-gcm', newMasterKey, reNonce);
+        const reEnc = Buffer.concat([reCipher.update(entry.plaintext), reCipher.final(), reCipher.getAuthTag()]);
+        reEncrypted.push({
+          id: entry.id,
+          encrypted_data: reEnc.toString('hex'),
+          nonce: reNonce.toString('hex'),
+        });
+      }
+
+      // 7. POST takeover with new credentials and re-encrypted entries
+      const takeoverRes = await fetch(`${api}/api/v1/emergency-access/${encodeURIComponent(eaId)}/takeover`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({
+          new_auth_hash: newAuthHash.toString('hex'),
+          new_salt: newSalt.toString('hex'),
+          new_public_key: newPublicKeyBuf.toString('hex'),
+          new_encrypted_private_key: newEncPrivKey.toString('hex'),
+          new_master_key: newMasterKey.toString('hex'),
+          old_master_key: grantorMasterKey.toString('hex'),
+          re_encrypted_entries: reEncrypted,
+        }),
+      });
+      return await takeoverRes.json();
+    } catch (e) {
+      console.error('[emergency] performTakeover error:', e);
+      return { error: `Takeover failed: ${e instanceof Error ? e.message : 'unknown'}` };
+    }
+  });
+
+  ipcMain.handle('emergency:delete', async (_event, token: string, eaId: string) => {
+    const api = getApiBase();
+    if (!api) return { error: 'Backend not available' };
+    try {
+      const res = await fetch(`${api}/api/v1/emergency-access/${encodeURIComponent(eaId)}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      return await res.json();
+    } catch { return { error: 'Failed to connect to backend' }; }
+  });
+
+  ipcMain.handle('emergency:getPublicKey', async (_event, token: string, eaId: string) => {
+    const api = getApiBase();
+    if (!api) return { error: 'Backend not available' };
+    try {
+      const res = await fetch(`${api}/api/v1/emergency-access/${encodeURIComponent(eaId)}/public-key`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      return await res.json();
+    } catch { return { error: 'Failed to connect to backend' }; }
+  });
+
+  // Auto-confirm: grantor encrypts their master key for the grantee using X25519
+  ipcMain.handle('emergency:autoConfirm', async (_event, token: string, eaId: string, masterKeyHex: string) => {
+    const api = getApiBase();
+    if (!api) return { error: 'Backend not available' };
+    try {
+      // 1. Get grantee's public key
+      const pkRes = await fetch(`${api}/api/v1/emergency-access/${encodeURIComponent(eaId)}/public-key`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const pkData = await pkRes.json() as { public_key?: string; error?: string };
+      if (pkData.error || !pkData.public_key) return { error: pkData.error || 'Failed to get grantee public key' };
+
+      // 2. X25519 encrypt master key with grantee's public key
+      const recipientPubKeyDer = Buffer.from(pkData.public_key, 'hex');
+      const recipientKey = nodeCrypto.createPublicKey({ key: recipientPubKeyDer, format: 'der', type: 'spki' });
+
+      const ephemeral = nodeCrypto.generateKeyPairSync('x25519');
+      const ephPubBuf = ephemeral.publicKey.export({ type: 'spki', format: 'der' });
+      const ephPubRaw = ephPubBuf.subarray(ephPubBuf.length - 32);
+
+      const sharedSecret = nodeCrypto.diffieHellman({ privateKey: ephemeral.privateKey, publicKey: recipientKey });
+      const encKey = nodeCrypto.createHmac('sha256', sharedSecret).update('x25519-emergency').digest();
+
+      const plaintext = Buffer.from(masterKeyHex, 'hex');
+      const nonce = nodeCrypto.randomBytes(12);
+      const cipher = nodeCrypto.createCipheriv('aes-256-gcm', encKey, nonce);
+      const encrypted = Buffer.concat([cipher.update(plaintext), cipher.final()]);
+      const authTag = cipher.getAuthTag();
+      const ciphertext = Buffer.concat([encrypted, authTag]);
+      const blob = Buffer.concat([ephPubRaw, nonce, ciphertext]);
+
+      // 3. POST confirm with the encrypted blob
+      const confirmRes = await fetch(`${api}/api/v1/emergency-access/${encodeURIComponent(eaId)}/confirm`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ encrypted_key: blob.toString('hex') }),
+      });
+      return await confirmRes.json();
+    } catch (e) { console.error('[emergency] autoConfirm error:', e); return { error: `Auto-confirm failed: ${e instanceof Error ? e.message : 'unknown'}` }; }
+  });
+
+  // Decrypt emergency vault: recovers grantor's master key and decrypts all entries
+  ipcMain.handle('emergency:decryptVault', async (_event, token: string, eaId: string, masterKeyHex: string) => {
+    const api = getApiBase();
+    if (!api) return { error: 'Backend not available' };
+    try {
+      // 1. Fetch vault data (entries + encrypted key blob)
+      const vaultRes = await fetch(`${api}/api/v1/emergency-access/${encodeURIComponent(eaId)}/vault`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const vaultData = await vaultRes.json() as { entries?: Array<Record<string, unknown>>; encrypted_key?: string; error?: string };
+      if (vaultData.error) return { error: vaultData.error };
+      if (!vaultData.encrypted_key || vaultData.encrypted_key === '') {
+        // Key exchange not done — return entries as-is (encrypted)
+        return { entries: vaultData.entries || [], decrypted: false };
+      }
+
+      // 2. Get own encrypted private key from security settings
+      const settingsRes = await fetch(`${api}/api/v1/auth/security-settings`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const settings = await settingsRes.json() as { encrypted_private_key?: string; error?: string };
+      if (!settings.encrypted_private_key) return { entries: vaultData.entries || [], decrypted: false };
+
+      // 3. Decrypt own private key with own master key
+      const masterKey = Buffer.from(masterKeyHex, 'hex');
+      const encPrivKey = Buffer.from(settings.encrypted_private_key, 'hex');
+      const iv = encPrivKey.subarray(0, 12);
+      const authTag = encPrivKey.subarray(encPrivKey.length - 16);
+      const privCiphertext = encPrivKey.subarray(12, encPrivKey.length - 16);
+      const privDecipher = nodeCrypto.createDecipheriv('aes-256-gcm', masterKey, iv);
+      privDecipher.setAuthTag(authTag);
+      const privateKeyDer = Buffer.concat([privDecipher.update(privCiphertext), privDecipher.final()]);
+
+      // 4. X25519 decrypt the grantor's master key from the blob
+      const blob = Buffer.from(vaultData.encrypted_key, 'hex');
+      const ephPubRaw = blob.subarray(0, 32);
+      const blobNonce = blob.subarray(32, 44);
+      const blobCiphertext = blob.subarray(44);
+
+      const privateKey = nodeCrypto.createPrivateKey({ key: privateKeyDer, format: 'der', type: 'pkcs8' });
+      const spkiPrefix = Buffer.from('302a300506032b656e032100', 'hex');
+      const ephPubDer = Buffer.concat([spkiPrefix, ephPubRaw]);
+      const ephPub = nodeCrypto.createPublicKey({ key: ephPubDer, format: 'der', type: 'spki' });
+
+      const sharedSecret = nodeCrypto.diffieHellman({ privateKey, publicKey: ephPub });
+      const decKey = nodeCrypto.createHmac('sha256', sharedSecret).update('x25519-emergency').digest();
+
+      const blobAuthTag = blobCiphertext.subarray(blobCiphertext.length - 16);
+      const blobEncData = blobCiphertext.subarray(0, blobCiphertext.length - 16);
+      const blobDecipher = nodeCrypto.createDecipheriv('aes-256-gcm', decKey, blobNonce);
+      blobDecipher.setAuthTag(blobAuthTag);
+      const grantorMasterKey = Buffer.concat([blobDecipher.update(blobEncData), blobDecipher.final()]);
+
+      // 5. Decrypt each vault entry using the recovered master key
+      const entries = vaultData.entries || [];
+      const decryptedEntries: Array<Record<string, unknown>> = [];
+      for (const entry of entries) {
+        try {
+          const entryData = Buffer.from(entry.encrypted_data as string, 'hex');
+          const entryNonce = Buffer.from(entry.nonce as string, 'hex');
+          const entryAuthTag = entryData.subarray(entryData.length - 16);
+          const entryCiphertext = entryData.subarray(0, entryData.length - 16);
+          const entryDecipher = nodeCrypto.createDecipheriv('aes-256-gcm', grantorMasterKey, entryNonce);
+          entryDecipher.setAuthTag(entryAuthTag);
+          const decrypted = Buffer.concat([entryDecipher.update(entryCiphertext), entryDecipher.final()]);
+          const data = JSON.parse(decrypted.toString('utf8'));
+          decryptedEntries.push({
+            id: entry.id,
+            entry_type: entry.entry_type,
+            data,
+            version: entry.version,
+            is_favorite: entry.is_favorite,
+            is_archived: entry.is_archived,
+            created_at: entry.created_at,
+            updated_at: entry.updated_at,
+          });
+        } catch {
+          // Entry couldn't be decrypted — include as encrypted
+          decryptedEntries.push({
+            id: entry.id,
+            entry_type: entry.entry_type,
+            version: entry.version,
+            is_favorite: entry.is_favorite,
+            is_archived: entry.is_archived,
+            created_at: entry.created_at,
+            updated_at: entry.updated_at,
+          });
+        }
+      }
+      return { entries: decryptedEntries, decrypted: true };
+    } catch (e) { console.error('[emergency] decryptVault error:', e); return { error: `Vault decryption failed: ${e instanceof Error ? e.message : 'unknown'}` }; }
+  });
+
+  // X25519 encrypt: encrypt plaintext with recipient's X25519 public key (DER SPKI hex)
+  ipcMain.handle('crypto:x25519Encrypt', (_event, plaintextHex: string, recipientPubKeyHex: string) => {
+    try {
+      const recipientPubKeyDer = Buffer.from(recipientPubKeyHex, 'hex');
+      const recipientKey = nodeCrypto.createPublicKey({ key: recipientPubKeyDer, format: 'der', type: 'spki' });
+
+      // Generate ephemeral X25519 key pair
+      const ephemeral = nodeCrypto.generateKeyPairSync('x25519');
+      const ephPubBuf = ephemeral.publicKey.export({ type: 'spki', format: 'der' });
+      // Raw 32-byte public key is at the end of the SPKI DER encoding
+      const ephPubRaw = ephPubBuf.subarray(ephPubBuf.length - 32);
+
+      // ECDH shared secret
+      const sharedSecret = nodeCrypto.diffieHellman({
+        privateKey: ephemeral.privateKey,
+        publicKey: recipientKey,
+      });
+
+      // Derive encryption key using HMAC-SHA256
+      const encKey = nodeCrypto.createHmac('sha256', sharedSecret).update('x25519-emergency').digest();
+
+      // AES-256-GCM encrypt
+      const plaintext = Buffer.from(plaintextHex, 'hex');
+      const nonce = nodeCrypto.randomBytes(12);
+      const cipher = nodeCrypto.createCipheriv('aes-256-gcm', encKey, nonce);
+      const encrypted = Buffer.concat([cipher.update(plaintext), cipher.final()]);
+      const authTag = cipher.getAuthTag();
+      const ciphertext = Buffer.concat([encrypted, authTag]);
+
+      // blob = ephemeral pub key (32) || nonce (12) || ciphertext
+      const blob = Buffer.concat([ephPubRaw, nonce, ciphertext]);
+      return { encrypted: blob.toString('hex') };
+    } catch (err) {
+      return { error: `X25519 encryption failed: ${err}` };
+    }
+  });
+
+  // X25519 decrypt: decrypt blob using own private key
+  ipcMain.handle('crypto:x25519Decrypt', (_event, blobHex: string, privateKeyDerHex: string) => {
+    try {
+      const blob = Buffer.from(blobHex, 'hex');
+      const ephPubRaw = blob.subarray(0, 32);
+      const nonce = blob.subarray(32, 44);
+      const ciphertext = blob.subarray(44);
+
+      // Import own private key
+      const privKeyDer = Buffer.from(privateKeyDerHex, 'hex');
+      const privateKey = nodeCrypto.createPrivateKey({ key: privKeyDer, format: 'der', type: 'pkcs8' });
+
+      // Reconstruct ephemeral public key from raw 32 bytes — X25519 SPKI DER prefix
+      const spkiPrefix = Buffer.from('302a300506032b656e032100', 'hex'); // X25519 SPKI header
+      const ephPubDer = Buffer.concat([spkiPrefix, ephPubRaw]);
+      const ephPub = nodeCrypto.createPublicKey({ key: ephPubDer, format: 'der', type: 'spki' });
+
+      // ECDH shared secret
+      const sharedSecret = nodeCrypto.diffieHellman({
+        privateKey: privateKey,
+        publicKey: ephPub,
+      });
+
+      // Derive decryption key
+      const decKey = nodeCrypto.createHmac('sha256', sharedSecret).update('x25519-emergency').digest();
+
+      // AES-256-GCM decrypt
+      const authTag = ciphertext.subarray(ciphertext.length - 16);
+      const encData = ciphertext.subarray(0, ciphertext.length - 16);
+      const decipher = nodeCrypto.createDecipheriv('aes-256-gcm', decKey, nonce);
+      decipher.setAuthTag(authTag);
+      const decrypted = Buffer.concat([decipher.update(encData), decipher.final()]);
+      return { plaintext: decrypted.toString('hex') };
+    } catch (err) {
+      return { error: `X25519 decryption failed: ${err}` };
     }
   });
 

@@ -108,6 +108,7 @@ func main() {
 	var collectionRepo db.CollectionRepository
 	var orgRepo db.OrgRepository
 	var auditRepo db.AuditRepository
+	var eaRepo db.EmergencyAccessRepository
 	var rawSQLiteDB *sql.DB // raw *sql.DB for migration support
 
 	if cfg.StorageBackend == "sqlite" {
@@ -136,6 +137,7 @@ func main() {
 		syncRepo := db.NewSQLiteSyncRepo(sqliteDB.DB)
 		sendRepo = db.NewSQLiteSendRepo(sqliteDB.DB)
 		collectionRepo = db.NewSQLiteCollectionRepo()
+		eaRepo = db.NewSQLiteEmergencyAccessRepo(sqliteDB.DB)
 
 		var authErr error
 		authService, authErr = auth.NewService(userRepo, nil, nil, auth.ServiceConfig{}, vaultRepo, orgRepo)
@@ -166,6 +168,7 @@ func main() {
 		syncRepo := db.NewPgSyncRepo(database.Pool)
 		sendRepo = db.NewPgSendRepo(database.Pool)
 		collectionRepo = db.NewPgCollectionRepo(database.Pool)
+		eaRepo = db.NewPgEmergencyAccessRepo(database.Pool)
 		var authErr error
 		authService, authErr = auth.NewService(userRepo, nil, nil, auth.ServiceConfig{}, vaultRepo, orgRepo)
 		if authErr != nil {
@@ -202,7 +205,7 @@ func main() {
 		})
 
 		if authService != nil {
-			r.Mount("/", api.Router(authService, totpService, smsService, vaultService, adminService, syncService, webauthnService, userRepo, sendRepo, collectionRepo, orgRepo, auditRepo, cfg.StorageBackend, rawSQLiteDB))
+			r.Mount("/", api.Router(authService, totpService, smsService, vaultService, adminService, syncService, webauthnService, userRepo, vaultRepo, sendRepo, collectionRepo, orgRepo, auditRepo, eaRepo, cfg.StorageBackend, rawSQLiteDB))
 		}
 	})
 
@@ -266,6 +269,33 @@ func main() {
 				select {
 				case <-ticker.C:
 					sendHandler.PurgeExpiredSends()
+				case <-ctx.Done():
+					return
+				}
+			}
+		}()
+	}
+
+	// Background goroutine: auto-approve emergency access after wait period
+	if eaRepo != nil {
+		go func() {
+			ticker := time.NewTicker(1 * time.Hour)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-ticker.C:
+					eligible, err := eaRepo.GetAutoApproveEligible(context.Background())
+					if err != nil {
+						log.Error().Err(err).Msg("failed to check emergency access auto-approve")
+						continue
+					}
+					for _, ea := range eligible {
+						if err := eaRepo.UpdateStatus(context.Background(), ea.ID, "recovery_approved"); err != nil {
+							log.Error().Err(err).Str("id", ea.ID).Msg("failed to auto-approve emergency access")
+						} else {
+							log.Info().Str("id", ea.ID).Str("grantee_email", ea.GranteeEmail).Msg("emergency access auto-approved")
+						}
+					}
 				case <-ctx.Done():
 					return
 				}
