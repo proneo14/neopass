@@ -7,7 +7,7 @@ const BASE32_CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
 
 /** Decode a base32-encoded string into raw bytes. */
 function base32Decode(input: string): Uint8Array {
-  const clean = input.replace(/[\s=\-]/g, '').toUpperCase();
+  const clean = input.replace(/[\s=-]/g, '').toUpperCase();
   const bits: number[] = [];
   for (const ch of clean) {
     const val = BASE32_CHARS.indexOf(ch);

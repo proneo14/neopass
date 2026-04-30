@@ -23,7 +23,7 @@ let reqCounter = 0;
 console.debug('[LGI Pass] passkey provider loaded on', window.location.hostname);
 
 /** Decode a base64url string to a Uint8Array. */
-function b64urlToBytes(b64: string): Uint8Array {
+const b64urlToBytes = (b64: string): Uint8Array => {
   let s = b64.replace(/-/g, '+').replace(/_/g, '/');
   while (s.length % 4 !== 0) s += '=';
   const binary = atob(s);
@@ -33,7 +33,7 @@ function b64urlToBytes(b64: string): Uint8Array {
 }
 
 /** Encode a Uint8Array or ArrayBuffer to base64url (no padding). */
-function bytesToB64url(buf: ArrayBuffer | Uint8Array): string {
+const bytesToB64url = (buf: ArrayBuffer | Uint8Array): string => {
   const bytes = buf instanceof Uint8Array ? buf : new Uint8Array(buf);
   let binary = '';
   for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
@@ -41,7 +41,7 @@ function bytesToB64url(buf: ArrayBuffer | Uint8Array): string {
 }
 
 /** Send a message to the ISOLATED-world content script and wait for a reply. */
-function sendPasskeyMessage(payload: Record<string, unknown>): Promise<Record<string, unknown>> {
+const sendPasskeyMessage = (payload: Record<string, unknown>): Promise<Record<string, unknown>> => {
   return new Promise((resolve) => {
     const id = `pk_${++reqCounter}_${Date.now()}`;
 
@@ -70,7 +70,7 @@ function sendPasskeyMessage(payload: Record<string, unknown>): Promise<Record<st
  * Build a PublicKeyCredential for navigator.credentials.create().
  * Websites call getClientExtensionResults(), response.getTransports(), etc.
  */
-function buildCreateCredential(data: Record<string, unknown>, challenge: string): PublicKeyCredential {
+const buildCreateCredential = (data: Record<string, unknown>, challenge: string): PublicKeyCredential => {
   const credIdBytes = b64urlToBytes(data.credential_id as string);
   const attestObjBytes = b64urlToBytes(data.attestation_object as string);
   const clientDataJSON = b64urlToBytes(data.client_data_json as string);
@@ -106,7 +106,7 @@ function buildCreateCredential(data: Record<string, unknown>, challenge: string)
 /**
  * Build a PublicKeyCredential for navigator.credentials.get().
  */
-function buildGetCredential(data: Record<string, unknown>): PublicKeyCredential {
+const buildGetCredential = (data: Record<string, unknown>): PublicKeyCredential => {
   const credIdBytes = b64urlToBytes(data.credential_id as string);
   const authDataBytes = b64urlToBytes(data.authenticator_data as string);
   const clientDataJSON = b64urlToBytes(data.client_data_json as string);

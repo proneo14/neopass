@@ -674,7 +674,7 @@ function registerIpcHandlers(): void {
       if (!hashPrefix || hashPrefix.length !== 5) {
         return { error: 'Invalid hash prefix' };
       }
-      const { net } = require('electron');
+      const { net } = await import('electron');
       const resp = await net.fetch(`https://api.pwnedpasswords.com/range/${encodeURIComponent(hashPrefix)}`, {
         headers: { 'Add-Padding': 'true' },
       });
