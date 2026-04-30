@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useRef, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useParams, useLocation } from 'react-router-dom';
 import { useVaultStore } from '../store/vaultStore';
 import { useAuthStore } from '../store/authStore';
 import { ENTRY_TYPE_ICONS, ENTRY_TYPE_LABELS } from '../types/vault';
@@ -27,6 +27,7 @@ function ContextMenu({
   onRestore,
   onPermanentDelete,
   onClone,
+  readOnly = false,
 }: {
   x: number;
   y: number;
@@ -45,6 +46,7 @@ function ContextMenu({
   onRestore: () => void;
   onPermanentDelete: () => void;
   onClone: () => void;
+  readOnly?: boolean;
 }) {
   const menuRef = React.useRef<HTMLDivElement>(null);
   const [pos, setPos] = React.useState({ left: x, top: y });
@@ -103,24 +105,28 @@ function ContextMenu({
           <button onClick={onToggleFavorite} className="w-full text-left px-3 py-1.5 text-sm text-surface-200 hover:bg-surface-700 transition-colors">
             {isFavorite ? 'Remove favorite' : 'Add to favorites'}
           </button>
-          {isArchived ? (
-            <button onClick={onUnarchive} className="w-full text-left px-3 py-1.5 text-sm text-surface-200 hover:bg-surface-700 transition-colors">
-              Unarchive
-            </button>
-          ) : (
-            <button onClick={onArchive} className="w-full text-left px-3 py-1.5 text-sm text-surface-200 hover:bg-surface-700 transition-colors">
-              Archive
-            </button>
+          {!readOnly && (
+            <>
+              {isArchived ? (
+                <button onClick={onUnarchive} className="w-full text-left px-3 py-1.5 text-sm text-surface-200 hover:bg-surface-700 transition-colors">
+                  Unarchive
+                </button>
+              ) : (
+                <button onClick={onArchive} className="w-full text-left px-3 py-1.5 text-sm text-surface-200 hover:bg-surface-700 transition-colors">
+                  Archive
+                </button>
+              )}
+              <button onClick={onEdit} className="w-full text-left px-3 py-1.5 text-sm text-surface-200 hover:bg-surface-700 transition-colors">
+                Edit
+              </button>
+              <button onClick={onClone} className="w-full text-left px-3 py-1.5 text-sm text-surface-200 hover:bg-surface-700 transition-colors">
+                Clone
+              </button>
+              <button onClick={onDelete} className="w-full text-left px-3 py-1.5 text-sm text-red-400 hover:bg-surface-700 transition-colors">
+                Delete
+              </button>
+            </>
           )}
-          <button onClick={onEdit} className="w-full text-left px-3 py-1.5 text-sm text-surface-200 hover:bg-surface-700 transition-colors">
-            Edit
-          </button>
-          <button onClick={onClone} className="w-full text-left px-3 py-1.5 text-sm text-surface-200 hover:bg-surface-700 transition-colors">
-            Clone
-          </button>
-          <button onClick={onDelete} className="w-full text-left px-3 py-1.5 text-sm text-red-400 hover:bg-surface-700 transition-colors">
-            Delete
-          </button>
         </>
       )}
     </div>
@@ -267,17 +273,28 @@ function NewEntryModal({ entryType, onCancel, onSave }: {
 
 export function Vault() {
   const navigate = useNavigate();
-  const { entries, entryFields, addEntry, removeEntry, searchQuery, setSearchQuery, sortBy, setSortBy, selectedTypeFilter, setSelectedTypeFilter, activeFilter, updateEntry, isRepromptApproved, approveReprompt } = useVaultStore();
+  const location = useLocation();
+  const { collId } = useParams<{ collId?: string }>();
+  const { entries, entryFields, addEntry, removeEntry, searchQuery, setSearchQuery, sortBy, setSortBy, selectedTypeFilter, setSelectedTypeFilter, updateEntry, isRepromptApproved, approveReprompt } = useVaultStore();
   const { token, masterKeyHex } = useAuthStore();
+
+  // Derive filter and collection from URL path
+  const selectedCollectionId = collId ?? null;
+  const collPermissionRef = React.useRef<string | null>(null);
+  const activeFilter: 'all' | 'favorites' | 'archived' | 'trash' =
+    location.pathname === '/vault/favorites' ? 'favorites' :
+    location.pathname === '/vault/archived' ? 'archived' :
+    location.pathname === '/vault/trash' ? 'trash' : 'all';
   const [showAddDropdown, setShowAddDropdown] = useState(false);
   const [newEntryType, setNewEntryType] = useState<string | null>(null);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; entryId: string } | null>(null);
   const [loading, setLoading] = useState(true);
+  const loadingRef = useRef(false);
   const [showRepromptDialog, setShowRepromptDialog] = useState(false);
   const [pendingRepromptAction, setPendingRepromptAction] = useState<(() => void) | null>(null);
   const [pendingRepromptEntryId, setPendingRepromptEntryId] = useState<string | null>(null);
 
-  const filterTitle = activeFilter === 'favorites' ? 'Favorites' : activeFilter === 'archived' ? 'Archive' : activeFilter === 'trash' ? 'Trash' : 'Vault';
+  const filterTitle = selectedCollectionId ? 'Collection' : activeFilter === 'favorites' ? 'Favorites' : activeFilter === 'archived' ? 'Archive' : activeFilter === 'trash' ? 'Trash' : 'Vault';
 
   /** Require re-auth before executing an action on a reprompt-protected entry. */
   const withReprompt = (entryId: string, action: () => void) => {
@@ -302,7 +319,7 @@ export function Vault() {
     setPendingRepromptEntryId(null);
   };
 
-  // Load entries from backend on mount, then poll every 3 seconds
+  // Load entries from backend on mount, then poll
   useEffect(() => {
     if (!token || !masterKeyHex) {
       setLoading(false);
@@ -310,6 +327,9 @@ export function Vault() {
     }
     let cancelled = false;
     setLoading(true);
+
+    // Clear entries immediately when switching views to prevent stale data flash
+    useVaultStore.getState().setEntries([]);
 
     // Check for pending vault import from org leave
     window.api.vault.importExport(token).then((res) => {
@@ -319,20 +339,98 @@ export function Vault() {
     }).catch(() => {});
 
     const loadVault = async () => {
+      if (loadingRef.current) return; // Skip if a load is already in flight
+      loadingRef.current = true;
       try {
+        // If a collection is selected, load collection entries instead
+        if (selectedCollectionId) {
+          // First, get the collection key by finding it in the user's collections
+          const userColls = await window.api.collections.listUser(token) as Array<{
+            id: string;
+            encrypted_key: string;
+            permission: string;
+          }> | { error: string };
+          if (!Array.isArray(userColls)) return;
+          const thisColl = userColls.find(c => c.id === selectedCollectionId);
+          if (!thisColl || !thisColl.encrypted_key) return;
+          collPermissionRef.current = thisColl.permission;
+
+          // Decrypt collection key with master key
+          const ekNonce = thisColl.encrypted_key.slice(0, 24);
+          const ekCipher = thisColl.encrypted_key.slice(24);
+          const collKeyDec = await window.api.vault.decrypt(masterKeyHex, ekCipher, ekNonce) as { plaintext?: string; error?: string };
+          if (collKeyDec.error || !collKeyDec.plaintext) return;
+          const collKeyHex = collKeyDec.plaintext;
+
+          if (cancelled) return;
+
+          const collResult = await window.api.collections.listEntries(token, selectedCollectionId) as { error?: string } | Array<{ entry_id: string; entry_type: string; encrypted_data: string; nonce: string }>;
+          if (!Array.isArray(collResult)) {
+            // Don't clear entries on transient errors — keep stale data visible
+            return;
+          }
+          if (cancelled) return;
+
+          const loadedEntries: VaultEntry[] = [];
+          const loadedFields: Record<string, Record<string, string>> = {};
+
+          for (const entry of collResult) {
+            if (!entry.encrypted_data || !entry.nonce) continue;
+            // Decrypt with COLLECTION key, not master key
+            const decResult = await window.api.vault.decrypt(collKeyHex, entry.encrypted_data, entry.nonce);
+            if (decResult.error || !decResult.plaintext) continue;
+
+            try {
+              const parsed = JSON.parse(decResult.plaintext) as Record<string, unknown>;
+              const fields: Record<string, string> = {};
+              for (const [k, v] of Object.entries(parsed)) {
+                if (k === 'passwordHistory') {
+                  fields._passwordHistory = JSON.stringify(v);
+                } else if (k === 'uris') {
+                  fields._uris = JSON.stringify(v);
+                } else if (k === 'reprompt') {
+                  fields._reprompt = String(v === 1 || v === '1' ? '1' : '0');
+                } else {
+                  fields[k] = String(v ?? '');
+                }
+              }
+              loadedEntries.push({
+                id: entry.entry_id,
+                entry_type: entry.entry_type as VaultEntry['entry_type'],
+                encrypted_data: entry.encrypted_data,
+                nonce: entry.nonce,
+                version: 0,
+                folder_id: null,
+                is_favorite: false,
+                is_archived: false,
+                deleted_at: null,
+                created_at: '',
+                updated_at: '',
+              });
+              loadedFields[entry.entry_id] = fields;
+            } catch { /* skip malformed */ }
+          }
+
+          if (!cancelled) {
+            useVaultStore.getState().setEntries(loadedEntries);
+            for (const [id, f] of Object.entries(loadedFields)) {
+              useVaultStore.getState().updateEntryFields(id, f);
+            }
+            setLoading(false);
+          }
+          return;
+        }
+
         // Build query params based on active filter
         let filterParam: string | undefined;
         if (activeFilter === 'favorites') filterParam = 'favorite=true';
         else if (activeFilter === 'archived') filterParam = 'filter=archived';
         else if (activeFilter === 'trash') filterParam = 'filter=trash';
 
-        const listResult = await window.api.vault.list(token, filterParam) as { error?: string } | Array<{ id: string; entry_type: string; folder_id: string | null; version: number; is_favorite?: boolean; is_archived?: boolean; deleted_at?: string | null; created_at: string; updated_at: string }>;
+        const listResult = await window.api.vault.list(token, filterParam) as { error?: string } | Array<{ id: string; entry_type: string; encrypted_data: string; nonce: string; folder_id: string | null; version: number; is_favorite?: boolean; is_archived?: boolean; deleted_at?: string | null; created_at: string; updated_at: string }>;
         if (!Array.isArray(listResult)) {
           console.error('[vault] list returned non-array:', listResult);
-          // Clear entries so stale data from a previous filter doesn't persist
-          if (!cancelled) {
-            useVaultStore.getState().setEntries([]);
-          }
+          // Don't clear entries on transient errors — keep stale data visible
           return;
         }
         if (cancelled) return;
@@ -352,11 +450,9 @@ export function Vault() {
             continue;
           }
 
-          const detail = await window.api.vault.get(token, summary.id) as { id: string; entry_type: string; encrypted_data: string; nonce: string; folder_id: string | null; version: number; created_at: string; updated_at: string; error?: string };
-          if (cancelled) return;
-          if (detail.error || !detail.encrypted_data || !detail.nonce) continue;
-
-          const decResult = await window.api.vault.decrypt(masterKeyHex, detail.encrypted_data, detail.nonce);
+          // Encrypted data is included in list response — decrypt directly, no separate fetch needed
+          if (!summary.encrypted_data || !summary.nonce) continue;
+          const decResult = await window.api.vault.decrypt(masterKeyHex, summary.encrypted_data, summary.nonce);
           if (decResult.error || !decResult.plaintext) continue;
 
           try {
@@ -375,19 +471,19 @@ export function Vault() {
               }
             }
             loadedEntries.push({
-              id: detail.id,
-              entry_type: detail.entry_type as VaultEntry['entry_type'],
-              encrypted_data: detail.encrypted_data,
-              nonce: detail.nonce,
-              version: detail.version,
-              folder_id: detail.folder_id ?? null,
-              is_favorite: (detail as Record<string, unknown>).is_favorite as boolean ?? false,
-              is_archived: (detail as Record<string, unknown>).is_archived as boolean ?? false,
-              deleted_at: (detail as Record<string, unknown>).deleted_at as string | null ?? null,
-              created_at: detail.created_at,
-              updated_at: detail.updated_at,
+              id: summary.id,
+              entry_type: summary.entry_type as VaultEntry['entry_type'],
+              encrypted_data: summary.encrypted_data,
+              nonce: summary.nonce,
+              version: summary.version,
+              folder_id: summary.folder_id ?? null,
+              is_favorite: summary.is_favorite ?? false,
+              is_archived: summary.is_archived ?? false,
+              deleted_at: summary.deleted_at ?? null,
+              created_at: summary.created_at,
+              updated_at: summary.updated_at,
             });
-            loadedFields[detail.id] = fields;
+            loadedFields[summary.id] = fields;
           } catch { /* skip entries that fail to parse */ }
         }
 
@@ -398,15 +494,16 @@ export function Vault() {
           }
         }
       } finally {
+        loadingRef.current = false;
         if (!cancelled) setLoading(false);
       }
     };
 
     loadVault();
-    const interval = setInterval(loadVault, 3000);
+    const interval = setInterval(loadVault, 10000);
 
-    return () => { cancelled = true; clearInterval(interval); };
-  }, [token, masterKeyHex, activeFilter]);
+    return () => { cancelled = true; loadingRef.current = false; clearInterval(interval); };
+  }, [token, masterKeyHex, activeFilter, selectedCollectionId]);
 
 
 
@@ -485,10 +582,35 @@ export function Vault() {
     };
     addEntry(newEntry, fields);
     setNewEntryType(null);
+
+    // If creating from a collection view, also add the entry to that collection
+    if (selectedCollectionId) {
+      try {
+        const userColls = await window.api.collections.listUser(token) as Array<{
+          id: string; encrypted_key: string; permission: string;
+        }> | { error: string };
+        if (Array.isArray(userColls)) {
+          const coll = userColls.find(c => c.id === selectedCollectionId);
+          if (coll?.encrypted_key) {
+            const ekNonce = coll.encrypted_key.slice(0, 24);
+            const ekCipher = coll.encrypted_key.slice(24);
+            const collKeyDec = await window.api.vault.decrypt(masterKeyHex, ekCipher, ekNonce) as { plaintext: string };
+            const collEnc = await window.api.vault.encrypt(collKeyDec.plaintext, plaintext) as { encrypted_data: string; nonce: string };
+            await window.api.collections.addEntry(token, selectedCollectionId, createResult.id, {
+              entry_type: type,
+              encrypted_data: collEnc.encrypted_data,
+              nonce: collEnc.nonce,
+            });
+          }
+        }
+      } catch { /* best-effort */ }
+    }
   };
 
   const formatDate = (iso: string) => {
+    if (!iso) return '';
     const d = new Date(iso);
+    if (isNaN(d.getTime())) return '';
     const now = new Date();
     const diffMs = now.getTime() - d.getTime();
     const diffDays = Math.floor(diffMs / 86400000);
@@ -503,7 +625,7 @@ export function Vault() {
       {/* Header */}
       <div className="flex items-center justify-between mb-4">
         <h1 className="text-lg font-semibold text-surface-100">{filterTitle}</h1>
-        {activeFilter !== 'trash' && (
+        {activeFilter !== 'trash' && !(selectedCollectionId && collPermissionRef.current === 'read') && (
           <div className="relative">
             <button
               onClick={() => setShowAddDropdown(!showAddDropdown)}
@@ -587,7 +709,7 @@ export function Vault() {
               return (
                 <div
                   key={entry.id}
-                  onClick={() => navigate(`/vault/${entry.id}`)}
+                  onClick={() => navigate(`/vault/${entry.id}`, selectedCollectionId ? { state: { collectionId: selectedCollectionId, collectionPermission: collPermissionRef.current } } : undefined)}
                   onContextMenu={(e) => handleContextMenu(e, entry.id)}
                   className="flex items-center gap-3 px-3 py-2.5 rounded-md hover:bg-surface-800/60 cursor-pointer transition-colors group"
                 >
@@ -604,6 +726,7 @@ export function Vault() {
                   </div>
                   <div className="flex items-center gap-1.5 shrink-0">
                     {f?._reprompt === '1' && <span className="text-surface-500 text-[11px]" title="Master password re-prompt enabled">🔒</span>}
+                    {selectedCollectionId && <span className="text-surface-500 text-[11px]" title="Shared collection entry">🔗</span>}
                     {entry.is_favorite && <svg className="w-3.5 h-3.5 text-amber-400" viewBox="0 0 20 20" fill="currentColor"><path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.286 3.957a1 1 0 00.95.69h4.162c.969 0 1.371 1.24.588 1.81l-3.37 2.448a1 1 0 00-.364 1.118l1.287 3.957c.3.921-.755 1.688-1.54 1.118l-3.37-2.448a1 1 0 00-1.176 0l-3.37 2.448c-.784.57-1.838-.197-1.539-1.118l1.287-3.957a1 1 0 00-.364-1.118L2.065 9.384c-.783-.57-.38-1.81.588-1.81h4.162a1 1 0 00.95-.69l1.284-3.957z" /></svg>}
                     <span className="text-xs text-surface-600 group-hover:text-surface-400 transition-colors">
                       {formatDate(entry.updated_at)}
@@ -634,6 +757,7 @@ export function Vault() {
           isFavorite={entries.find((e) => e.id === contextMenu.entryId)?.is_favorite ?? false}
           isArchived={activeFilter === 'archived'}
           isTrash={activeFilter === 'trash'}
+          readOnly={selectedCollectionId != null && collPermissionRef.current === 'read'}
           onClose={() => setContextMenu(null)}
           onCopyUsername={() => {
             navigator.clipboard.writeText(entryFields[contextMenu.entryId]?.username ?? '');
@@ -685,7 +809,7 @@ export function Vault() {
             setContextMenu(null);
           }}
           onEdit={() => {
-            navigate(`/vault/${contextMenu.entryId}`, { state: { edit: true } });
+            navigate(`/vault/${contextMenu.entryId}`, { state: { edit: true, ...(selectedCollectionId ? { collectionId: selectedCollectionId, collectionPermission: collPermissionRef.current } : {}) } });
             setContextMenu(null);
           }}
           onClone={async () => {

@@ -1,5 +1,5 @@
-import React, { useEffect } from 'react';
-import { NavLink, useNavigate } from 'react-router-dom';
+import React, { useEffect, useState } from 'react';
+import { NavLink, useNavigate, useLocation } from 'react-router-dom';
 import { useAuthStore } from '../store/authStore';
 import { useNotificationStore } from '../store/notificationStore';
 import { useVaultStore } from '../store/vaultStore';
@@ -20,8 +20,6 @@ export function Sidebar() {
   const navigate = useNavigate();
   const notifCount = useNotificationStore((s) => s.totalCount());
   const refreshNotifications = useNotificationStore((s) => s.refresh);
-  const activeFilter = useVaultStore((s) => s.activeFilter);
-  const setActiveFilter = useVaultStore((s) => s.setActiveFilter);
   const healthFlags = useVaultStore((s) => s.healthFlags);
   const healthIssueCount = Object.values(healthFlags).filter(
     (f) => f.weak || f.breached || f.reused
@@ -31,7 +29,7 @@ export function Sidebar() {
   useEffect(() => {
     if (!token) return;
     refreshNotifications();
-    const interval = setInterval(refreshNotifications, 5_000);
+    const interval = setInterval(refreshNotifications, 30_000);
     return () => clearInterval(interval);
   }, [token, refreshNotifications]);
 
@@ -70,10 +68,10 @@ export function Sidebar() {
           <NavLink
             key={item.to}
             to={item.to}
-            onClick={() => { if (item.to === '/vault') setActiveFilter('all'); }}
+            end={item.to === '/vault'}
             className={({ isActive }) =>
               `flex items-center gap-3 px-3 py-2 rounded-md text-sm transition-colors ${
-                isActive && (item.to !== '/vault' || activeFilter === 'all')
+                isActive
                   ? 'bg-accent-600/20 text-accent-400'
                   : 'text-surface-300 hover:bg-surface-800 hover:text-surface-100'
               }`
@@ -94,27 +92,31 @@ export function Sidebar() {
           <span className="text-[10px] font-semibold text-surface-500 uppercase tracking-widest">Filters</span>
         </div>
         {[
-          { key: 'favorites' as const, label: 'Favorites', icon: '★' },
-          { key: 'archived' as const, label: 'Archive', icon: '📦' },
-          { key: 'trash' as const, label: 'Trash', icon: '🗑️' },
+          { to: '/vault/favorites', label: 'Favorites', icon: '★' },
+          { to: '/vault/archived', label: 'Archive', icon: '📦' },
+          { to: '/vault/trash', label: 'Trash', icon: '🗑️' },
         ].map((item) => (
-          <button
-            key={item.key}
-            onClick={() => { setActiveFilter(item.key); navigate('/vault'); }}
-            className={`w-full flex items-center gap-3 px-3 py-2 rounded-md text-sm transition-colors ${
-              activeFilter === item.key
-                ? 'bg-accent-600/20 text-accent-400'
-                : 'text-surface-300 hover:bg-surface-800 hover:text-surface-100'
-            }`}
+          <NavLink
+            key={item.to}
+            to={item.to}
+            className={({ isActive }) =>
+              `w-full flex items-center gap-3 px-3 py-2 rounded-md text-sm transition-colors ${
+                isActive
+                  ? 'bg-accent-600/20 text-accent-400'
+                  : 'text-surface-300 hover:bg-surface-800 hover:text-surface-100'
+              }`
+            }
           >
             <span>{item.icon}</span>
             <span>{item.label}</span>
-          </button>
+          </NavLink>
         ))}
+
+        {orgId && <CollectionsSidebarSection />}
 
         {role === 'admin' && orgId && (
           <>
-            <div className="mx-3 mb-2" style={{ marginTop: 75 }}>
+            <div className="mx-3 mt-4 mb-2">
               <span className="text-[10px] font-semibold text-surface-500 uppercase tracking-widest">Organization</span>
             </div>
             {adminItems.map((item) => (
@@ -174,5 +176,85 @@ export function Sidebar() {
         </button>
       </div>
     </aside>
+  );
+}
+
+// Collections sidebar section — shows the user's collections when in an org
+function CollectionsSidebarSection() {
+  const { token, masterKeyHex } = useAuthStore();
+  const collectionsVersion = useVaultStore((s) => s.collectionsVersion);
+  const navigate = useNavigate();
+  const location = useLocation();
+
+  const [collections, setCollections] = useState<{ id: string; name: string }[]>([]);
+
+  useEffect(() => {
+    if (!token || !masterKeyHex) return;
+    let cancelled = false;
+    const load = async () => {
+      try {
+        const result = await window.api.collections.listUser(token) as Array<{
+          id: string;
+          name_encrypted: string;
+          name_nonce: string;
+          encrypted_key: string;
+        }> | { error: string };
+        if (cancelled || 'error' in result) return;
+        const items: { id: string; name: string }[] = [];
+        for (const c of result) {
+          try {
+            // Decrypt collection key with master key, then decrypt name with collection key
+            const ekNonce = c.encrypted_key.slice(0, 24);
+            const ekCipher = c.encrypted_key.slice(24);
+            const collKeyDec = await window.api.vault.decrypt(masterKeyHex, ekCipher, ekNonce) as { plaintext: string };
+            const dec = await window.api.vault.decrypt(collKeyDec.plaintext, c.name_encrypted, c.name_nonce) as { plaintext: string };
+            items.push({ id: c.id, name: dec.plaintext });
+          } catch {
+            items.push({ id: c.id, name: '(encrypted)' });
+          }
+        }
+        if (!cancelled) {
+          setCollections(items);
+          // If viewing a deleted collection, redirect to vault
+          const collMatch = location.pathname.match(/\/vault\/collection\/(.+)/);
+          if (collMatch && items.length > 0 && !items.some(c => c.id === collMatch[1])) {
+            navigate('/vault');
+          }
+        }
+      } catch { /* ignore */ }
+    };
+    load();
+    const interval = setInterval(load, 15000);
+    return () => { cancelled = true; clearInterval(interval); };
+  }, [token, masterKeyHex, collectionsVersion]);
+
+  return (
+    <>
+      <div className="mx-3 mt-4 mb-2">
+        <span className="text-[10px] font-semibold text-surface-500 uppercase tracking-widest">
+          Collections
+        </span>
+      </div>
+      {collections.length === 0 ? (
+        <div className="px-3 py-1 text-xs text-surface-600 italic">No collections yet</div>
+      ) : (
+        collections.map((coll) => (
+          <NavLink
+            key={coll.id}
+            to={`/vault/collection/${coll.id}`}
+            className={({ isActive }) =>
+              `w-full flex items-center gap-3 px-3 py-2 rounded-md text-sm transition-colors ${
+                isActive
+                  ? 'bg-accent-600/20 text-accent-400'
+                  : 'text-surface-300 hover:bg-surface-800 hover:text-surface-100'
+              }`
+            }
+          >
+            <span>📁</span>
+            <span className="truncate">{coll.name}</span>
+          </NavLink>
+        ))
+      )}
+    </>
   );
 }

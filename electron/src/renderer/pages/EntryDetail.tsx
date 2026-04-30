@@ -143,8 +143,12 @@ export function EntryDetail() {
   const navigate = useNavigate();
   const location = useLocation();
   const { entries, entryFields, updateEntryFields, updateEntry, removeEntry, isRepromptApproved, approveReprompt, healthFlags } = useVaultStore();
-  const { token, masterKeyHex } = useAuthStore();
-  const [editing, setEditing] = useState(!!(location.state as { edit?: boolean } | null)?.edit);
+  const { token, masterKeyHex, orgId } = useAuthStore();
+  const routeState = location.state as { edit?: boolean; collectionId?: string; collectionPermission?: string } | null;
+  const sourceCollectionId = routeState?.collectionId ?? null;
+  const collectionPermission = routeState?.collectionPermission ?? null;
+  const isReadOnlyCollection = sourceCollectionId != null && collectionPermission === 'read';
+  const [editing, setEditing] = useState(!!routeState?.edit && !isReadOnlyCollection);
   const [showGenerator, setShowGenerator] = useState(false);
   const [revealedFields, setRevealedFields] = useState<Set<string>>(new Set());
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -226,6 +230,81 @@ export function EntryDetail() {
     ...allKeys.filter((k) => !typeOrder.includes(k) && k !== 'name'),
   ];
 
+  // Auto-sync: if this entry is in a collection and the collection copy was edited
+  // by another member, pull those changes into the owner's vault
+  useEffect(() => {
+    if (!id || !token || !masterKeyHex || !orgId || sourceCollectionId || !vaultEntry) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const colls = await window.api.collections.getEntryCollections(token, id) as Array<{
+          id: string; encrypted_key: string;
+        }> | { error: string };
+        if (!Array.isArray(colls) || colls.length === 0 || cancelled) return;
+
+        // Use the first collection that has a key
+        for (const c of colls) {
+          if (!c.encrypted_key || cancelled) continue;
+          // Decrypt collection key
+          const ekNonce = c.encrypted_key.slice(0, 24);
+          const ekCipher = c.encrypted_key.slice(24);
+          const collKeyDec = await window.api.vault.decrypt(masterKeyHex, ekCipher, ekNonce) as { plaintext?: string };
+          if (!collKeyDec.plaintext || cancelled) continue;
+
+          // Fetch collection entries to find this entry
+          const collEntries = await window.api.collections.listEntries(token, c.id) as Array<{
+            entry_id: string; entry_type: string; encrypted_data: string; nonce: string;
+          }> | { error: string };
+          if (!Array.isArray(collEntries) || cancelled) continue;
+          const collEntry = collEntries.find(e => e.entry_id === id);
+          if (!collEntry?.encrypted_data) continue;
+
+          // Decrypt collection copy
+          const collDec = await window.api.vault.decrypt(collKeyDec.plaintext, collEntry.encrypted_data, collEntry.nonce) as { plaintext?: string };
+          if (!collDec.plaintext || cancelled) continue;
+
+          // Decrypt vault copy
+          const vaultDec = await window.api.vault.decrypt(masterKeyHex, vaultEntry.encrypted_data, vaultEntry.nonce) as { plaintext?: string };
+          if (!vaultDec.plaintext || cancelled) continue;
+
+          // Compare — if different, sync collection → vault
+          if (collDec.plaintext !== vaultDec.plaintext) {
+            const encResult = await window.api.vault.encrypt(masterKeyHex, collDec.plaintext) as { encrypted_data: string; nonce: string; error?: string };
+            if (encResult.error || cancelled) continue;
+
+            const updateResult = await window.api.vault.update(token, id, {
+              entry_type: vaultEntry.entry_type,
+              encrypted_data: encResult.encrypted_data,
+              nonce: encResult.nonce,
+            }) as { version?: number; updated_at?: string; error?: string };
+
+            if (!updateResult.error && !cancelled) {
+              // Update local state with synced data
+              const parsed = JSON.parse(collDec.plaintext) as Record<string, unknown>;
+              const syncedFields: Record<string, string> = {};
+              for (const [k, v] of Object.entries(parsed)) {
+                if (k === 'passwordHistory') syncedFields._passwordHistory = JSON.stringify(v);
+                else if (k === 'uris') syncedFields._uris = JSON.stringify(v);
+                else if (k === 'reprompt') syncedFields._reprompt = v === 1 || v === '1' ? '1' : '0';
+                else syncedFields[k] = String(v ?? '');
+              }
+              updateEntryFields(id, syncedFields);
+              updateEntry({
+                ...vaultEntry,
+                encrypted_data: encResult.encrypted_data,
+                nonce: encResult.nonce,
+                version: updateResult.version ?? vaultEntry.version,
+                updated_at: updateResult.updated_at ?? vaultEntry.updated_at,
+              });
+            }
+          }
+          break; // only need to check one collection
+        }
+      } catch { /* sync is best-effort */ }
+    })();
+    return () => { cancelled = true; };
+  }, [id, token, masterKeyHex, orgId]);
+
   const toggleReveal = (field: string) => {
     const doToggle = () => {
       setRevealedFields((prev) => {
@@ -294,7 +373,30 @@ export function EntryDetail() {
     const encResult = await window.api.vault.encrypt(masterKeyHex, plaintext);
     if (encResult.error) return;
 
-    // Save to backend
+    // If viewing from a collection, update the collection copy first
+    if (sourceCollectionId && orgId) {
+      try {
+        const userColls = await window.api.collections.listUser(token) as Array<{
+          id: string; encrypted_key: string;
+        }> | { error: string };
+        if (Array.isArray(userColls)) {
+          const coll = userColls.find(c => c.id === sourceCollectionId);
+          if (coll?.encrypted_key) {
+            const ekNonce = coll.encrypted_key.slice(0, 24);
+            const ekCipher = coll.encrypted_key.slice(24);
+            const collKeyDec = await window.api.vault.decrypt(masterKeyHex, ekCipher, ekNonce) as { plaintext: string };
+            const collEnc = await window.api.vault.encrypt(collKeyDec.plaintext, plaintext) as { encrypted_data: string; nonce: string };
+            await window.api.collections.addEntry(token, sourceCollectionId, id, {
+              entry_type: vaultEntry.entry_type,
+              encrypted_data: collEnc.encrypted_data,
+              nonce: collEnc.nonce,
+            });
+          }
+        }
+      } catch { /* collection update failed */ }
+    }
+
+    // Try to update the vault copy (succeeds only if current user owns the entry)
     const updateResult = await window.api.vault.update(token, id, {
       entry_type: vaultEntry.entry_type,
       encrypted_data: encResult.encrypted_data,
@@ -310,6 +412,32 @@ export function EntryDetail() {
         version: updateResult.version,
         updated_at: updateResult.updated_at,
       });
+
+      // Sync to all other collections containing this entry
+      if (orgId) {
+        try {
+          const colls = await window.api.collections.getEntryCollections(token, id) as Array<{
+            id: string; encrypted_key: string;
+          }> | { error: string };
+          if (Array.isArray(colls)) {
+            for (const c of colls) {
+              if (!c.encrypted_key || c.id === sourceCollectionId) continue;
+              const ekNonce = c.encrypted_key.slice(0, 24);
+              const ekCipher = c.encrypted_key.slice(24);
+              const collKeyDec = await window.api.vault.decrypt(masterKeyHex, ekCipher, ekNonce) as { plaintext: string };
+              const collEnc = await window.api.vault.encrypt(collKeyDec.plaintext, plaintext) as { encrypted_data: string; nonce: string };
+              await window.api.collections.addEntry(token, c.id, id, {
+                entry_type: vaultEntry.entry_type,
+                encrypted_data: collEnc.encrypted_data,
+                nonce: collEnc.nonce,
+              });
+            }
+          }
+        } catch { /* best-effort */ }
+      }
+    } else if (sourceCollectionId) {
+      // Vault update failed (not owner) but collection copy was updated
+      updateEntryFields(id, cleanFields);
     }
     setEditing(false);
   };
@@ -325,14 +453,18 @@ export function EntryDetail() {
     setEditing(false);
   };
 
-  const formatDate = (iso: string) => new Date(iso).toLocaleString();
+  const formatDate = (iso: string) => {
+    if (!iso) return '—';
+    const d = new Date(iso);
+    return isNaN(d.getTime()) ? '—' : d.toLocaleString();
+  };
 
   return (
     <div className="max-w-2xl">
       {/* Back + header */}
       <div className="flex items-center gap-3 mb-6">
         <button
-          onClick={() => navigate('/vault')}
+          onClick={() => navigate(-1)}
           className="text-surface-400 hover:text-surface-200 transition-colors text-sm"
         >
           ← Back
@@ -342,7 +474,17 @@ export function EntryDetail() {
       <div className="flex items-center gap-3 mb-6">
         <span className="text-2xl">{ENTRY_TYPE_ICONS[entryType]}</span>
         <div>
-          <h1 className="text-lg font-semibold text-surface-100">{fields.name}</h1>
+          {editing ? (
+            <input
+              type="text"
+              value={editFields.name ?? ''}
+              onChange={(e) => setEditFields({ ...editFields, name: e.target.value })}
+              className="text-lg font-semibold text-surface-100 bg-transparent border-b border-surface-600 focus:border-accent-500 focus:outline-none w-full"
+              placeholder="Entry name"
+            />
+          ) : (
+            <h1 className="text-lg font-semibold text-surface-100">{fields.name}</h1>
+          )}
           <span className="text-xs text-surface-500">
             {ENTRY_TYPE_LABELS[entryType]}
             {vaultEntry.is_archived && ' · Archived'}
@@ -389,12 +531,18 @@ export function EntryDetail() {
             </button>
           </div>
         ) : !editing ? (
-          <button
-            onClick={() => setEditing(true)}
-            className="px-3 py-1.5 rounded-md bg-surface-800 hover:bg-surface-700 text-surface-300 text-sm transition-colors"
-          >
-            Edit
-          </button>
+          <div className="flex items-center gap-2">
+            {isReadOnlyCollection && (
+              <span className="text-xs text-amber-400 bg-amber-400/10 px-2 py-1 rounded">Read-only</span>
+            )}
+            <button
+              onClick={() => setEditing(true)}
+              disabled={isReadOnlyCollection}
+              className="px-3 py-1.5 rounded-md bg-surface-800 hover:bg-surface-700 text-surface-300 text-sm transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              Edit
+            </button>
+          </div>
         ) : (
           <div className="flex gap-2">
             <button onClick={handleCancel} className="px-3 py-1.5 rounded-md bg-surface-800 hover:bg-surface-700 text-surface-400 text-sm transition-colors">
@@ -680,8 +828,11 @@ export function EntryDetail() {
         <span>Modified: {formatDate(vaultEntry.updated_at)}</span>
       </div>
 
+      {/* Collections */}
+      <EntryCollections entryId={id ?? ''} readOnly={isReadOnlyCollection} />
+
       {/* Delete / Archive */}
-      {!isTrash && (
+      {!isTrash && !isReadOnlyCollection && (
         <div className="mt-6 pt-4 border-t border-surface-800 flex items-center gap-4">
           {!vaultEntry.is_archived ? (
             <button
@@ -781,6 +932,206 @@ export function EntryDetail() {
             setPendingRepromptAction(null);
           }}
         />
+      )}
+    </div>
+  );
+}
+
+// Shows which collections an entry belongs to
+function EntryCollections({ entryId, readOnly = false }: { entryId: string; readOnly?: boolean }) {
+  const { token, masterKeyHex, orgId } = useAuthStore();
+  const [collections, setCollections] = useState<Array<{ id: string; name: string }>>([]);
+  const [allCollections, setAllCollections] = useState<Array<{ id: string; name: string; encrypted_key: string }>>([]);
+  const [loading, setLoading] = useState(false);
+  const [showAdd, setShowAdd] = useState(false);
+  const [addError, setAddError] = useState('');
+  const collectionsVersion = useVaultStore((s) => s.collectionsVersion);
+  const bumpCollectionsVersion = useVaultStore((s) => s.bumpCollectionsVersion);
+  const entryFields = useVaultStore((s) => s.entryFields);
+  const entries = useVaultStore((s) => s.entries);
+
+  // Helper: decrypt collection name using collection key
+  const decryptCollName = async (c: { name_encrypted: string; name_nonce: string; encrypted_key: string }) => {
+    if (!masterKeyHex || !c.encrypted_key) return '(encrypted)';
+    try {
+      const ekNonce = c.encrypted_key.slice(0, 24);
+      const ekCipher = c.encrypted_key.slice(24);
+      const collKeyDec = await window.api.vault.decrypt(masterKeyHex, ekCipher, ekNonce) as { plaintext: string };
+      const dec = await window.api.vault.decrypt(collKeyDec.plaintext, c.name_encrypted, c.name_nonce) as { plaintext: string };
+      return dec.plaintext;
+    } catch {
+      return '(encrypted)';
+    }
+  };
+
+  const loadEntryCollections = async () => {
+    if (!token || !entryId || !orgId) return;
+    setLoading(true);
+    try {
+      const result = await window.api.collections.getEntryCollections(token, entryId) as Array<{
+        id: string;
+        name_encrypted: string;
+        name_nonce: string;
+        encrypted_key: string;
+      }> | { error: string };
+      if ('error' in result || !Array.isArray(result)) {
+        setLoading(false);
+        return;
+      }
+      const items: { id: string; name: string }[] = [];
+      for (const c of result) {
+        items.push({ id: c.id, name: await decryptCollName(c) });
+      }
+      setCollections(items);
+    } catch { /* ignore */ }
+    setLoading(false);
+  };
+
+  useEffect(() => {
+    loadEntryCollections();
+  }, [token, entryId, masterKeyHex, orgId]);
+
+  // Load all user's collections for the "add to collection" dropdown
+  useEffect(() => {
+    if (!token || !masterKeyHex || !orgId) return;
+    (async () => {
+      try {
+        const result = await window.api.collections.listUser(token) as Array<{
+          id: string;
+          name_encrypted: string;
+          name_nonce: string;
+          encrypted_key: string;
+        }> | { error: string };
+        if ('error' in result || !Array.isArray(result)) return;
+        const items: { id: string; name: string; encrypted_key: string }[] = [];
+        for (const c of result) {
+          items.push({ id: c.id, name: await decryptCollName(c), encrypted_key: c.encrypted_key });
+        }
+        setAllCollections(items);
+      } catch { /* ignore */ }
+    })();
+  }, [token, masterKeyHex, orgId, collectionsVersion]);
+
+  const handleAdd = async (collId: string) => {
+    if (!token || !masterKeyHex) return;
+    setAddError('');
+    try {
+      // Find the vault entry and its decrypted fields
+      const vaultEntry = entries.find(e => e.id === entryId);
+      const fields = entryFields[entryId];
+      if (!vaultEntry || !fields) {
+        setAddError('Entry data not available');
+        return;
+      }
+
+      // Find the collection to get its encrypted key
+      const coll = allCollections.find(c => c.id === collId);
+      if (!coll || !coll.encrypted_key) {
+        setAddError('Collection key not available');
+        return;
+      }
+
+      // Decrypt the collection key with master key
+      const ekNonce = coll.encrypted_key.slice(0, 24);
+      const ekCipher = coll.encrypted_key.slice(24);
+      const collKeyDec = await window.api.vault.decrypt(masterKeyHex, ekCipher, ekNonce) as { plaintext: string };
+      const collKeyHex = collKeyDec.plaintext;
+
+      // Build the plaintext data from fields (reconstruct the original JSON)
+      const plainData: Record<string, unknown> = {};
+      for (const [k, v] of Object.entries(fields)) {
+        if (k === '_passwordHistory') {
+          try { plainData.passwordHistory = JSON.parse(v); } catch { /* skip */ }
+        } else if (k === '_uris') {
+          try { plainData.uris = JSON.parse(v); } catch { /* skip */ }
+        } else if (k === '_reprompt') {
+          plainData.reprompt = v === '1' ? 1 : 0;
+        } else {
+          plainData[k] = v;
+        }
+      }
+
+      // Encrypt the entry data with the collection key
+      const encResult = await window.api.vault.encrypt(collKeyHex, JSON.stringify(plainData)) as { encrypted_data: string; nonce: string };
+
+      // Send to server with encrypted data
+      const result = await window.api.collections.addEntry(token, collId, entryId, {
+        entry_type: vaultEntry.entry_type,
+        encrypted_data: encResult.encrypted_data,
+        nonce: encResult.nonce,
+      }) as { status?: string; error?: string };
+
+      if (result.error) {
+        setAddError(result.error);
+        return;
+      }
+
+      setShowAdd(false);
+      loadEntryCollections();
+      bumpCollectionsVersion();
+    } catch {
+      setAddError('Failed to add to collection');
+    }
+  };
+
+  const handleRemove = async (collId: string) => {
+    if (!token) return;
+    try {
+      await window.api.collections.removeEntry(token, collId, entryId);
+      loadEntryCollections();
+    } catch { /* ignore */ }
+  };
+
+  if (!orgId) return null;
+
+  const assignedIds = new Set(collections.map(c => c.id));
+  const available = allCollections.filter(c => !assignedIds.has(c.id));
+
+  return (
+    <div className="mt-4 pt-4 border-t border-surface-800">
+      <div className="flex items-center justify-between mb-2">
+        <div className="text-xs font-medium text-surface-400 uppercase tracking-wide">Collections</div>
+        {!readOnly && available.length > 0 && (
+          <button
+            onClick={() => setShowAdd(!showAdd)}
+            className="text-xs text-accent-400 hover:text-accent-300"
+          >
+            {showAdd ? 'Cancel' : '+ Add to Collection'}
+          </button>
+        )}
+      </div>
+      {loading ? (
+        <span className="text-xs text-surface-500">Loading...</span>
+      ) : (
+        <>
+          {addError && (
+            <div className="text-xs text-red-400 mb-2">{addError}</div>
+          )}
+          {collections.length === 0 && !showAdd && (
+            <div className="text-xs text-surface-500 italic">Not in any collection</div>
+          )}
+          <div className="flex flex-wrap gap-2">
+            {collections.map((c) => (
+              <span key={c.id} className="inline-flex items-center gap-1 px-2 py-1 rounded bg-surface-800 text-xs text-surface-300">
+                <span>📁</span> {c.name}
+                {!readOnly && <button onClick={() => handleRemove(c.id)} className="ml-1 text-surface-500 hover:text-red-400" title="Remove from collection">×</button>}
+              </span>
+            ))}
+          </div>
+          {showAdd && (
+            <div className="mt-2 space-y-1">
+              {available.map((c) => (
+                <button
+                  key={c.id}
+                  onClick={() => handleAdd(c.id)}
+                  className="w-full text-left px-3 py-1.5 text-xs rounded bg-surface-800 hover:bg-surface-700 text-surface-200 transition-colors"
+                >
+                  📁 {c.name}
+                </button>
+              ))}
+            </div>
+          )}
+        </>
       )}
     </div>
   );

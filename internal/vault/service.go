@@ -11,16 +11,19 @@ import (
 	"github.com/password-manager/password-manager/internal/db"
 )
 
-// EntrySummary is a metadata-only view of a vault entry (no encrypted blob).
+// EntrySummary is a view of a vault entry including encrypted data.
 type EntrySummary struct {
-	ID         string    `json:"id"`
-	EntryType  string    `json:"entry_type"`
-	FolderID   *string   `json:"folder_id,omitempty"`
-	Version    int       `json:"version"`
-	IsFavorite bool      `json:"is_favorite"`
-	IsArchived bool      `json:"is_archived"`
-	CreatedAt  time.Time `json:"created_at"`
-	UpdatedAt  time.Time `json:"updated_at"`
+	ID            string    `json:"id"`
+	EntryType     string    `json:"entry_type"`
+	EncryptedData string    `json:"encrypted_data"` // hex-encoded
+	Nonce         string    `json:"nonce"`           // hex-encoded
+	FolderID      *string   `json:"folder_id,omitempty"`
+	Version       int       `json:"version"`
+	IsFavorite    bool      `json:"is_favorite"`
+	IsArchived    bool      `json:"is_archived"`
+	DeletedAt     *time.Time `json:"deleted_at,omitempty"`
+	CreatedAt     time.Time `json:"created_at"`
+	UpdatedAt     time.Time `json:"updated_at"`
 }
 
 // EntryResponse is the full vault entry returned to the client.
@@ -159,14 +162,17 @@ func (s *Service) ListEntries(ctx context.Context, userID string, filters ListFi
 	summaries := make([]EntrySummary, len(entries))
 	for i, e := range entries {
 		summaries[i] = EntrySummary{
-			ID:         e.ID,
-			EntryType:  e.EntryType,
-			FolderID:   e.FolderID,
-			Version:    e.Version,
-			IsFavorite: e.IsFavorite,
-			IsArchived: e.IsArchived,
-			CreatedAt:  e.CreatedAt,
-			UpdatedAt:  e.UpdatedAt,
+			ID:            e.ID,
+			EntryType:     e.EntryType,
+			EncryptedData: hex.EncodeToString(e.EncryptedData),
+			Nonce:         hex.EncodeToString(e.Nonce),
+			FolderID:      e.FolderID,
+			Version:       e.Version,
+			IsFavorite:    e.IsFavorite,
+			IsArchived:    e.IsArchived,
+			DeletedAt:     e.DeletedAt,
+			CreatedAt:     e.CreatedAt,
+			UpdatedAt:     e.UpdatedAt,
 		}
 	}
 	return summaries, nil

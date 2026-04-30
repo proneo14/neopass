@@ -5,9 +5,11 @@ import { VaultAccessPanel } from '../components/admin/VaultAccessPanel';
 import { TwoFactorSharePanel } from '../components/admin/TwoFactorSharePanel';
 import { PoliciesPanel } from '../components/admin/PoliciesPanel';
 import { AuditLogPanel } from '../components/admin/AuditLogPanel';
+import { CollectionsPanel } from '../components/admin/CollectionsPanel';
 
 const TABS = [
   { id: 'members', label: 'Members', icon: '👥' },
+  { id: 'collections', label: 'Collections', icon: '📁' },
   { id: 'vault', label: 'Vault Access', icon: '🔓' },
   { id: '2fa', label: '2FA Sharing', icon: '🔑' },
   { id: 'policies', label: 'Policies', icon: '📋' },
@@ -21,8 +23,18 @@ export function Admin() {
   const { orgId, orgName, token, role, masterKeyHex, setOrg, clearOrg } = useAuthStore();
 
   // Refresh org info from backend on mount and propagate org keys to all admins
+  // Only run if org info is missing — skip if already loaded to reduce API calls.
+  const hasOrgRef = React.useRef(false);
   useEffect(() => {
     if (!token) return;
+    if (orgId && role === 'admin') {
+      // Already have org info — just propagate keys once
+      if (!hasOrgRef.current && masterKeyHex) {
+        hasOrgRef.current = true;
+        window.api.admin.propagateKeys(token, orgId, masterKeyHex).catch(() => {});
+      }
+      return;
+    }
     (async () => {
       try {
         const result = await window.api.admin.getMyOrg(token) as { member?: boolean; org_id?: string; org_name?: string; role?: string };
@@ -30,10 +42,9 @@ export function Admin() {
           setOrg(result.org_id, result.org_name ?? '', result.role ?? 'member');
           // Auto-propagate org keys so all admins can access vault
           if (result.role === 'admin' && masterKeyHex) {
+            hasOrgRef.current = true;
             window.api.admin.propagateKeys(token, result.org_id, masterKeyHex).catch(() => {});
           }
-        } else {
-          clearOrg();
         }
       } catch { /* ignore */ }
     })();
@@ -94,6 +105,7 @@ export function Admin() {
       {/* Tab Content */}
       <div className="flex-1 overflow-y-auto p-6">
         {activeTab === 'members' && <MembersPanel orgId={orgId} />}
+        {activeTab === 'collections' && <CollectionsPanel orgId={orgId} />}
         {activeTab === 'vault' && <VaultAccessPanel orgId={orgId} />}
         {activeTab === '2fa' && <TwoFactorSharePanel orgId={orgId} />}
         {activeTab === 'policies' && <PoliciesPanel orgId={orgId} />}

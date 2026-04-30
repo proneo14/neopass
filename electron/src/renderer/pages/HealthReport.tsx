@@ -139,7 +139,7 @@ export function HealthReport() {
 
     (async () => {
       try {
-        const listResult = await window.api.vault.list(token) as Array<{ id: string; entry_type: string; folder_id: string | null; version: number; is_favorite?: boolean; is_archived?: boolean; deleted_at?: string | null; created_at: string; updated_at: string }> | { error?: string };
+        const listResult = await window.api.vault.list(token) as Array<{ id: string; entry_type: string; encrypted_data: string; nonce: string; folder_id: string | null; version: number; is_favorite?: boolean; is_archived?: boolean; deleted_at?: string | null; created_at: string; updated_at: string }> | { error?: string };
         if (!Array.isArray(listResult) || cancelled) return;
 
         const loadedEntries: import('../types/vault').VaultEntry[] = [];
@@ -147,10 +147,9 @@ export function HealthReport() {
 
         for (const summary of listResult) {
           if (cancelled) return;
-          const detail = await window.api.vault.get(token, summary.id) as { id: string; entry_type: string; encrypted_data: string; nonce: string; folder_id: string | null; version: number; created_at: string; updated_at: string; error?: string };
-          if (detail.error || !detail.encrypted_data || !detail.nonce) continue;
+          if (!summary.encrypted_data || !summary.nonce) continue;
 
-          const decResult = await window.api.vault.decrypt(masterKeyHex, detail.encrypted_data, detail.nonce);
+          const decResult = await window.api.vault.decrypt(masterKeyHex, summary.encrypted_data, summary.nonce);
           if (decResult.error || !decResult.plaintext) continue;
 
           try {
@@ -163,19 +162,19 @@ export function HealthReport() {
               else fields[k] = String(v ?? '');
             }
             loadedEntries.push({
-              id: detail.id,
-              entry_type: detail.entry_type as import('../types/vault').VaultEntry['entry_type'],
-              encrypted_data: detail.encrypted_data,
-              nonce: detail.nonce,
-              version: detail.version,
-              folder_id: detail.folder_id ?? null,
-              is_favorite: (detail as Record<string, unknown>).is_favorite as boolean ?? false,
-              is_archived: (detail as Record<string, unknown>).is_archived as boolean ?? false,
-              deleted_at: (detail as Record<string, unknown>).deleted_at as string | null ?? null,
-              created_at: detail.created_at,
-              updated_at: detail.updated_at,
+              id: summary.id,
+              entry_type: summary.entry_type as import('../types/vault').VaultEntry['entry_type'],
+              encrypted_data: summary.encrypted_data,
+              nonce: summary.nonce,
+              version: summary.version,
+              folder_id: summary.folder_id ?? null,
+              is_favorite: summary.is_favorite ?? false,
+              is_archived: summary.is_archived ?? false,
+              deleted_at: summary.deleted_at ?? null,
+              created_at: summary.created_at,
+              updated_at: summary.updated_at,
             });
-            loadedFields[detail.id] = fields;
+            loadedFields[summary.id] = fields;
           } catch { /* skip */ }
         }
 

@@ -18,7 +18,7 @@ import (
 // Router sets up all API v1 routes.
 // storageBackend should be "sqlite" or "postgres".
 // sqliteDB is the raw SQLite *sql.DB for migration support (nil when using postgres).
-func Router(authService *auth.Service, totpService *auth.TOTPService, smsService *auth.SMSService, vaultService *vault.Service, adminService *admin.Service, syncService *syncsvc.Service, webauthnService *auth.WebAuthnService, userRepo db.UserRepository, sendRepo db.SendRepository, storageBackend string, sqliteDB *sql.DB) chi.Router {
+func Router(authService *auth.Service, totpService *auth.TOTPService, smsService *auth.SMSService, vaultService *vault.Service, adminService *admin.Service, syncService *syncsvc.Service, webauthnService *auth.WebAuthnService, userRepo db.UserRepository, sendRepo db.SendRepository, collectionRepo db.CollectionRepository, orgRepo db.OrgRepository, auditRepo db.AuditRepository, storageBackend string, sqliteDB *sql.DB) chi.Router {
 	r := chi.NewRouter()
 
 	authHandler := NewAuthHandler(authService)
@@ -31,25 +31,25 @@ func Router(authService *auth.Service, totpService *auth.TOTPService, smsService
 	syncHandler := NewSyncHandler(syncService)
 	passkeyHandler := NewPasskeyHandler(webauthnService)
 	sendHandler := NewSendHandler(sendRepo, userRepo)
+	collectionHandler := NewCollectionHandler(collectionRepo, orgRepo, userRepo, auditRepo)
 
-	// Rate limiter for auth endpoints: 5 requests per minute per IP
-	authLimiter := NewRateLimiter(5, 1*time.Minute)
+	// Rate limiter for public auth endpoints: 10 requests per minute per IP
+	authLimiter := NewRateLimiter(10, 1*time.Minute)
 
 	// Public FIDO metadata endpoint (no auth required)
 	r.Get("/fido/metadata", passkeyHandler.FIDOMetadata)
 
-	// Public auth routes
+	// Public auth routes (rate-limited)
 	r.Route("/auth", func(r chi.Router) {
-		r.Use(authLimiter.RateLimit)
-		r.Post("/register", authHandler.Register)
-		r.Post("/login", authHandler.Login)
-		r.Post("/refresh", authHandler.Refresh)
+		r.With(authLimiter.RateLimit).Post("/register", authHandler.Register)
+		r.With(authLimiter.RateLimit).Post("/login", authHandler.Login)
+		r.With(authLimiter.RateLimit).Post("/refresh", authHandler.Refresh)
 		r.Post("/logout", authHandler.Logout)
 
 		// 2FA routes that use temp token (no auth middleware)
-		r.Post("/2fa/validate", tfaHandler.Validate)
-		r.Post("/2fa/sms/send", tfaHandler.SendSMS)
-		r.Post("/2fa/sms/validate", tfaHandler.ValidateSMS)
+		r.With(authLimiter.RateLimit).Post("/2fa/validate", tfaHandler.Validate)
+		r.With(authLimiter.RateLimit).Post("/2fa/sms/send", tfaHandler.SendSMS)
+		r.With(authLimiter.RateLimit).Post("/2fa/sms/validate", tfaHandler.ValidateSMS)
 	})
 
 	// Protected routes
@@ -141,7 +141,31 @@ func Router(authService *auth.Service, totpService *auth.TOTPService, smsService
 				r.Get("/audit", adminHandler.GetAuditLog)
 				r.Post("/propagate-keys", adminHandler.PropagateKeys)
 			})
+
+			// Org-scoped collection routes
+			r.Route("/orgs/{orgId}/collections", func(r chi.Router) {
+				r.Post("/", collectionHandler.CreateCollection)
+				r.Get("/", collectionHandler.ListOrgCollections)
+			})
 		})
+
+		// Collection routes (not org-scoped)
+		r.Get("/collections", collectionHandler.ListUserCollections)
+		r.Route("/collections/{id}", func(r chi.Router) {
+			r.Get("/", collectionHandler.GetCollection)
+			r.Put("/", collectionHandler.UpdateCollection)
+			r.Delete("/", collectionHandler.DeleteCollection)
+			r.Post("/members", collectionHandler.AddMember)
+			r.Get("/members", collectionHandler.GetCollectionMembers)
+			r.Delete("/members/{uid}", collectionHandler.RemoveMember)
+			r.Put("/members/{uid}/permission", collectionHandler.UpdateMemberPermission)
+			r.Post("/entries", collectionHandler.AddEntry)
+			r.Get("/entries", collectionHandler.ListEntries)
+			r.Delete("/entries/{entryId}", collectionHandler.RemoveEntry)
+		})
+
+		// Entry's collections
+		r.Get("/vault/entries/{id}/collections", collectionHandler.GetEntryCollections)
 
 		// Sync routes
 		r.Route("/sync", func(r chi.Router) {

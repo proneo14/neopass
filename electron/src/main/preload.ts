@@ -378,6 +378,86 @@ const api = {
     },
   },
 
+  collections: {
+    create: (token: string, orgId: string, data: Record<string, unknown>): Promise<unknown> => {
+      validateString(token, 'token');
+      validateString(orgId, 'orgId');
+      validateObject(data, 'data');
+      return ipcRenderer.invoke('collections:create', token, orgId, data);
+    },
+    listOrg: (token: string, orgId: string): Promise<unknown> => {
+      validateString(token, 'token');
+      validateString(orgId, 'orgId');
+      return ipcRenderer.invoke('collections:listOrg', token, orgId);
+    },
+    listUser: (token: string): Promise<unknown> => {
+      validateString(token, 'token');
+      return ipcRenderer.invoke('collections:listUser', token);
+    },
+    get: (token: string, collectionId: string): Promise<unknown> => {
+      validateString(token, 'token');
+      validateString(collectionId, 'collectionId');
+      return ipcRenderer.invoke('collections:get', token, collectionId);
+    },
+    update: (token: string, collectionId: string, data: Record<string, unknown>): Promise<unknown> => {
+      validateString(token, 'token');
+      validateString(collectionId, 'collectionId');
+      validateObject(data, 'data');
+      return ipcRenderer.invoke('collections:update', token, collectionId, data);
+    },
+    delete: (token: string, collectionId: string): Promise<unknown> => {
+      validateString(token, 'token');
+      validateString(collectionId, 'collectionId');
+      return ipcRenderer.invoke('collections:delete', token, collectionId);
+    },
+    addMember: (token: string, collectionId: string, data: Record<string, unknown>): Promise<unknown> => {
+      validateString(token, 'token');
+      validateString(collectionId, 'collectionId');
+      validateObject(data, 'data');
+      return ipcRenderer.invoke('collections:addMember', token, collectionId, data);
+    },
+    getMembers: (token: string, collectionId: string): Promise<unknown> => {
+      validateString(token, 'token');
+      validateString(collectionId, 'collectionId');
+      return ipcRenderer.invoke('collections:getMembers', token, collectionId);
+    },
+    removeMember: (token: string, collectionId: string, userId: string): Promise<unknown> => {
+      validateString(token, 'token');
+      validateString(collectionId, 'collectionId');
+      validateString(userId, 'userId');
+      return ipcRenderer.invoke('collections:removeMember', token, collectionId, userId);
+    },
+    updatePermission: (token: string, collectionId: string, userId: string, permission: string): Promise<unknown> => {
+      validateString(token, 'token');
+      validateString(collectionId, 'collectionId');
+      validateString(userId, 'userId');
+      validateString(permission, 'permission');
+      return ipcRenderer.invoke('collections:updatePermission', token, collectionId, userId, permission);
+    },
+    addEntry: (token: string, collectionId: string, entryId: string, data: { entry_type: string; encrypted_data: string; nonce: string }): Promise<unknown> => {
+      validateString(token, 'token');
+      validateString(collectionId, 'collectionId');
+      validateString(entryId, 'entryId');
+      return ipcRenderer.invoke('collections:addEntry', token, collectionId, entryId, data);
+    },
+    removeEntry: (token: string, collectionId: string, entryId: string): Promise<unknown> => {
+      validateString(token, 'token');
+      validateString(collectionId, 'collectionId');
+      validateString(entryId, 'entryId');
+      return ipcRenderer.invoke('collections:removeEntry', token, collectionId, entryId);
+    },
+    listEntries: (token: string, collectionId: string): Promise<unknown> => {
+      validateString(token, 'token');
+      validateString(collectionId, 'collectionId');
+      return ipcRenderer.invoke('collections:listEntries', token, collectionId);
+    },
+    getEntryCollections: (token: string, entryId: string): Promise<unknown> => {
+      validateString(token, 'token');
+      validateString(entryId, 'entryId');
+      return ipcRenderer.invoke('collections:getEntryCollections', token, entryId);
+    },
+  },
+
   storage: {
     getBackend: (): Promise<'sqlite' | 'postgres'> =>
       ipcRenderer.invoke('storage:getBackend'),

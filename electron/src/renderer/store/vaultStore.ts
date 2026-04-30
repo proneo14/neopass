@@ -27,6 +27,9 @@ interface VaultState {
   selectedFolderId: string | null;
   selectedTypeFilter: string | null;
   activeFilter: 'all' | 'favorites' | 'archived' | 'trash';
+  selectedCollectionId: string | null;
+  /** Bump to trigger sidebar collection list refresh. */
+  collectionsVersion: number;
 
   /** Cache of entry IDs that have been approved for reprompt bypass, with expiry timestamps. */
   repromptApprovals: Record<string, number>;
@@ -47,6 +50,9 @@ interface VaultState {
   setSelectedFolderId: (id: string | null) => void;
   setSelectedTypeFilter: (type: string | null) => void;
   setActiveFilter: (filter: 'all' | 'favorites' | 'archived' | 'trash') => void;
+  setSelectedCollectionId: (id: string | null) => void;
+  /** Bump to trigger sidebar collection list refresh. */
+  bumpCollectionsVersion: () => void;
 
   /** Grant a 5-minute reprompt approval for a specific entry. */
   approveReprompt: (entryId: string) => void;
@@ -74,6 +80,8 @@ export const useVaultStore = create<VaultState>((set, get) => ({
   selectedFolderId: null,
   selectedTypeFilter: null,
   activeFilter: 'all',
+  selectedCollectionId: null,
+  collectionsVersion: 0,
   repromptApprovals: {},
   healthFlags: {},
   healthAnalyzed: false,
@@ -101,6 +109,8 @@ export const useVaultStore = create<VaultState>((set, get) => ({
   setSelectedFolderId: (selectedFolderId) => set({ selectedFolderId }),
   setSelectedTypeFilter: (selectedTypeFilter) => set({ selectedTypeFilter }),
   setActiveFilter: (activeFilter) => set({ activeFilter }),
+  setSelectedCollectionId: (selectedCollectionId) => set({ selectedCollectionId }),
+  bumpCollectionsVersion: () => set((s) => ({ collectionsVersion: s.collectionsVersion + 1 })),
 
   approveReprompt: (entryId) =>
     set((s) => ({

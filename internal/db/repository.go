@@ -134,3 +134,61 @@ type SendRepository interface {
 	DisableSend(ctx context.Context, sendID, userID string) error
 	PurgeExpiredSends(ctx context.Context) (int, error)
 }
+
+// Collection represents a shared vault collection.
+type Collection struct {
+	ID            string    `json:"id"`
+	OrgID         string    `json:"org_id"`
+	NameEncrypted []byte    `json:"name_encrypted"`
+	NameNonce     []byte    `json:"name_nonce"`
+	ExternalID    *string   `json:"external_id,omitempty"`
+	CreatedAt     time.Time `json:"created_at"`
+	UpdatedAt     time.Time `json:"updated_at"`
+}
+
+// CollectionMember represents a user's membership in a collection.
+type CollectionMember struct {
+	CollectionID string `json:"collection_id"`
+	UserID       string `json:"user_id"`
+	Email        string `json:"email,omitempty"`
+	EncryptedKey []byte `json:"encrypted_key"`
+	Permission   string `json:"permission"`
+}
+
+// CollectionWithPermission is a collection with the requesting user's permission.
+type CollectionWithPermission struct {
+	Collection
+	Permission   string `json:"permission"`
+	EncryptedKey []byte `json:"encrypted_key,omitempty"` // requesting user's encrypted copy of the collection key
+	MemberCount  int    `json:"member_count"`
+	EntryCount   int    `json:"entry_count"`
+}
+
+// CollectionEntryData represents a vault entry's data stored in a collection,
+// encrypted with the collection key so all members can decrypt.
+type CollectionEntryData struct {
+	CollectionID  string `json:"collection_id"`
+	EntryID       string `json:"entry_id"`
+	EntryType     string `json:"entry_type"`
+	EncryptedData []byte `json:"encrypted_data"`
+	Nonce         []byte `json:"nonce"`
+}
+
+// CollectionRepository defines the interface for collection database operations.
+type CollectionRepository interface {
+	CreateCollection(ctx context.Context, collection Collection) (Collection, error)
+	GetCollection(ctx context.Context, collectionID string) (Collection, error)
+	ListCollections(ctx context.Context, orgID string, requestingUserID string) ([]CollectionWithPermission, error)
+	ListUserCollections(ctx context.Context, userID string) ([]CollectionWithPermission, error)
+	UpdateCollection(ctx context.Context, collection Collection) error
+	DeleteCollection(ctx context.Context, collectionID string) error
+	AddCollectionMember(ctx context.Context, collectionID, userID string, encryptedKey []byte, permission string) error
+	RemoveCollectionMember(ctx context.Context, collectionID, userID string) error
+	UpdateCollectionMemberPermission(ctx context.Context, collectionID, userID, permission string) error
+	GetCollectionMembers(ctx context.Context, collectionID string) ([]CollectionMember, error)
+	GetCollectionKey(ctx context.Context, collectionID, userID string) ([]byte, error)
+	AddEntryToCollection(ctx context.Context, collectionID, entryID, entryType string, encryptedData, nonce []byte) error
+	RemoveEntryFromCollection(ctx context.Context, collectionID, entryID string) error
+	GetCollectionEntries(ctx context.Context, collectionID string) ([]CollectionEntryData, error)
+	GetEntryCollections(ctx context.Context, entryID string, userID string) ([]CollectionWithPermission, error)
+}

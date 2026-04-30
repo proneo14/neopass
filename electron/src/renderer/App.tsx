@@ -36,6 +36,10 @@ export function App() {
           }
         >
           <Route path="/vault" element={<Vault />} />
+          <Route path="/vault/favorites" element={<Vault />} />
+          <Route path="/vault/archived" element={<Vault />} />
+          <Route path="/vault/trash" element={<Vault />} />
+          <Route path="/vault/collection/:collId" element={<Vault />} />
           <Route path="/vault/:id" element={<EntryDetail />} />
           <Route path="/passkeys" element={<Passkeys />} />
           <Route path="/settings" element={<Settings />} />

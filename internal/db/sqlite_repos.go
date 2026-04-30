@@ -1270,3 +1270,59 @@ func (r *SQLiteSendRepo) PurgeExpiredSends(ctx context.Context) (int, error) {
 	n, _ := res.RowsAffected()
 	return int(n), nil
 }
+
+// ── SQLite Collection Repo (stub — org feature, returns errors) ──────────────
+
+var errCollectionsNotSupported = fmt.Errorf("collections require PostgreSQL (organization feature)")
+
+// SQLiteCollectionRepo stubs out CollectionRepository for SQLite.
+type SQLiteCollectionRepo struct{}
+
+// NewSQLiteCollectionRepo creates a new SQLiteCollectionRepo.
+func NewSQLiteCollectionRepo() *SQLiteCollectionRepo { return &SQLiteCollectionRepo{} }
+
+func (r *SQLiteCollectionRepo) CreateCollection(ctx context.Context, c Collection) (Collection, error) {
+	return Collection{}, errCollectionsNotSupported
+}
+func (r *SQLiteCollectionRepo) GetCollection(ctx context.Context, id string) (Collection, error) {
+	return Collection{}, errCollectionsNotSupported
+}
+func (r *SQLiteCollectionRepo) ListCollections(ctx context.Context, orgID string, requestingUserID string) ([]CollectionWithPermission, error) {
+	return nil, errCollectionsNotSupported
+}
+func (r *SQLiteCollectionRepo) ListUserCollections(ctx context.Context, userID string) ([]CollectionWithPermission, error) {
+	return nil, errCollectionsNotSupported
+}
+func (r *SQLiteCollectionRepo) UpdateCollection(ctx context.Context, c Collection) error {
+	return errCollectionsNotSupported
+}
+func (r *SQLiteCollectionRepo) DeleteCollection(ctx context.Context, id string) error {
+	return errCollectionsNotSupported
+}
+func (r *SQLiteCollectionRepo) AddCollectionMember(ctx context.Context, collID, userID string, key []byte, perm string) error {
+	return errCollectionsNotSupported
+}
+func (r *SQLiteCollectionRepo) RemoveCollectionMember(ctx context.Context, collID, userID string) error {
+	return errCollectionsNotSupported
+}
+func (r *SQLiteCollectionRepo) UpdateCollectionMemberPermission(ctx context.Context, collID, userID, perm string) error {
+	return errCollectionsNotSupported
+}
+func (r *SQLiteCollectionRepo) GetCollectionMembers(ctx context.Context, collID string) ([]CollectionMember, error) {
+	return nil, errCollectionsNotSupported
+}
+func (r *SQLiteCollectionRepo) GetCollectionKey(ctx context.Context, collID, userID string) ([]byte, error) {
+	return nil, errCollectionsNotSupported
+}
+func (r *SQLiteCollectionRepo) AddEntryToCollection(ctx context.Context, collID, entryID, entryType string, encryptedData, nonce []byte) error {
+	return errCollectionsNotSupported
+}
+func (r *SQLiteCollectionRepo) RemoveEntryFromCollection(ctx context.Context, collID, entryID string) error {
+	return errCollectionsNotSupported
+}
+func (r *SQLiteCollectionRepo) GetCollectionEntries(ctx context.Context, collID string) ([]CollectionEntryData, error) {
+	return nil, errCollectionsNotSupported
+}
+func (r *SQLiteCollectionRepo) GetEntryCollections(ctx context.Context, entryID string, userID string) ([]CollectionWithPermission, error) {
+	return nil, errCollectionsNotSupported
+}

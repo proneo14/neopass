@@ -105,6 +105,9 @@ func main() {
 	var vaultRepo db.VaultRepository
 	var userRepo db.UserRepository
 	var sendRepo db.SendRepository
+	var collectionRepo db.CollectionRepository
+	var orgRepo db.OrgRepository
+	var auditRepo db.AuditRepository
 	var rawSQLiteDB *sql.DB // raw *sql.DB for migration support
 
 	if cfg.StorageBackend == "sqlite" {
@@ -128,10 +131,11 @@ func main() {
 		totpRepo := db.NewSQLiteTOTPRepo(sqliteDB.DB)
 		sqlVaultRepo := db.NewSQLiteVaultRepo(sqliteDB.DB)
 		vaultRepo = sqlVaultRepo
-		orgRepo := db.NewSQLiteOrgRepo(sqliteDB.DB)
-		auditRepo := db.NewSQLiteAuditRepo(sqliteDB.DB)
+		orgRepo = db.NewSQLiteOrgRepo(sqliteDB.DB)
+		auditRepo = db.NewSQLiteAuditRepo(sqliteDB.DB)
 		syncRepo := db.NewSQLiteSyncRepo(sqliteDB.DB)
 		sendRepo = db.NewSQLiteSendRepo(sqliteDB.DB)
+		collectionRepo = db.NewSQLiteCollectionRepo()
 
 		var authErr error
 		authService, authErr = auth.NewService(userRepo, nil, nil, auth.ServiceConfig{}, vaultRepo, orgRepo)
@@ -157,10 +161,11 @@ func main() {
 		userRepo = db.NewPgUserRepo(database.Pool)
 		totpRepo := db.NewPgTOTPRepo(database.Pool)
 		vaultRepo = db.NewPgVaultRepo(database.Pool)
-		orgRepo := db.NewPgOrgRepo(database.Pool)
-		auditRepo := db.NewPgAuditRepo(database.Pool)
+		orgRepo = db.NewPgOrgRepo(database.Pool)
+		auditRepo = db.NewPgAuditRepo(database.Pool)
 		syncRepo := db.NewPgSyncRepo(database.Pool)
 		sendRepo = db.NewPgSendRepo(database.Pool)
+		collectionRepo = db.NewPgCollectionRepo(database.Pool)
 		var authErr error
 		authService, authErr = auth.NewService(userRepo, nil, nil, auth.ServiceConfig{}, vaultRepo, orgRepo)
 		if authErr != nil {
@@ -197,7 +202,7 @@ func main() {
 		})
 
 		if authService != nil {
-			r.Mount("/", api.Router(authService, totpService, smsService, vaultService, adminService, syncService, webauthnService, userRepo, sendRepo, cfg.StorageBackend, rawSQLiteDB))
+			r.Mount("/", api.Router(authService, totpService, smsService, vaultService, adminService, syncService, webauthnService, userRepo, sendRepo, collectionRepo, orgRepo, auditRepo, cfg.StorageBackend, rawSQLiteDB))
 		}
 	})
 
