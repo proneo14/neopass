@@ -1,6 +1,7 @@
 package crypto
 
 import (
+	"crypto/ecdh"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/ed25519"
@@ -74,11 +75,14 @@ func SignAssertion(privateKeyRaw []byte, algorithm int, authData, clientDataHash
 		key := new(ecdsa.PrivateKey)
 		key.Curve = elliptic.P256()
 		key.D = new(big.Int).SetBytes(privateKeyRaw)
-		key.PublicKey.X, key.PublicKey.Y = elliptic.P256().ScalarMult(
-			elliptic.P256().Params().Gx,
-			elliptic.P256().Params().Gy,
-			privateKeyRaw,
-		)
+		ecdhKey, err := ecdh.P256().NewPrivateKey(privateKeyRaw)
+		if err != nil {
+			return nil, fmt.Errorf("ES256 derive public key: %w", err)
+		}
+		pubBytes := ecdhKey.PublicKey().Bytes()
+		// Uncompressed point: 0x04 || X || Y, each coordinate 32 bytes
+		key.PublicKey.X = new(big.Int).SetBytes(pubBytes[1:33])
+		key.PublicKey.Y = new(big.Int).SetBytes(pubBytes[33:65])
 
 		hash := sha256.Sum256(signedData)
 		sig, err := ecdsa.SignASN1(rand.Reader, key, hash[:])
