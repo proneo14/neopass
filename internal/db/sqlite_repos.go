@@ -243,7 +243,7 @@ func (r *SQLiteVaultRepo) ListEntries(ctx context.Context, userID string, filter
 		baseFilter = " AND is_deleted = 0"
 	}
 	query := `SELECT ` + sqliteVaultColumns + `
-	          FROM vault_entries WHERE user_id = ?` + baseFilter
+	          FROM vault_entries WHERE user_id = ?` + baseFilter // #nosec G202 -- baseFilter is a static string, not user input
 	args := []interface{}{userID}
 
 	if filters.EntryType != "" {

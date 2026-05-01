@@ -74,7 +74,11 @@ func SignAssertion(privateKeyRaw []byte, algorithm int, authData, clientDataHash
 		key := new(ecdsa.PrivateKey)
 		key.Curve = elliptic.P256()
 		key.D = new(big.Int).SetBytes(privateKeyRaw)
-		key.PublicKey.X, key.PublicKey.Y = key.Curve.ScalarBaseMult(privateKeyRaw)
+		key.PublicKey.X, key.PublicKey.Y = elliptic.P256().ScalarMult(
+			elliptic.P256().Params().Gx,
+			elliptic.P256().Params().Gy,
+			privateKeyRaw,
+		)
 
 		hash := sha256.Sum256(signedData)
 		sig, err := ecdsa.SignASN1(rand.Reader, key, hash[:])

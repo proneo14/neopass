@@ -61,7 +61,7 @@ func AuthMiddleware(authService *auth.Service, userRepo db.UserRepository) func(
 					writeError(w, http.StatusUnauthorized, "invalid or expired token")
 					return
 				}
-				if user.TokensRevokedAt != nil && claims.IssuedAt.Time.Before(*user.TokensRevokedAt) {
+				if user.TokensRevokedAt != nil && claims.IssuedAt.Before(*user.TokensRevokedAt) {
 					writeError(w, http.StatusUnauthorized, "session revoked")
 					return
 				}

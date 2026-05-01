@@ -338,7 +338,7 @@ func (s *WebAuthnService) SignPasskeyAssertion(ctx context.Context, userID strin
 	// Build authenticator data
 	rpIDHash := crypto.RPIDHash(req.RPID)
 	flags := crypto.FlagUserPresent | crypto.FlagUserVerified | crypto.FlagBackupElig | crypto.FlagBackupState
-	newSignCount := uint32(passkey.SignCount + 1)
+	newSignCount := uint32(passkey.SignCount) + 1 // #nosec G115 -- sign count is always small
 	authData := crypto.MarshalAuthenticatorData(rpIDHash, flags, newSignCount, nil)
 
 	// Use website's challenge if provided, otherwise use our session challenge

@@ -288,7 +288,7 @@ func (s *Service) AccessUserVault(ctx context.Context, adminUserID, orgID, targe
 		}
 		// Creator succeeded — save per-admin key and propagate to other admins
 		_ = s.orgRepo.SetMemberOrgKey(ctx, orgID, adminUserID, org.EncryptedOrgPrivateKey)
-		go s.propagateOrgKey(context.Background(), orgID, orgPrivKey)
+		go s.propagateOrgKey(context.Background(), orgID, orgPrivKey) // #nosec G118 -- intentionally detached goroutine for async propagation
 	}
 	defer crypto.ZeroBytes(orgPrivKey)
 

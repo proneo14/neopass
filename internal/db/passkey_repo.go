@@ -330,7 +330,7 @@ func (r *SQLitePasskeyRepo) GetPasskeysByRPID(ctx context.Context, userID, rpID 
 	if err != nil {
 		return nil, fmt.Errorf("get passkeys by rp_id: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	return scanSQLitePasskeys(rows)
 }
 
@@ -355,7 +355,7 @@ func (r *SQLitePasskeyRepo) GetAllPasskeys(ctx context.Context, userID string) (
 	if err != nil {
 		return nil, fmt.Errorf("get all passkeys: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	return scanSQLitePasskeys(rows)
 }
 
@@ -482,7 +482,7 @@ func (r *SQLiteHardwareKeyRepo) GetHardwareKeys(ctx context.Context, userID stri
 	if err != nil {
 		return nil, fmt.Errorf("get hardware keys: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var result []HardwareAuthKey
 	for rows.Next() {

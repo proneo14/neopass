@@ -123,6 +123,7 @@ func (r *PgVaultRepo) ListEntries(ctx context.Context, userID string, filters Va
 	if filters.UpdatedSince != nil {
 		query += fmt.Sprintf(" AND updated_at > $%d", argIdx)
 		args = append(args, *filters.UpdatedSince)
+		_ = argIdx // future filters may use argIdx
 		argIdx++
 	}
 	if filters.IsFavorite != nil && *filters.IsFavorite {

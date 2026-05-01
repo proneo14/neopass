@@ -286,7 +286,7 @@ func (s *Service) RefreshToken(ctx context.Context, refreshTokenStr string) (Tok
 		return TokenResponse{}, ErrInvalidToken
 	}
 	if user.TokensRevokedAt != nil && claims.IssuedAt != nil {
-		if claims.IssuedAt.Time.Before(*user.TokensRevokedAt) {
+		if claims.IssuedAt.Before(*user.TokensRevokedAt) {
 			return TokenResponse{}, ErrInvalidToken
 		}
 	}
