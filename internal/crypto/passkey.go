@@ -81,8 +81,8 @@ func SignAssertion(privateKeyRaw []byte, algorithm int, authData, clientDataHash
 		}
 		pubBytes := ecdhKey.PublicKey().Bytes()
 		// Uncompressed point: 0x04 || X || Y, each coordinate 32 bytes
-		key.PublicKey.X = new(big.Int).SetBytes(pubBytes[1:33])
-		key.PublicKey.Y = new(big.Int).SetBytes(pubBytes[33:65])
+		key.X = new(big.Int).SetBytes(pubBytes[1:33])
+		key.Y = new(big.Int).SetBytes(pubBytes[33:65])
 
 		hash := sha256.Sum256(signedData)
 		sig, err := ecdsa.SignASN1(rand.Reader, key, hash[:])
