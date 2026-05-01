@@ -38,7 +38,7 @@ func setupVaultRouter(t *testing.T) (chi.Router, *auth.Service, string, string) 
 
 	r := chi.NewRouter()
 	r.Group(func(r chi.Router) {
-		r.Use(api.AuthMiddleware(authService))
+		r.Use(api.AuthMiddleware(authService, userRepo))
 		r.Post("/vault/entries", vaultHandler.CreateEntry)
 		r.Get("/vault/entries", vaultHandler.ListEntries)
 		r.Get("/vault/entries/{id}", vaultHandler.GetEntry)

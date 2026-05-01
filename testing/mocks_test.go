@@ -100,6 +100,29 @@ func (m *MockUserRepo) UpdateUserKeys(ctx context.Context, id string, authHash, 
 	return nil
 }
 
+func (m *MockUserRepo) RevokeUserTokens(ctx context.Context, userID string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	user, exists := m.users[userID]
+	if !exists {
+		return fmt.Errorf("user not found")
+	}
+	user.UpdatedAt = time.Now()
+	m.users[userID] = user
+	return nil
+}
+
+func (m *MockUserRepo) SetRequireHWKey(ctx context.Context, userID string, require bool) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if _, exists := m.users[userID]; !exists {
+		return fmt.Errorf("user not found")
+	}
+	return nil
+}
+
 // SetHas2FA helper for testing — sets the Has2FA flag on a user.
 func (m *MockUserRepo) SetHas2FA(id string, has2fa bool) {
 	m.mu.Lock()
@@ -235,6 +258,34 @@ func (m *MockVaultRepo) GetEntryByID(ctx context.Context, entryID string) (db.Va
 	return entry, nil
 }
 
+func (m *MockVaultRepo) PermanentDeleteEntry(ctx context.Context, entryID, userID string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	entry, exists := m.entries[entryID]
+	if !exists || entry.UserID != userID {
+		return fmt.Errorf("entry not found")
+	}
+	delete(m.entries, entryID)
+	return nil
+}
+
+func (m *MockVaultRepo) SetFavorite(ctx context.Context, entryID, userID string, favorite bool) error {
+	return nil
+}
+
+func (m *MockVaultRepo) SetArchived(ctx context.Context, entryID, userID string, archived bool) error {
+	return nil
+}
+
+func (m *MockVaultRepo) RestoreEntry(ctx context.Context, entryID, userID string) error {
+	return nil
+}
+
+func (m *MockVaultRepo) PurgeExpiredTrash(ctx context.Context, userID string, olderThan time.Time) (int, error) {
+	return 0, nil
+}
+
 func (m *MockVaultRepo) CreateFolder(ctx context.Context, folder db.Folder) (db.Folder, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -351,6 +402,14 @@ func (m *MockOrgRepo) GetMember(ctx context.Context, orgID, userID string) (db.O
 
 func (m *MockOrgRepo) GetMemberEscrow(ctx context.Context, orgID, userID string) ([]byte, error) {
 	return nil, fmt.Errorf("not implemented in mock")
+}
+
+func (m *MockOrgRepo) GetMemberOrgKey(ctx context.Context, orgID, userID string) ([]byte, error) {
+	return nil, fmt.Errorf("not implemented in mock")
+}
+
+func (m *MockOrgRepo) SetMemberOrgKey(ctx context.Context, orgID, userID string, encOrgKey []byte) error {
+	return nil
 }
 
 func (m *MockOrgRepo) ListMembers(ctx context.Context, orgID string) ([]db.OrgMember, error) {
