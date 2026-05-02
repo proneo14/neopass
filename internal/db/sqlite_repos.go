@@ -927,6 +927,39 @@ func (r *SQLiteSyncRepo) UpsertSyncCursor(ctx context.Context, userID, deviceID 
 	return nil
 }
 
+func (r *SQLiteSyncRepo) ListDevices(ctx context.Context, userID string) ([]SyncCursor, error) {
+	rows, err := r.db.QueryContext(ctx,
+		`SELECT user_id, device_id, last_sync_at FROM sync_cursors WHERE user_id = ? ORDER BY last_sync_at DESC`,
+		userID,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("list devices: %w", err)
+	}
+	defer rows.Close()
+	var devices []SyncCursor
+	for rows.Next() {
+		var d SyncCursor
+		var lastSyncStr string
+		if err := rows.Scan(&d.UserID, &d.DeviceID, &lastSyncStr); err != nil {
+			return nil, fmt.Errorf("scan device: %w", err)
+		}
+		d.LastSyncAt = parseTime(lastSyncStr)
+		devices = append(devices, d)
+	}
+	return devices, nil
+}
+
+func (r *SQLiteSyncRepo) DeleteDevice(ctx context.Context, userID, deviceID string) error {
+	_, err := r.db.ExecContext(ctx,
+		`DELETE FROM sync_cursors WHERE user_id = ? AND device_id = ?`,
+		userID, deviceID,
+	)
+	if err != nil {
+		return fmt.Errorf("delete device: %w", err)
+	}
+	return nil
+}
+
 // ── SQLite TOTP Repo ─────────────────────────────────────────────────────────
 
 // SQLiteTOTPRepo implements TOTPRepository for SQLite.

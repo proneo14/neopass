@@ -67,6 +67,8 @@ type AuditRepository interface {
 type SyncRepository interface {
 	GetSyncCursor(ctx context.Context, userID, deviceID string) (time.Time, error)
 	UpsertSyncCursor(ctx context.Context, userID, deviceID string, syncAt time.Time) error
+	ListDevices(ctx context.Context, userID string) ([]SyncCursor, error)
+	DeleteDevice(ctx context.Context, userID, deviceID string) error
 }
 
 // TOTPRepository defines the interface for 2FA database operations.

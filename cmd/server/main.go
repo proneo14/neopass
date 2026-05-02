@@ -109,6 +109,7 @@ func main() {
 	var orgRepo db.OrgRepository
 	var auditRepo db.AuditRepository
 	var eaRepo db.EmergencyAccessRepository
+	var syncRepo db.SyncRepository
 	var rawSQLiteDB *sql.DB // raw *sql.DB for migration support
 
 	if cfg.StorageBackend == "sqlite" {
@@ -134,7 +135,7 @@ func main() {
 		vaultRepo = sqlVaultRepo
 		orgRepo = db.NewSQLiteOrgRepo(sqliteDB.DB)
 		auditRepo = db.NewSQLiteAuditRepo(sqliteDB.DB)
-		syncRepo := db.NewSQLiteSyncRepo(sqliteDB.DB)
+		syncRepo = db.NewSQLiteSyncRepo(sqliteDB.DB)
 		sendRepo = db.NewSQLiteSendRepo(sqliteDB.DB)
 		collectionRepo = db.NewSQLiteCollectionRepo()
 		eaRepo = db.NewSQLiteEmergencyAccessRepo(sqliteDB.DB)
@@ -165,7 +166,7 @@ func main() {
 		vaultRepo = db.NewPgVaultRepo(database.Pool)
 		orgRepo = db.NewPgOrgRepo(database.Pool)
 		auditRepo = db.NewPgAuditRepo(database.Pool)
-		syncRepo := db.NewPgSyncRepo(database.Pool)
+		syncRepo = db.NewPgSyncRepo(database.Pool)
 		sendRepo = db.NewPgSendRepo(database.Pool)
 		collectionRepo = db.NewPgCollectionRepo(database.Pool)
 		eaRepo = db.NewPgEmergencyAccessRepo(database.Pool)
@@ -205,7 +206,7 @@ func main() {
 		})
 
 		if authService != nil {
-			r.Mount("/", api.Router(authService, totpService, smsService, vaultService, adminService, syncService, webauthnService, userRepo, vaultRepo, sendRepo, collectionRepo, orgRepo, auditRepo, eaRepo, cfg.StorageBackend, rawSQLiteDB))
+			r.Mount("/", api.Router(authService, totpService, smsService, vaultService, adminService, syncService, webauthnService, userRepo, vaultRepo, sendRepo, collectionRepo, orgRepo, auditRepo, eaRepo, syncRepo, cfg.StorageBackend, rawSQLiteDB))
 		}
 	})
 

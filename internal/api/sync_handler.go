@@ -5,19 +5,22 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/rs/zerolog/log"
 
+	"github.com/password-manager/password-manager/internal/db"
 	syncsvc "github.com/password-manager/password-manager/internal/sync"
 )
 
 // SyncHandler handles sync HTTP endpoints.
 type SyncHandler struct {
 	syncService *syncsvc.Service
+	syncRepo    db.SyncRepository
 }
 
 // NewSyncHandler creates a new SyncHandler.
-func NewSyncHandler(syncService *syncsvc.Service) *SyncHandler {
-	return &SyncHandler{syncService: syncService}
+func NewSyncHandler(syncService *syncsvc.Service, syncRepo db.SyncRepository) *SyncHandler {
+	return &SyncHandler{syncService: syncService, syncRepo: syncRepo}
 }
 
 // Pull handles POST /api/v1/sync/pull
@@ -124,4 +127,48 @@ func (h *SyncHandler) Resolve(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, map[string]string{"status": "resolved"})
+}
+
+// ListDevices handles GET /api/v1/sync/devices
+func (h *SyncHandler) ListDevices(w http.ResponseWriter, r *http.Request) {
+	claims := GetClaims(r.Context())
+	if claims == nil {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
+	devices, err := h.syncRepo.ListDevices(r.Context(), claims.UserID)
+	if err != nil {
+		log.Error().Err(err).Msg("list devices failed")
+		writeError(w, http.StatusInternalServerError, "list devices failed")
+		return
+	}
+	if devices == nil {
+		devices = []db.SyncCursor{}
+	}
+
+	writeJSON(w, http.StatusOK, devices)
+}
+
+// DeleteDevice handles DELETE /api/v1/sync/devices/{deviceId}
+func (h *SyncHandler) DeleteDevice(w http.ResponseWriter, r *http.Request) {
+	claims := GetClaims(r.Context())
+	if claims == nil {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
+	deviceID := chi.URLParam(r, "deviceId")
+	if deviceID == "" {
+		writeError(w, http.StatusBadRequest, "missing device_id")
+		return
+	}
+
+	if err := h.syncRepo.DeleteDevice(r.Context(), claims.UserID, deviceID); err != nil {
+		log.Error().Err(err).Msg("delete device failed")
+		writeError(w, http.StatusInternalServerError, "delete device failed")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
 }

@@ -5,6 +5,7 @@ import { useAuthStore } from '../store/authStore';
 import { ENTRY_TYPE_ICONS, ENTRY_TYPE_LABELS } from '../types/vault';
 import { PasswordGenerator } from '../components/PasswordGenerator';
 import { RepromptDialog } from '../components/RepromptDialog';
+import { ImportWizard } from '../components/ImportWizard';
 import type { VaultEntry } from '../types/vault';
 
 const ENTRY_TYPES = ['login', 'secure_note', 'credit_card', 'identity'] as const;
@@ -287,6 +288,7 @@ export function Vault() {
     location.pathname === '/vault/trash' ? 'trash' : 'all';
   const [showAddDropdown, setShowAddDropdown] = useState(false);
   const [newEntryType, setNewEntryType] = useState<string | null>(null);
+  const [showImportWizard, setShowImportWizard] = useState(false);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; entryId: string } | null>(null);
   const [loading, setLoading] = useState(true);
   const loadingRef = useRef(false);
@@ -699,8 +701,16 @@ export function Vault() {
             <span className="text-5xl mb-4">🔐</span>
             <p className="text-sm">{searchQuery ? 'No matching entries' : 'Your vault is empty'}</p>
             <p className="text-xs mt-1">
-              {searchQuery ? 'Try a different search term' : 'Add your first entry to get started'}
+              {searchQuery ? 'Try a different search term' : 'Add your first entry or import from another password manager'}
             </p>
+            {!searchQuery && (
+              <button
+                onClick={() => setShowImportWizard(true)}
+                className="mt-4 px-4 py-2 bg-accent-600 hover:bg-accent-500 text-white text-sm rounded-md transition-colors"
+              >
+                Import Passwords
+              </button>
+            )}
           </div>
         ) : (
           <div className="space-y-1">
@@ -903,6 +913,9 @@ export function Vault() {
           }}
         />
       )}
+
+      {/* Import Wizard */}
+      {showImportWizard && <ImportWizard onClose={() => setShowImportWizard(false)} />}
     </div>
   );
 }

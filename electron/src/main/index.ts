@@ -2,6 +2,7 @@ import { app, BrowserWindow, ipcMain, Menu, session, dialog, clipboard, shell } 
 import path from 'path';
 import fs from 'fs';
 import http from 'http';
+import os from 'os';
 import nodeCrypto from 'crypto';
 import { spawn, execFileSync, ChildProcess } from 'child_process';
 import {
@@ -29,6 +30,18 @@ const isDev = process.env.NODE_ENV === 'development';
 // API server URL: use BACKEND_URL env or try sidecar
 const backendUrl = process.env.BACKEND_URL || '';
 
+/** Read server_url from config.json (set when user opts into remote server mode). */
+function getConfiguredServerUrl(): string {
+  try {
+    const configPath = path.join(getAppDataDir(), 'config.json');
+    if (fs.existsSync(configPath)) {
+      const cfg = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+      if (cfg.server_url) return cfg.server_url;
+    }
+  } catch { /* ignore */ }
+  return '';
+}
+
 /**
  * Notify the renderer to force-logout (e.g. after emergency takeover revokes tokens).
  */
@@ -41,6 +54,8 @@ function emitForceLogout(): void {
 
 function getApiBase(): string {
   if (backendUrl) return backendUrl;
+  const configured = getConfiguredServerUrl();
+  if (configured) return configured;
   if (sidecarPort) return `http://127.0.0.1:${sidecarPort}`;
   return '';
 }
@@ -71,6 +86,13 @@ function getRandomPort(): number {
 }
 
 async function startSidecar(): Promise<void> {
+  // Skip sidecar if a remote server URL is configured
+  const remoteUrl = getConfiguredServerUrl();
+  if (remoteUrl) {
+    console.log(`[sidecar] remote server configured (${remoteUrl}), skipping sidecar`);
+    return;
+  }
+
   const sidecarPath = getSidecarPath();
 
   if (!fs.existsSync(sidecarPath)) {
@@ -2382,6 +2404,100 @@ transports:r.getTransports?.()??['usb']
     }
   });
 
+  // ── Sync IPC handlers ───────────────────────────────────────────────────────
+
+  ipcMain.handle('sync:getDeviceId', () => {
+    const deviceIdPath = path.join(getAppDataDir(), 'device-id');
+    try {
+      if (fs.existsSync(deviceIdPath)) {
+        return fs.readFileSync(deviceIdPath, 'utf-8').trim();
+      }
+    } catch { /* regenerate */ }
+    const id = `${os.hostname()}-${nodeCrypto.randomBytes(4).toString('hex')}`;
+    try {
+      fs.mkdirSync(path.dirname(deviceIdPath), { recursive: true });
+      fs.writeFileSync(deviceIdPath, id, { mode: 0o600 });
+    } catch { /* best effort */ }
+    return id;
+  });
+
+  ipcMain.handle('sync:pull', async (_event, token: string, deviceId: string, lastSyncAt?: string) => {
+    const api = getApiBase();
+    if (!api) return { error: 'Backend not available' };
+    try {
+      const res = await fetch(`${api}/api/v1/sync/pull`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ device_id: deviceId, last_sync_at: lastSyncAt || '' }),
+      });
+      if (res.status === 401) { emitForceLogout(); return { error: 'session_revoked' }; }
+      return await res.json();
+    } catch {
+      return { error: 'Failed to connect to backend' };
+    }
+  });
+
+  ipcMain.handle('sync:push', async (_event, token: string, deviceId: string, changes: unknown[]) => {
+    const api = getApiBase();
+    if (!api) return { error: 'Backend not available' };
+    try {
+      const res = await fetch(`${api}/api/v1/sync/push`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ device_id: deviceId, changes }),
+      });
+      if (res.status === 401) { emitForceLogout(); return { error: 'session_revoked' }; }
+      return await res.json();
+    } catch {
+      return { error: 'Failed to connect to backend' };
+    }
+  });
+
+  ipcMain.handle('sync:resolve', async (_event, token: string, data: Record<string, unknown>) => {
+    const api = getApiBase();
+    if (!api) return { error: 'Backend not available' };
+    try {
+      const res = await fetch(`${api}/api/v1/sync/resolve`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify(data),
+      });
+      if (res.status === 401) { emitForceLogout(); return { error: 'session_revoked' }; }
+      return await res.json();
+    } catch {
+      return { error: 'Failed to connect to backend' };
+    }
+  });
+
+  ipcMain.handle('sync:devices', async (_event, token: string) => {
+    const api = getApiBase();
+    if (!api) return { error: 'Backend not available' };
+    try {
+      const res = await fetch(`${api}/api/v1/sync/devices`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.status === 401) { emitForceLogout(); return { error: 'session_revoked' }; }
+      return await res.json();
+    } catch {
+      return { error: 'Failed to connect to backend' };
+    }
+  });
+
+  ipcMain.handle('sync:deleteDevice', async (_event, token: string, deviceId: string) => {
+    const api = getApiBase();
+    if (!api) return { error: 'Backend not available' };
+    try {
+      const res = await fetch(`${api}/api/v1/sync/devices/${encodeURIComponent(deviceId)}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.status === 401) { emitForceLogout(); return { error: 'session_revoked' }; }
+      return await res.json();
+    } catch {
+      return { error: 'Failed to connect to backend' };
+    }
+  });
+
   // Storage backend IPC handlers
   ipcMain.handle('storage:getBackend', () => {
     if (backendUrl) return 'postgres';
@@ -2456,6 +2572,118 @@ transports:r.getTransports?.()??['usb']
       }
       return result;
     } catch { return { error: 'Migration failed' }; }
+  });
+
+  // ── Server Mode IPC handlers ───────────────────────────────────────────
+
+  /** Get current server mode: 'local' (sidecar) or 'remote' (user-provided URL). */
+  ipcMain.handle('server:getConfig', () => {
+    const configPath = path.join(getAppDataDir(), 'config.json');
+    let serverUrl = '';
+    try {
+      if (fs.existsSync(configPath)) {
+        const cfg = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+        serverUrl = cfg.server_url || '';
+      }
+    } catch { /* ignore */ }
+    return {
+      mode: serverUrl ? 'remote' : 'local',
+      serverUrl,
+    };
+  });
+
+  /** Test connectivity to a remote server URL. */
+  ipcMain.handle('server:testConnection', async (_event, url: string) => {
+    try {
+      const cleanUrl = url.replace(/\/+$/, '');
+      const res = await fetch(`${cleanUrl}/health`, { signal: AbortSignal.timeout(5000) });
+      if (res.ok) return { success: true };
+      return { error: `Server returned status ${res.status}` };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Connection failed';
+      return { error: msg };
+    }
+  });
+
+  /**
+   * Switch to remote server mode.
+   * Stops the local sidecar and saves the server URL to config.
+   * The user must then register/login on the remote server.
+   * Existing local data remains in the SQLite file as a backup.
+   */
+  ipcMain.handle('server:setRemote', async (_event, url: string) => {
+    try {
+      const cleanUrl = url.replace(/\/+$/, '');
+      // Verify the remote server is reachable
+      const res = await fetch(`${cleanUrl}/health`, { signal: AbortSignal.timeout(5000) });
+      if (!res.ok) return { error: `Server returned status ${res.status}` };
+
+      // Save to config
+      const configDir = getAppDataDir();
+      const configPath = path.join(configDir, 'config.json');
+      if (!fs.existsSync(configDir)) fs.mkdirSync(configDir, { recursive: true });
+
+      let cfg: Record<string, unknown> = {};
+      try {
+        if (fs.existsSync(configPath)) cfg = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+      } catch { /* start fresh */ }
+      cfg.server_url = cleanUrl;
+      fs.writeFileSync(configPath, JSON.stringify(cfg, null, 2), { mode: 0o600 });
+
+      // Stop local sidecar — all API calls now go to the remote URL
+      stopSidecar();
+      console.log(`[server] switched to remote mode: ${cleanUrl}`);
+      return { success: true };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Failed to switch';
+      return { error: msg };
+    }
+  });
+
+  /**
+   * Switch back to local (sidecar) mode.
+   * Clears the remote server_url from config and restarts the sidecar.
+   */
+  ipcMain.handle('server:setLocal', async () => {
+    try {
+      const configDir = getAppDataDir();
+      const configPath = path.join(configDir, 'config.json');
+
+      let cfg: Record<string, unknown> = {};
+      try {
+        if (fs.existsSync(configPath)) cfg = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+      } catch { /* start fresh */ }
+      delete cfg.server_url;
+      fs.writeFileSync(configPath, JSON.stringify(cfg, null, 2), { mode: 0o600 });
+
+      // Restart local sidecar
+      await startSidecar();
+      console.log('[server] switched to local mode');
+      return { success: true };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Failed to switch';
+      return { error: msg };
+    }
+  });
+
+  /**
+   * Export all vault entries from the current server as encrypted blobs.
+   * Used during local→remote migration so the user can re-import on the remote server.
+   */
+  ipcMain.handle('server:exportEntries', async (_event, token: string) => {
+    const api = getApiBase();
+    if (!api) return { error: 'Backend not available' };
+    try {
+      const res = await fetch(`${api}/api/v1/vault/entries`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) return { error: `Server returned ${res.status}` };
+      const entries = await res.json();
+      return { entries };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Export failed';
+      return { error: msg };
+    }
   });
 }
 

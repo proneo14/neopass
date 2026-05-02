@@ -18,7 +18,7 @@ import (
 // Router sets up all API v1 routes.
 // storageBackend should be "sqlite" or "postgres".
 // sqliteDB is the raw SQLite *sql.DB for migration support (nil when using postgres).
-func Router(authService *auth.Service, totpService *auth.TOTPService, smsService *auth.SMSService, vaultService *vault.Service, adminService *admin.Service, syncService *syncsvc.Service, webauthnService *auth.WebAuthnService, userRepo db.UserRepository, vaultRepo db.VaultRepository, sendRepo db.SendRepository, collectionRepo db.CollectionRepository, orgRepo db.OrgRepository, auditRepo db.AuditRepository, eaRepo db.EmergencyAccessRepository, storageBackend string, sqliteDB *sql.DB) chi.Router {
+func Router(authService *auth.Service, totpService *auth.TOTPService, smsService *auth.SMSService, vaultService *vault.Service, adminService *admin.Service, syncService *syncsvc.Service, webauthnService *auth.WebAuthnService, userRepo db.UserRepository, vaultRepo db.VaultRepository, sendRepo db.SendRepository, collectionRepo db.CollectionRepository, orgRepo db.OrgRepository, auditRepo db.AuditRepository, eaRepo db.EmergencyAccessRepository, syncRepo db.SyncRepository, storageBackend string, sqliteDB *sql.DB) chi.Router {
 	r := chi.NewRouter()
 
 	authHandler := NewAuthHandler(authService)
@@ -28,7 +28,7 @@ func Router(authService *auth.Service, totpService *auth.TOTPService, smsService
 	if sqliteDB != nil {
 		adminHandler.SetSQLiteDB(sqliteDB)
 	}
-	syncHandler := NewSyncHandler(syncService)
+	syncHandler := NewSyncHandler(syncService, syncRepo)
 	passkeyHandler := NewPasskeyHandler(webauthnService)
 	sendHandler := NewSendHandler(sendRepo, userRepo)
 	collectionHandler := NewCollectionHandler(collectionRepo, orgRepo, userRepo, auditRepo)
@@ -173,6 +173,8 @@ func Router(authService *auth.Service, totpService *auth.TOTPService, smsService
 			r.Post("/pull", syncHandler.Pull)
 			r.Post("/push", syncHandler.Push)
 			r.Post("/resolve", syncHandler.Resolve)
+			r.Get("/devices", syncHandler.ListDevices)
+			r.Delete("/devices/{deviceId}", syncHandler.DeleteDevice)
 		})
 
 		// Secure Send routes (authenticated)

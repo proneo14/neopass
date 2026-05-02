@@ -53,3 +53,36 @@ func (r *PgSyncRepo) UpsertSyncCursor(ctx context.Context, userID, deviceID stri
 	}
 	return nil
 }
+
+// ListDevices returns all sync cursors for a user.
+func (r *PgSyncRepo) ListDevices(ctx context.Context, userID string) ([]SyncCursor, error) {
+	rows, err := r.pool.Query(ctx,
+		`SELECT user_id, device_id, last_sync_at FROM sync_cursors WHERE user_id = $1 ORDER BY last_sync_at DESC`,
+		userID,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("list devices: %w", err)
+	}
+	defer rows.Close()
+	var devices []SyncCursor
+	for rows.Next() {
+		var d SyncCursor
+		if err := rows.Scan(&d.UserID, &d.DeviceID, &d.LastSyncAt); err != nil {
+			return nil, fmt.Errorf("scan device: %w", err)
+		}
+		devices = append(devices, d)
+	}
+	return devices, nil
+}
+
+// DeleteDevice removes a sync cursor for a specific device.
+func (r *PgSyncRepo) DeleteDevice(ctx context.Context, userID, deviceID string) error {
+	_, err := r.pool.Exec(ctx,
+		`DELETE FROM sync_cursors WHERE user_id = $1 AND device_id = $2`,
+		userID, deviceID,
+	)
+	if err != nil {
+		return fmt.Errorf("delete device: %w", err)
+	}
+	return nil
+}

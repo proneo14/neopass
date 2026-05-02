@@ -5,6 +5,9 @@ import { useNotificationStore } from '../store/notificationStore';
 import { PasswordGenerator } from '../components/PasswordGenerator';
 import { OrgSetupWizard } from '../components/OrgSetupWizard';
 import { EmergencyAccessSection } from '../components/EmergencyAccessSection';
+import { ImportWizard } from '../components/ImportWizard';
+import { SyncSettings } from '../components/SyncSettings';
+import { ServerConfig } from '../components/ServerConfig';
 
 type AutoLockOption = '1' | '5' | '15' | '30' | '60' | 'never';
 
@@ -414,6 +417,9 @@ export function Settings() {
   const [sendDomainInput, setSendDomainInput] = useState('');
   const [sendDomainSaving, setSendDomainSaving] = useState(false);
   const [sendDomainMsg, setSendDomainMsg] = useState('');
+  const [showImport, setShowImport] = useState(false);
+  const [showSync, setShowSync] = useState(false);
+  const [showServerConfig, setShowServerConfig] = useState(false);
   useEffect(() => {
     (async () => {
       const available = await window.api.biometric.isAvailable();
@@ -967,8 +973,25 @@ export function Settings() {
         <section>
           <h2 className="text-xs font-semibold text-surface-500 uppercase tracking-wider mb-3">Data</h2>
           <div className="space-y-2">
-            <button className="w-full text-left px-4 py-3 rounded-md bg-surface-800 hover:bg-surface-700 text-sm text-surface-200 transition-colors flex items-center justify-between">
+            <button
+              onClick={() => setShowImport(true)}
+              className="w-full text-left px-4 py-3 rounded-md bg-surface-800 hover:bg-surface-700 text-sm text-surface-200 transition-colors flex items-center justify-between"
+            >
+              Import from another password manager
+              <span className="text-surface-600">→</span>
+            </button>
+            <button
+              onClick={() => setShowSync(true)}
+              className="w-full text-left px-4 py-3 rounded-md bg-surface-800 hover:bg-surface-700 text-sm text-surface-200 transition-colors flex items-center justify-between"
+            >
               Sync Settings
+              <span className="text-surface-600">→</span>
+            </button>
+            <button
+              onClick={() => setShowServerConfig(true)}
+              className="w-full text-left px-4 py-3 rounded-md bg-surface-800 hover:bg-surface-700 text-sm text-surface-200 transition-colors flex items-center justify-between"
+            >
+              Server Configuration (Local / Remote)
               <span className="text-surface-600">→</span>
             </button>
             <button
@@ -1072,6 +1095,9 @@ export function Settings() {
           onConfirm={handleBiometricEnroll}
         />
       )}
+      {showImport && <ImportWizard onClose={() => setShowImport(false)} />}
+      {showSync && <SyncSettings onClose={() => setShowSync(false)} />}
+      {showServerConfig && <ServerConfig onClose={() => setShowServerConfig(false)} />}
     </div>
   );
 }

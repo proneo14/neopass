@@ -554,6 +554,36 @@ const api = {
     },
   },
 
+  sync: {
+    getDeviceId: (): Promise<string> => {
+      return ipcRenderer.invoke('sync:getDeviceId');
+    },
+    pull: (token: string, deviceId: string, lastSyncAt?: string): Promise<unknown> => {
+      validateString(token, 'token');
+      validateString(deviceId, 'deviceId');
+      return ipcRenderer.invoke('sync:pull', token, deviceId, lastSyncAt);
+    },
+    push: (token: string, deviceId: string, changes: unknown[]): Promise<unknown> => {
+      validateString(token, 'token');
+      validateString(deviceId, 'deviceId');
+      return ipcRenderer.invoke('sync:push', token, deviceId, changes);
+    },
+    resolve: (token: string, data: Record<string, unknown>): Promise<unknown> => {
+      validateString(token, 'token');
+      validateObject(data, 'data');
+      return ipcRenderer.invoke('sync:resolve', token, data);
+    },
+    listDevices: (token: string): Promise<unknown> => {
+      validateString(token, 'token');
+      return ipcRenderer.invoke('sync:devices', token);
+    },
+    deleteDevice: (token: string, deviceId: string): Promise<unknown> => {
+      validateString(token, 'token');
+      validateString(deviceId, 'deviceId');
+      return ipcRenderer.invoke('sync:deleteDevice', token, deviceId);
+    },
+  },
+
   storage: {
     getBackend: (): Promise<'sqlite' | 'postgres'> =>
       ipcRenderer.invoke('storage:getBackend'),
@@ -564,6 +594,25 @@ const api = {
     migrateToPostgres: (databaseUrl: string): Promise<{ error?: string; users?: number; vault_entries?: number }> => {
       validateString(databaseUrl, 'databaseUrl');
       return ipcRenderer.invoke('storage:migrateToPostgres', databaseUrl);
+    },
+  },
+
+  server: {
+    getConfig: (): Promise<{ mode: 'local' | 'remote'; serverUrl: string }> =>
+      ipcRenderer.invoke('server:getConfig'),
+    testConnection: (url: string): Promise<{ success?: boolean; error?: string }> => {
+      validateString(url, 'url');
+      return ipcRenderer.invoke('server:testConnection', url);
+    },
+    setRemote: (url: string): Promise<{ success?: boolean; error?: string }> => {
+      validateString(url, 'url');
+      return ipcRenderer.invoke('server:setRemote', url);
+    },
+    setLocal: (): Promise<{ success?: boolean; error?: string }> =>
+      ipcRenderer.invoke('server:setLocal'),
+    exportEntries: (token: string): Promise<{ entries?: unknown[]; error?: string }> => {
+      validateString(token, 'token');
+      return ipcRenderer.invoke('server:exportEntries', token);
     },
   },
 

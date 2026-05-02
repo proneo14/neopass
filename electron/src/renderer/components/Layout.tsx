@@ -4,6 +4,8 @@ import { Sidebar } from './Sidebar';
 import { TitleBar } from './TitleBar';
 import { useAuthStore } from '../store/authStore';
 import { useNotificationStore } from '../store/notificationStore';
+import { useSyncStore } from '../store/syncStore';
+import { performSync } from '../utils/sync';
 
 export function Layout() {
   const navigate = useNavigate();
@@ -39,6 +41,40 @@ export function Layout() {
       events.forEach((e) => window.removeEventListener(e, resetTimer));
     };
   }, [autoLockMinutes, resetTimer]);
+
+  // ── Auto-sync timer ─────────────────────────────────────────────────
+  const token = useAuthStore((s) => s.token);
+  const masterKeyHex = useAuthStore((s) => s.masterKeyHex);
+  const autoSyncInterval = useSyncStore((s) => s.autoSyncInterval);
+  const syncStatus = useSyncStore((s) => s.status);
+  const deviceId = useSyncStore((s) => s.deviceId);
+  const setDeviceId = useSyncStore((s) => s.setDeviceId);
+
+  // Initialize device ID once on mount
+  useEffect(() => {
+    if (!deviceId && token) {
+      window.api.sync.getDeviceId().then((id: string) => setDeviceId(id));
+    }
+  }, [deviceId, token, setDeviceId]);
+
+  useEffect(() => {
+    if (!token || !masterKeyHex || !deviceId || autoSyncInterval <= 0) return;
+
+    const doSync = () => {
+      const currentStatus = useSyncStore.getState().status;
+      if (currentStatus === 'syncing') return; // skip if already in-flight
+      performSync(token, masterKeyHex, deviceId).catch(() => {});
+    };
+
+    // Run an initial sync shortly after login
+    const initial = setTimeout(doSync, 3000);
+    const interval = setInterval(doSync, autoSyncInterval * 1000);
+
+    return () => {
+      clearTimeout(initial);
+      clearInterval(interval);
+    };
+  }, [token, masterKeyHex, deviceId, autoSyncInterval]);
 
   // Force-logout when the server revokes tokens (e.g. after emergency takeover)
   useEffect(() => {
