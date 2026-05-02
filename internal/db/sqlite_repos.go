@@ -935,7 +935,7 @@ func (r *SQLiteSyncRepo) ListDevices(ctx context.Context, userID string) ([]Sync
 	if err != nil {
 		return nil, fmt.Errorf("list devices: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var devices []SyncCursor
 	for rows.Next() {
 		var d SyncCursor
