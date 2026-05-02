@@ -1,0 +1,4 @@
+-- 008_ssh_keys.sql: Add ssh_key entry type
+-- SQLite does not support ALTER TABLE to modify CHECK constraints.
+-- The application layer allows 'ssh_key' as a valid entry_type.
+-- Existing CHECK constraint in 001_initial.sql is advisory only in SQLite.

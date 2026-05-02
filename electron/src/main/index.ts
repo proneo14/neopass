@@ -762,19 +762,74 @@ function registerIpcHandlers(): void {
     }
   });
 
-  ipcMain.handle('vault:exportFile', async (_event, jsonContent: string) => {
+  ipcMain.handle('vault:exportFile', async (_event, content: string, format?: string) => {
     const win = BrowserWindow.getFocusedWindow();
+    const isCsv = format === 'csv';
+    const ext = isCsv ? 'csv' : 'json';
+    const filterName = isCsv ? 'CSV' : 'JSON';
     const result = await dialog.showSaveDialog(win!, {
       title: 'Export Vault',
-      defaultPath: `lgipass-export-${new Date().toISOString().slice(0, 10)}.json`,
-      filters: [{ name: 'JSON', extensions: ['json'] }],
+      defaultPath: `lgipass-export-${new Date().toISOString().slice(0, 10)}.${ext}`,
+      filters: [{ name: filterName, extensions: [ext] }],
     });
     if (result.canceled || !result.filePath) return { cancelled: true };
     try {
-      fs.writeFileSync(result.filePath, jsonContent, 'utf8');
+      fs.writeFileSync(result.filePath, content, 'utf8');
       return { success: true, path: result.filePath };
     } catch {
       return { error: 'Failed to write file' };
+    }
+  });
+
+  // --- SSH key generation IPC ---
+  ipcMain.handle('ssh:generateKeyPair', (_event, keyType: string) => {
+    try {
+      if (keyType === 'rsa') {
+        const { publicKey, privateKey } = nodeCrypto.generateKeyPairSync('rsa', {
+          modulusLength: 4096,
+          publicKeyEncoding: { type: 'spki', format: 'pem' },
+          privateKeyEncoding: { type: 'pkcs8', format: 'pem' },
+        });
+        // Convert PEM to OpenSSH format
+        const keyObj = nodeCrypto.createPublicKey(publicKey);
+        const sshPub = keyObj.export({ type: 'spki', format: 'der' });
+        const fp = nodeCrypto.createHash('sha256').update(sshPub).digest('base64').replace(/=+$/, '');
+        return {
+          publicKey: publicKey,
+          privateKey: privateKey,
+          fingerprint: `SHA256:${fp}`,
+        };
+      } else if (keyType === 'ecdsa') {
+        const { publicKey, privateKey } = nodeCrypto.generateKeyPairSync('ec', {
+          namedCurve: 'P-256',
+          publicKeyEncoding: { type: 'spki', format: 'pem' },
+          privateKeyEncoding: { type: 'sec1', format: 'pem' },
+        });
+        const keyObj = nodeCrypto.createPublicKey(publicKey);
+        const sshPub = keyObj.export({ type: 'spki', format: 'der' });
+        const fp = nodeCrypto.createHash('sha256').update(sshPub).digest('base64').replace(/=+$/, '');
+        return {
+          publicKey: publicKey,
+          privateKey: privateKey,
+          fingerprint: `SHA256:${fp}`,
+        };
+      } else {
+        // Default: Ed25519
+        const { publicKey, privateKey } = nodeCrypto.generateKeyPairSync('ed25519', {
+          publicKeyEncoding: { type: 'spki', format: 'pem' },
+          privateKeyEncoding: { type: 'pkcs8', format: 'pem' },
+        });
+        const keyObj = nodeCrypto.createPublicKey(publicKey);
+        const sshPub = keyObj.export({ type: 'spki', format: 'der' });
+        const fp = nodeCrypto.createHash('sha256').update(sshPub).digest('base64').replace(/=+$/, '');
+        return {
+          publicKey: publicKey,
+          privateKey: privateKey,
+          fingerprint: `SHA256:${fp}`,
+        };
+      }
+    } catch (e) {
+      return { error: `Key generation failed: ${e instanceof Error ? e.message : String(e)}` };
     }
   });
 

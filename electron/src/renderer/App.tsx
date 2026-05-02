@@ -9,6 +9,7 @@ const Register = lazy(() => import('./pages/Register').then(m => ({ default: m.R
 const Vault = lazy(() => import('./pages/Vault').then(m => ({ default: m.Vault })));
 const EntryDetail = lazy(() => import('./pages/EntryDetail').then(m => ({ default: m.EntryDetail })));
 const Passkeys = lazy(() => import('./pages/Passkeys').then(m => ({ default: m.Passkeys })));
+const SSHKeys = lazy(() => import('./pages/SSHKeys').then(m => ({ default: m.SSHKeys })));
 const Admin = lazy(() => import('./pages/Admin').then(m => ({ default: m.Admin })));
 const Settings = lazy(() => import('./pages/Settings').then(m => ({ default: m.Settings })));
 const HealthReport = lazy(() => import('./pages/HealthReport').then(m => ({ default: m.HealthReport })));
@@ -42,6 +43,7 @@ export function App() {
           <Route path="/vault/collection/:collId" element={<Vault />} />
           <Route path="/vault/:id" element={<EntryDetail />} />
           <Route path="/passkeys" element={<Passkeys />} />
+          <Route path="/ssh-keys" element={<SSHKeys />} />
           <Route path="/settings" element={<Settings />} />
           <Route path="/health" element={<HealthReport />} />
           <Route path="/send" element={<Send />} />

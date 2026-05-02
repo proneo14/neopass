@@ -7,6 +7,7 @@ import { useVaultStore } from '../store/vaultStore';
 const navItems = [
   { to: '/vault', label: 'Vault', icon: '🔐' },
   { to: '/passkeys', label: 'Passkeys', icon: '🪪' },
+  { to: '/ssh-keys', label: 'SSH Keys', icon: '🗝️' },
   { to: '/health', label: 'Health', icon: '🛡️' },
   { to: '/send', label: 'Send', icon: '📤' },
 ];

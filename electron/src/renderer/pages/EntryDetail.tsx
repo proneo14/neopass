@@ -22,6 +22,8 @@ const FIELD_LABELS: Record<string, string> = {
   notes: 'Notes', content: 'Content', number: 'Card Number', expiry: 'Expiry',
   cvv: 'CVV', cardholder: 'Cardholder', firstName: 'First Name', lastName: 'Last Name',
   email: 'Email', phone: 'Phone', address: 'Address', totp: 'Authenticator Key',
+  privateKey: 'Private Key', publicKey: 'Public Key', fingerprint: 'Fingerprint',
+  keyType: 'Key Type', passphrase: 'Passphrase',
 };
 
 /** Fixed display order per entry type (fields not listed here appear at the end). */
@@ -30,9 +32,10 @@ const FIELD_ORDER: Record<string, string[]> = {
   secure_note: ['content', 'notes'],
   credit_card: ['number', 'expiry', 'cvv', 'cardholder', 'notes'],
   identity: ['firstName', 'lastName', 'email', 'phone', 'address', 'notes'],
+  ssh_key: ['publicKey', 'privateKey', 'fingerprint', 'keyType', 'passphrase', 'notes'],
 };
 
-const SENSITIVE_FIELDS = new Set(['password', 'cvv', 'number', 'content', 'totp']);
+const SENSITIVE_FIELDS = new Set(['password', 'cvv', 'number', 'content', 'totp', 'privateKey', 'passphrase']);
 
 function CopyButton({ value, sensitive = false, onBeforeCopy }: { value: string; sensitive?: boolean; onBeforeCopy?: (proceed: () => void) => void }) {
   const [copied, setCopied] = useState(false);
@@ -626,6 +629,55 @@ export function EntryDetail() {
           if (key.startsWith('_')) return null;
           // In view mode, skip rendering the raw totp field — we show TOTPDisplay instead
           if (key === 'totp' && !editing && fields[key]) return null;
+
+          // SSH key: key type as badge in view mode
+          if (key === 'keyType' && entryType === 'ssh_key' && !editing) {
+            const kt = fields[key];
+            if (!kt) return null;
+            const badgeLabel = kt === 'ed25519' ? 'Ed25519' : kt === 'rsa' ? 'RSA-4096' : kt === 'ecdsa' ? 'ECDSA' : kt;
+            return (
+              <div key={key} className="flex items-center gap-3 py-2.5 border-b border-surface-800">
+                <span className="text-xs text-surface-500 w-24 shrink-0 pt-0.5">Key Type</span>
+                <span className="px-2.5 py-1 rounded-full bg-accent-500/20 text-accent-300 text-xs font-medium">{badgeLabel}</span>
+              </div>
+            );
+          }
+
+          // SSH key: fingerprint as read-only monospace in view mode
+          if (key === 'fingerprint' && entryType === 'ssh_key' && !editing) {
+            const fp = fields[key];
+            if (!fp) return null;
+            return (
+              <div key={key} className="flex items-center gap-3 py-2.5 border-b border-surface-800">
+                <span className="text-xs text-surface-500 w-24 shrink-0 pt-0.5">Fingerprint</span>
+                <span className="flex-1 text-sm text-surface-300 font-mono break-all select-all">{fp}</span>
+                <CopyButton value={fp} />
+              </div>
+            );
+          }
+
+          // SSH key: publicKey with prominent copy button and monospace textarea view
+          if (key === 'publicKey' && entryType === 'ssh_key' && !editing) {
+            const pk = fields[key];
+            if (!pk) return null;
+            return (
+              <div key={key} className="py-2.5 border-b border-surface-800">
+                <div className="flex items-center gap-3 mb-1">
+                  <span className="text-xs text-surface-500 w-24 shrink-0">Public Key</span>
+                  <div className="flex-1" />
+                  <button
+                    onClick={async () => {
+                      await navigator.clipboard.writeText(pk);
+                    }}
+                    className="px-3 py-1 rounded-md bg-accent-600 hover:bg-accent-500 text-white text-xs font-medium transition-colors"
+                  >
+                    Copy Public Key
+                  </button>
+                </div>
+                <pre className="ml-[108px] text-xs text-surface-300 font-mono bg-surface-800 rounded-md p-2 whitespace-pre-wrap break-all select-all max-h-24 overflow-auto">{pk}</pre>
+              </div>
+            );
+          }
 
           // For login entries, render multi-URI section instead of single uri field
           if (key === 'uri' && entryType === 'login') {

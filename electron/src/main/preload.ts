@@ -114,8 +114,8 @@ const api = {
       validateString(nonce, 'nonce');
       return ipcRenderer.invoke('vault:decrypt', masterKeyHex, encryptedData, nonce);
     },
-    exportFile: (jsonContent: string): Promise<{ success?: boolean; cancelled?: boolean; path?: string; error?: string }> =>
-      ipcRenderer.invoke('vault:exportFile', jsonContent),
+    exportFile: (content: string, format?: string): Promise<{ success?: boolean; cancelled?: boolean; path?: string; error?: string }> =>
+      ipcRenderer.invoke('vault:exportFile', content, format),
     importExport: (token: string): Promise<{ imported?: number; total?: number; error?: string }> => {
       validateString(token, 'token');
       return ipcRenderer.invoke('vault:importExport', token);
@@ -193,6 +193,13 @@ const api = {
       validateString(token, 'token');
       validateObject(data, 'data');
       return ipcRenderer.invoke('passkey:finishAuthentication', token, data);
+    },
+  },
+
+  ssh: {
+    generateKeyPair: (keyType: string): Promise<{ publicKey?: string; privateKey?: string; fingerprint?: string; error?: string }> => {
+      validateString(keyType, 'keyType');
+      return ipcRenderer.invoke('ssh:generateKeyPair', keyType);
     },
   },
 

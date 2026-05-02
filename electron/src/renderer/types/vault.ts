@@ -1,6 +1,6 @@
 export interface VaultEntry {
   id: string;
-  entry_type: 'login' | 'secure_note' | 'credit_card' | 'identity';
+  entry_type: 'login' | 'secure_note' | 'credit_card' | 'identity' | 'ssh_key';
   encrypted_data: string;
   nonce: string;
   version: number;
@@ -60,13 +60,24 @@ export interface IdentityData {
   address: string;
 }
 
-export type EntryData = LoginData | SecureNoteData | CreditCardData | IdentityData;
+export interface SSHKeyData {
+  name: string;
+  privateKey: string;
+  publicKey: string;
+  fingerprint: string;
+  keyType: string;
+  passphrase: string;
+  notes: string;
+}
+
+export type EntryData = LoginData | SecureNoteData | CreditCardData | IdentityData | SSHKeyData;
 
 export const ENTRY_TYPE_ICONS: Record<string, string> = {
   login: '🔑',
   secure_note: '📝',
   credit_card: '💳',
   identity: '👤',
+  ssh_key: '🗝️',
 };
 
 export const ENTRY_TYPE_LABELS: Record<string, string> = {
@@ -74,4 +85,5 @@ export const ENTRY_TYPE_LABELS: Record<string, string> = {
   secure_note: 'Secure Note',
   credit_card: 'Credit Card',
   identity: 'Identity',
+  ssh_key: 'SSH Key',
 };

@@ -385,9 +385,337 @@ function BiometricEnrollModal({ onClose, onConfirm }: { onClose: () => void; onC
   );
 }
 
+type ExportFormat = 'encrypted_json' | 'json' | 'csv';
+
+function ExportModal({ onClose }: { onClose: () => void }) {
+  const { email, token, masterKeyHex } = useAuthStore();
+  const { entries, entryFields, folders } = useVaultStore();
+  const [format, setFormat] = useState<ExportFormat>('encrypted_json');
+  const [step, setStep] = useState<'choose' | 'warning' | 'verify' | 'exporting'>('choose');
+  const [password, setPassword] = useState('');
+  const [error, setError] = useState('');
+
+  const isUnencrypted = format === 'json' || format === 'csv';
+
+  const handleProceed = () => {
+    if (isUnencrypted) {
+      setStep('warning');
+    } else {
+      setStep('verify');
+    }
+  };
+
+  const handleWarningAccept = () => {
+    setStep('verify');
+  };
+
+  const handleVerify = async () => {
+    if (!email || !masterKeyHex) return;
+    setError('');
+    const result = await window.api.vault.verifyMasterPassword(email, password, masterKeyHex);
+    if (!result.verified) {
+      setError(result.error || 'Incorrect master password');
+      return;
+    }
+    setStep('exporting');
+    await doExport();
+  };
+
+  /** Build a map of folder_id -> decrypted name */
+  const buildFolderMap = async (): Promise<Record<string, string>> => {
+    const map: Record<string, string> = {};
+    if (!masterKeyHex) return map;
+    for (const folder of folders) {
+      try {
+        // folder.name_encrypted is hex nonce+ciphertext
+        const nonce = folder.name_encrypted.slice(0, 24);
+        const cipher = folder.name_encrypted.slice(24);
+        const dec = await window.api.vault.decrypt(masterKeyHex, cipher, nonce) as { plaintext?: string };
+        if (dec.plaintext) map[folder.id] = dec.plaintext;
+      } catch {
+        map[folder.id] = 'Unknown Folder';
+      }
+    }
+    return map;
+  };
+
+  const doExport = async () => {
+    try {
+      const folderMap = await buildFolderMap();
+
+      // Fetch passkeys from server
+      let passkeys: Array<Record<string, unknown>> = [];
+      if (token) {
+        try {
+          const pkResult = await window.api.passkey.list(token);
+          if (Array.isArray(pkResult)) passkeys = pkResult;
+        } catch { /* passkey fetch is best-effort */ }
+      }
+
+      if (format === 'encrypted_json') {
+        // Encrypted JSON — raw encrypted entries for re-import
+        const exportData = entries.map((entry) => ({
+          id: entry.id,
+          entry_type: entry.entry_type,
+          encrypted_data: entry.encrypted_data,
+          nonce: entry.nonce,
+          version: entry.version,
+          folder_id: entry.folder_id,
+          is_favorite: entry.is_favorite,
+          created_at: entry.created_at,
+          updated_at: entry.updated_at,
+        }));
+        const payload = {
+          version: 1,
+          format: 'lgipass_encrypted',
+          exportDate: new Date().toISOString(),
+          entries: exportData,
+          folders: folders.map((f) => ({
+            id: f.id,
+            name_encrypted: f.name_encrypted,
+            parent_id: f.parent_id,
+          })),
+          passkeys,
+        };
+        const json = JSON.stringify(payload, null, 2);
+        await window.api.vault.exportFile(json);
+      } else if (format === 'json') {
+        // Unencrypted JSON — Bitwarden-compatible where possible
+        const exportEntries = entries.map((entry) => {
+          const fields = entryFields[entry.id] ?? {};
+          const { _reprompt, _passwordHistory, _uris, ...cleanFields } = fields;
+          const result: Record<string, unknown> = {
+            type: entry.entry_type,
+            name: fields.name || '',
+            ...cleanFields,
+            favorite: entry.is_favorite ?? false,
+            reprompt: _reprompt === '1',
+            folder: entry.folder_id ? (folderMap[entry.folder_id] ?? null) : null,
+          };
+          if (_passwordHistory) {
+            try { result.passwordHistory = JSON.parse(_passwordHistory); } catch { /* skip */ }
+          }
+          if (_uris) {
+            try { result.uris = JSON.parse(_uris); } catch { /* skip */ }
+          }
+          return result;
+        });
+        const payload = {
+          version: 1,
+          exportDate: new Date().toISOString(),
+          entries: exportEntries,
+          folders: await Promise.all(folders.map(async (f) => ({
+            id: f.id,
+            name: folderMap[f.id] ?? 'Unknown',
+          }))),
+          passkeys: passkeys.map((pk) => ({
+            id: pk.id,
+            rp_id: pk.rp_id,
+            rp_name: pk.rp_name,
+            username: pk.username,
+            credential_id: pk.credential_id,
+            public_key_alg: pk.public_key_alg,
+            discoverable: pk.discoverable,
+            created_at: pk.created_at,
+          })),
+        };
+        const json = JSON.stringify(payload, null, 2);
+        await window.api.vault.exportFile(json);
+      } else if (format === 'csv') {
+        // CSV export
+        const csvEscape = (val: string): string => {
+          if (!val) return '';
+          if (val.includes(',') || val.includes('"') || val.includes('\n')) {
+            return '"' + val.replace(/"/g, '""') + '"';
+          }
+          return val;
+        };
+
+        const headers = ['folder', 'type', 'name', 'username', 'password', 'uri', 'notes', 'totp', 'fields',
+          'number', 'expiry', 'cvv', 'cardholder',
+          'firstName', 'lastName', 'email', 'phone', 'address',
+          'privateKey', 'publicKey', 'fingerprint', 'keyType', 'passphrase'];
+        const rows = [headers.join(',')];
+
+        for (const entry of entries) {
+          const fields = entryFields[entry.id] ?? {};
+          const folder = entry.folder_id ? (folderMap[entry.folder_id] ?? '') : '';
+
+          // Collect "extra" custom fields not in the standard columns
+          const standardKeys = new Set([
+            'name', 'username', 'password', 'uri', 'notes', 'totp',
+            'number', 'expiry', 'cvv', 'cardholder',
+            'firstName', 'lastName', 'email', 'phone', 'address',
+            'content', 'privateKey', 'publicKey', 'fingerprint', 'keyType', 'passphrase',
+            '_reprompt', '_passwordHistory', '_uris',
+          ]);
+          const customFields: Record<string, string> = {};
+          for (const [k, v] of Object.entries(fields)) {
+            if (!standardKeys.has(k) && v) customFields[k] = v;
+          }
+          // For secure_note, put content in notes column
+          const notesVal = fields.notes || (entry.entry_type === 'secure_note' ? fields.content : '') || '';
+
+          const row = [
+            csvEscape(folder),
+            csvEscape(entry.entry_type),
+            csvEscape(fields.name || ''),
+            csvEscape(fields.username || ''),
+            csvEscape(fields.password || ''),
+            csvEscape(fields.uri || ''),
+            csvEscape(notesVal),
+            csvEscape(fields.totp || ''),
+            csvEscape(Object.keys(customFields).length > 0 ? JSON.stringify(customFields) : ''),
+            csvEscape(fields.number || ''),
+            csvEscape(fields.expiry || ''),
+            csvEscape(fields.cvv || ''),
+            csvEscape(fields.cardholder || ''),
+            csvEscape(fields.firstName || ''),
+            csvEscape(fields.lastName || ''),
+            csvEscape(fields.email || ''),
+            csvEscape(fields.phone || ''),
+            csvEscape(fields.address || ''),
+            csvEscape(fields.privateKey || ''),
+            csvEscape(fields.publicKey || ''),
+            csvEscape(fields.fingerprint || ''),
+            csvEscape(fields.keyType || ''),
+            csvEscape(fields.passphrase || ''),
+          ];
+          rows.push(row.join(','));
+        }
+
+        // Add passkeys as rows with type='passkey'
+        for (const pk of passkeys) {
+          const row = [
+            '', // folder
+            csvEscape('passkey'),
+            csvEscape(String(pk.rp_name || pk.rp_id || '')),
+            csvEscape(String(pk.username || '')),
+            '', // password
+            csvEscape(String(pk.rp_id || '')), // uri = rpId
+            '', // notes
+            '', // totp
+            csvEscape(JSON.stringify({ credential_id: pk.credential_id, public_key_alg: pk.public_key_alg, discoverable: pk.discoverable })),
+            '', '', '', '', '', '', '', '', '', '', '', '', '', '',
+          ];
+          rows.push(row.join(','));
+        }
+
+        await window.api.vault.exportFile(rows.join('\n'), 'csv');
+      }
+
+      onClose();
+    } catch {
+      setError('Export failed');
+      setStep('choose');
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
+      <div className="bg-surface-900 rounded-lg p-6 max-w-md w-full shadow-2xl">
+        <h2 className="text-lg font-semibold text-surface-100 mb-4">Export Vault</h2>
+
+        {step === 'choose' && (
+          <>
+            <p className="text-sm text-surface-400 mb-4">Choose an export format:</p>
+            <div className="space-y-2 mb-6">
+              {([
+                { value: 'encrypted_json' as const, label: 'Encrypted JSON', desc: 'Full backup — can be re-imported into LGI Pass' },
+                { value: 'json' as const, label: 'Unencrypted JSON', desc: 'All entries decrypted in standard JSON format' },
+                { value: 'csv' as const, label: 'Unencrypted CSV', desc: 'Flat CSV for spreadsheet / import into other managers' },
+              ]).map((opt) => (
+                <label
+                  key={opt.value}
+                  className={`flex items-start gap-3 px-4 py-3 rounded-md cursor-pointer transition-colors ${
+                    format === opt.value ? 'bg-accent-600/20 border border-accent-500/40' : 'bg-surface-800 hover:bg-surface-700 border border-transparent'
+                  }`}
+                >
+                  <input
+                    type="radio"
+                    name="exportFormat"
+                    checked={format === opt.value}
+                    onChange={() => setFormat(opt.value)}
+                    className="mt-1 accent-accent-500"
+                  />
+                  <div>
+                    <p className="text-sm text-surface-200 font-medium">{opt.label}</p>
+                    <p className="text-xs text-surface-500">{opt.desc}</p>
+                  </div>
+                </label>
+              ))}
+            </div>
+            <div className="flex gap-3">
+              <button onClick={onClose} className="flex-1 py-2 rounded-md bg-surface-700 text-surface-300 text-sm hover:bg-surface-600 transition-colors">
+                Cancel
+              </button>
+              <button onClick={handleProceed} className="flex-1 py-2 rounded-md bg-accent-600 hover:bg-accent-500 text-white text-sm font-medium transition-colors">
+                Continue
+              </button>
+            </div>
+          </>
+        )}
+
+        {step === 'warning' && (
+          <>
+            <div className="flex items-start gap-3 px-4 py-3 rounded-lg bg-amber-500/10 border border-amber-500/30 mb-4">
+              <span className="text-xl mt-0.5">⚠️</span>
+              <div>
+                <p className="text-sm text-amber-300 font-medium mb-1">Security Warning</p>
+                <p className="text-xs text-amber-200/80">
+                  Exporting unencrypted data exposes your passwords. The exported file is <strong>NOT encrypted</strong>.
+                  Delete it after importing into another application.
+                </p>
+              </div>
+            </div>
+            <div className="flex gap-3">
+              <button onClick={() => setStep('choose')} className="flex-1 py-2 rounded-md bg-surface-700 text-surface-300 text-sm hover:bg-surface-600 transition-colors">
+                Go Back
+              </button>
+              <button onClick={handleWarningAccept} className="flex-1 py-2 rounded-md bg-amber-600 hover:bg-amber-500 text-white text-sm font-medium transition-colors">
+                I Understand, Continue
+              </button>
+            </div>
+          </>
+        )}
+
+        {step === 'verify' && (
+          <form onSubmit={(e) => { e.preventDefault(); handleVerify(); }}>
+            <p className="text-sm text-surface-400 mb-3">Re-enter your master password to export:</p>
+            <input
+              type="password"
+              value={password}
+              onChange={(e) => { setPassword(e.target.value); setError(''); }}
+              placeholder="Master password"
+              autoFocus
+              className="w-full px-3 py-2 bg-surface-800 border border-surface-600 rounded-md text-surface-100 placeholder-surface-500 focus:outline-none focus:ring-2 focus:ring-accent-500 text-sm mb-3"
+            />
+            {error && <p className="text-xs text-red-400 mb-3">{error}</p>}
+            <div className="flex gap-3">
+              <button type="button" onClick={() => { setStep('choose'); setPassword(''); setError(''); }} className="flex-1 py-2 rounded-md bg-surface-700 text-surface-300 text-sm hover:bg-surface-600 transition-colors">
+                Cancel
+              </button>
+              <button type="submit" disabled={!password} className="flex-1 py-2 rounded-md bg-accent-600 hover:bg-accent-500 disabled:opacity-50 text-white text-sm font-medium transition-colors">
+                Export
+              </button>
+            </div>
+          </form>
+        )}
+
+        {step === 'exporting' && (
+          <div className="flex flex-col items-center py-8">
+            <div className="w-8 h-8 border-2 border-accent-500 border-t-transparent rounded-full animate-spin mb-3" />
+            <p className="text-sm text-surface-400">Exporting…</p>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export function Settings() {
   const { email, token, masterKeyHex, autoLockMinutes, setAutoLockMinutes, orgId, orgName, setOrg, clearOrg } = useAuthStore();
-  const { entries, entryFields } = useVaultStore();
+  const { entries, entryFields, folders } = useVaultStore();
   const refreshNotifications = useNotificationStore((s) => s.refresh);
   const [biometricEnabled, setBiometricEnabled] = useState(false);
   const [biometricAvailable, setBiometricAvailable] = useState(false);
@@ -420,6 +748,7 @@ export function Settings() {
   const [showImport, setShowImport] = useState(false);
   const [showSync, setShowSync] = useState(false);
   const [showServerConfig, setShowServerConfig] = useState(false);
+  const [showExport, setShowExport] = useState(false);
   useEffect(() => {
     (async () => {
       const available = await window.api.biometric.isAvailable();
@@ -995,20 +1324,10 @@ export function Settings() {
               <span className="text-surface-600">→</span>
             </button>
             <button
-              onClick={async () => {
-                // Export decrypted vault data as JSON file
-                const exportData = entries.map((entry) => ({
-                  entry_type: entry.entry_type,
-                  fields: entryFields[entry.id] ?? {},
-                  created_at: entry.created_at,
-                  updated_at: entry.updated_at,
-                }));
-                const json = JSON.stringify(exportData, null, 2);
-                await window.api.vault.exportFile(json);
-              }}
+              onClick={() => setShowExport(true)}
               className="w-full text-left px-4 py-3 rounded-md bg-surface-800 hover:bg-surface-700 text-sm text-surface-200 transition-colors flex items-center justify-between"
             >
-              Export Vault (Encrypted Backup)
+              Export Vault Data
               <span className="text-surface-600">→</span>
             </button>
             <button
@@ -1098,6 +1417,7 @@ export function Settings() {
       {showImport && <ImportWizard onClose={() => setShowImport(false)} />}
       {showSync && <SyncSettings onClose={() => setShowSync(false)} />}
       {showServerConfig && <ServerConfig onClose={() => setShowServerConfig(false)} />}
+      {showExport && <ExportModal onClose={() => setShowExport(false)} />}
     </div>
   );
 }

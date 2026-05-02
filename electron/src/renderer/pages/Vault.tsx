@@ -188,6 +188,15 @@ const FIELD_DEFS: Record<string, { key: string; label: string; type?: string }[]
     { key: 'phone', label: 'Phone' },
     { key: 'address', label: 'Address' },
   ],
+  ssh_key: [
+    { key: 'name', label: 'Name' },
+    { key: 'publicKey', label: 'Public Key', type: 'textarea' },
+    { key: 'privateKey', label: 'Private Key', type: 'textarea' },
+    { key: 'fingerprint', label: 'Fingerprint' },
+    { key: 'keyType', label: 'Key Type' },
+    { key: 'passphrase', label: 'Passphrase', type: 'password' },
+    { key: 'notes', label: 'Notes', type: 'textarea' },
+  ],
 };
 
 function NewEntryModal({ entryType, onCancel, onSave }: {
