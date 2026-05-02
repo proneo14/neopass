@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { PasswordGenerator } from '../components/PasswordGenerator';
+import { UsernameGenerator } from '../components/UsernameGenerator';
 import { RepromptDialog } from '../components/RepromptDialog';
 import { ENTRY_TYPE_ICONS, ENTRY_TYPE_LABELS } from '../types/vault';
 import type { LoginURI, PasswordHistoryEntry } from '../types/vault';
@@ -256,6 +257,7 @@ export function EntryDetail() {
   const isReadOnlyCollection = sourceCollectionId != null && collectionPermission === 'read';
   const [editing, setEditing] = useState(!!routeState?.edit && !isReadOnlyCollection);
   const [showGenerator, setShowGenerator] = useState(false);
+  const [showUsernameGen, setShowUsernameGen] = useState(false);
   const [revealedFields, setRevealedFields] = useState<Set<string>>(new Set());
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [confirmPermanent, setConfirmPermanent] = useState(false);
@@ -887,6 +889,52 @@ export function EntryDetail() {
                     rows={3}
                     className="flex-1 px-2 py-1 rounded bg-surface-800 border border-surface-600 text-surface-100 text-sm focus:outline-none focus:ring-2 focus:ring-accent-500 resize-none"
                   />
+                ) : key === 'username' && entryType === 'login' ? (
+                  <div className="flex-1 space-y-2">
+                    <div className="flex gap-2">
+                      <input
+                        type="text"
+                        value={editFields[key]}
+                        onChange={(e) => setEditFields({ ...editFields, [key]: e.target.value })}
+                        className="flex-1 px-2 py-1 rounded bg-surface-800 border border-surface-600 text-surface-100 text-sm focus:outline-none focus:ring-2 focus:ring-accent-500"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowUsernameGen(!showUsernameGen)}
+                        className="px-2 py-1 rounded bg-surface-800 border border-surface-600 text-surface-400 hover:text-accent-400 text-xs transition-colors"
+                      >
+                        Generate
+                      </button>
+                    </div>
+                    {showUsernameGen && (
+                      <div className="p-3 bg-surface-900/50 rounded-lg">
+                        <UsernameGenerator onUse={(u) => { setEditFields({ ...editFields, username: u }); setShowUsernameGen(false); }} />
+                      </div>
+                    )}
+                  </div>
+                ) : key === 'password' && entryType === 'login' ? (
+                  <div className="flex-1 space-y-2">
+                    <div className="flex gap-2">
+                      <input
+                        type={isSensitive && !revealed ? 'password' : 'text'}
+                        value={editFields[key]}
+                        onChange={(e) => setEditFields({ ...editFields, [key]: e.target.value })}
+                        className="flex-1 px-2 py-1 rounded bg-surface-800 border border-surface-600 text-surface-100 text-sm focus:outline-none focus:ring-2 focus:ring-accent-500"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowGenerator(!showGenerator)}
+                        className="px-2 py-1 rounded bg-surface-800 border border-surface-600 text-surface-400 hover:text-accent-400 text-xs transition-colors"
+                      >
+                        Generate
+                      </button>
+                    </div>
+                    {showGenerator && (
+                      <div className="p-3 bg-surface-900/50 rounded-lg">
+                        <PasswordGenerator onUse={(pw) => { setEditFields({ ...editFields, password: pw }); setShowGenerator(false); }} />
+                      </div>
+                    )}
+                  </div>
                 ) : (
                   <input
                     type={isSensitive && !revealed ? 'password' : 'text'}
@@ -965,22 +1013,7 @@ export function EntryDetail() {
         </div>
       )}
 
-      {/* Password generator (for login entries in edit mode) */}
-      {entryType === 'login' && editing && (
-        <div className="mt-4">
-          <button
-            onClick={() => setShowGenerator(!showGenerator)}
-            className="text-xs text-accent-400 hover:text-accent-300 transition-colors"
-          >
-            {showGenerator ? 'Hide password generator' : 'Generate new password'}
-          </button>
-          {showGenerator && (
-            <div className="mt-3 p-4 bg-surface-900/50 rounded-lg">
-              <PasswordGenerator onUse={(pw) => { setEditFields({ ...editFields, password: pw }); setShowGenerator(false); }} />
-            </div>
-          )}
-        </div>
-      )}
+
 
       {/* Timestamps */}
       <div className="mt-6 pt-4 border-t border-surface-800 flex gap-6 text-xs text-surface-600">

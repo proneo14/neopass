@@ -38,10 +38,13 @@ interface AuthState {
   orgId: string | null;
   orgName: string | null;
   autoLockMinutes: number; // 0 = never
+  timeoutAction: 'lock' | 'logout'; // lock = clear master key only, logout = full logout
   isAuthenticated: boolean;
   login: (token: string, userId: string, email: string, role?: string, masterKeyHex?: string) => void;
   logout: () => void;
+  lock: () => void;
   setAutoLockMinutes: (minutes: number) => void;
+  setTimeoutAction: (action: 'lock' | 'logout') => void;
   setOrg: (orgId: string, orgName: string, role: string) => void;
   clearOrg: () => void;
 }
@@ -55,6 +58,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   orgId: null,
   orgName: null,
   autoLockMinutes: 15,
+  timeoutAction: 'lock',
   isAuthenticated: false,
   login: (token, userId, email, role, masterKeyHex) => {
     const org = loadOrgFromStorage(userId);
@@ -78,7 +82,13 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     window.api?.auth?.logout?.().catch(() => {});
     set({ token: null, userId: null, email: null, role: null, masterKeyHex: null, orgId: null, orgName: null, isAuthenticated: false });
   },
+  lock: () => {
+    // Clear master key but keep session token — user can re-enter password or use biometric
+    useVaultStore.getState().clearRepromptApprovals();
+    set({ masterKeyHex: null });
+  },
   setAutoLockMinutes: (autoLockMinutes) => set({ autoLockMinutes }),
+  setTimeoutAction: (timeoutAction) => set({ timeoutAction }),
   setOrg: (orgId, orgName, role) => {
     const { userId } = get();
     saveOrgToStorage(userId, orgId, orgName, role);

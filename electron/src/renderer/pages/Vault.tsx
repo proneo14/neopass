@@ -4,6 +4,7 @@ import { useVaultStore } from '../store/vaultStore';
 import { useAuthStore } from '../store/authStore';
 import { ENTRY_TYPE_ICONS, ENTRY_TYPE_LABELS } from '../types/vault';
 import { PasswordGenerator } from '../components/PasswordGenerator';
+import { UsernameGenerator } from '../components/UsernameGenerator';
 import { RepromptDialog } from '../components/RepromptDialog';
 import { ImportWizard } from '../components/ImportWizard';
 import type { VaultEntry } from '../types/vault';
@@ -165,6 +166,7 @@ const FIELD_DEFS: Record<string, { key: string; label: string; type?: string }[]
   login: [
     { key: 'name', label: 'Name' },
     { key: 'username', label: 'Username' },
+    { key: 'email', label: 'Email' },
     { key: 'password', label: 'Password', type: 'password' },
     { key: 'uri', label: 'Website' },
     { key: 'notes', label: 'Notes', type: 'textarea' },
@@ -209,6 +211,7 @@ function NewEntryModal({ entryType, onCancel, onSave }: {
     Object.fromEntries(fieldDefs.map((f) => [f.key, '']))
   );
   const [showGenerator, setShowGenerator] = useState(false);
+  const [showUsernameGen, setShowUsernameGen] = useState(false);
 
   const update = (key: string, val: string) => setFields((prev) => ({ ...prev, [key]: val }));
 
@@ -251,6 +254,28 @@ function NewEntryModal({ entryType, onCancel, onSave }: {
                     </div>
                   )}
                 </>
+              ) : f.key === 'username' ? (
+                <>
+                  <div className="flex gap-2">
+                    <input
+                      type="text" value={fields[f.key]} onChange={(e) => update(f.key, e.target.value)}
+                      className="flex-1 px-3 py-2 rounded-md bg-surface-800 border border-surface-700 text-surface-100 text-sm placeholder-surface-500 focus:outline-none focus:ring-2 focus:ring-accent-500"
+                      placeholder={f.label}
+                    />
+                    <button
+                      type="button" onClick={() => setShowUsernameGen(!showUsernameGen)}
+                      className="px-3 py-2 rounded-md bg-surface-800 border border-surface-700 text-surface-400 hover:text-accent-400 text-sm transition-colors"
+                      title="Generate username"
+                    >
+                      Generate
+                    </button>
+                  </div>
+                  {showUsernameGen && (
+                    <div className="mt-2 p-4 bg-surface-800 rounded-lg">
+                      <UsernameGenerator onUse={(u) => { update('username', u); setShowUsernameGen(false); }} />
+                    </div>
+                  )}
+                </>
               ) : (
                 <input
                   type={f.type ?? 'text'} value={fields[f.key]} onChange={(e) => update(f.key, e.target.value)}
@@ -285,7 +310,7 @@ export function Vault() {
   const navigate = useNavigate();
   const location = useLocation();
   const { collId } = useParams<{ collId?: string }>();
-  const { entries, entryFields, addEntry, removeEntry, searchQuery, setSearchQuery, sortBy, setSortBy, selectedTypeFilter, setSelectedTypeFilter, updateEntry, isRepromptApproved, approveReprompt, selectedTags, toggleTag, setSelectedTags } = useVaultStore();
+  const { entries, entryFields, addEntry, removeEntry, searchQuery, setSearchQuery, sortBy, setSortBy, selectedTypeFilter, setSelectedTypeFilter, updateEntry, isRepromptApproved, approveReprompt, selectedTags, toggleTag, setSelectedTags, favoritesFirst, setFavoritesFirst, lastUsedAt, trackLastUsed } = useVaultStore();
   const { token, masterKeyHex } = useAuthStore();
 
   // Derive filter and collection from URL path
@@ -569,12 +594,22 @@ export function Vault() {
         const f = entryFields[e.id];
         const name = (f?.name ?? '').toLowerCase();
         const user = (f?.username ?? f?.email ?? '').toLowerCase();
-        return name.includes(q) || user.includes(q) || e.entry_type.includes(q);
+        const notes = (f?.notes ?? f?.content ?? '').toLowerCase();
+        const uriStr = (f?.uri ?? '').toLowerCase();
+        const tagsStr = (f?._tags ?? '').toLowerCase();
+        return name.includes(q) || user.includes(q) || notes.includes(q) || uriStr.includes(q) || tagsStr.includes(q) || e.entry_type.includes(q);
       });
     }
 
     result = [...result].sort((a, b) => {
+      // Favorites first toggle
+      if (favoritesFirst) {
+        if (a.is_favorite && !b.is_favorite) return -1;
+        if (!a.is_favorite && b.is_favorite) return 1;
+      }
       if (sortBy === 'updated_at') return new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime();
+      if (sortBy === 'created_at') return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+      if (sortBy === 'last_used') return (lastUsedAt[b.id] ?? 0) - (lastUsedAt[a.id] ?? 0);
       if (sortBy === 'entry_type') return a.entry_type.localeCompare(b.entry_type);
       const nameA = entryFields[a.id]?.name ?? '';
       const nameB = entryFields[b.id]?.name ?? '';
@@ -582,7 +617,7 @@ export function Vault() {
     });
 
     return result;
-  }, [entries, entryFields, searchQuery, sortBy, selectedTypeFilter, selectedTags]);
+  }, [entries, entryFields, searchQuery, sortBy, selectedTypeFilter, selectedTags, favoritesFirst, lastUsedAt]);
 
   const handleContextMenu = (e: React.MouseEvent, entryId: string) => {
     e.preventDefault();
@@ -705,13 +740,26 @@ export function Vault() {
         {/* Sort */}
         <select
           value={sortBy}
-          onChange={(e) => setSortBy(e.target.value as 'name' | 'updated_at' | 'entry_type')}
+          onChange={(e) => setSortBy(e.target.value as 'name' | 'updated_at' | 'entry_type' | 'created_at' | 'last_used')}
           className="px-3 py-2 rounded-md bg-surface-800 border border-surface-700 text-surface-300 text-sm focus:outline-none focus:ring-2 focus:ring-accent-500"
         >
           <option value="updated_at">Modified</option>
+          <option value="created_at">Created</option>
+          <option value="last_used">Recently used</option>
           <option value="name">Name</option>
           <option value="entry_type">Type</option>
         </select>
+        <button
+          onClick={() => setFavoritesFirst(!favoritesFirst)}
+          className={`px-2.5 py-2 rounded-md border text-sm transition-colors ${
+            favoritesFirst
+              ? 'bg-amber-500/15 border-amber-500/40 text-amber-400'
+              : 'bg-surface-800 border-surface-700 text-surface-400 hover:text-surface-200'
+          }`}
+          title={favoritesFirst ? 'Favorites first (on)' : 'Favorites first (off)'}
+        >
+          ★
+        </button>
       </div>
 
       {/* Type filter pills + Tags dropdown */}
@@ -790,24 +838,71 @@ export function Vault() {
           </div>
         ) : filtered.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-20 text-surface-500">
-            <span className="text-5xl mb-4">🔐</span>
-            <p className="text-sm">{searchQuery ? 'No matching entries' : 'Your vault is empty'}</p>
-            <p className="text-xs mt-1">
-              {searchQuery ? 'Try a different search term' : 'Add your first entry or import from another password manager'}
-            </p>
-            {!searchQuery && (
-              <button
-                onClick={() => setShowImportWizard(true)}
-                className="mt-4 px-4 py-2 bg-accent-600 hover:bg-accent-500 text-white text-sm rounded-md transition-colors"
-              >
-                Import Passwords
-              </button>
+            {activeFilter === 'trash' ? (
+              <>
+                <span className="text-5xl mb-4">🗑️</span>
+                <p className="text-sm">Trash is empty</p>
+                <p className="text-xs mt-1">Deleted items will appear here</p>
+              </>
+            ) : activeFilter === 'archived' ? (
+              <>
+                <span className="text-5xl mb-4">📦</span>
+                <p className="text-sm">No archived items</p>
+                <p className="text-xs mt-1">Archived entries will appear here</p>
+              </>
+            ) : searchQuery ? (
+              <>
+                <span className="text-5xl mb-4">🔍</span>
+                <p className="text-sm">No entries match your search</p>
+                <p className="text-xs mt-1">Try a different search term or clear filters</p>
+                <button
+                  onClick={() => { setSearchQuery(''); setSelectedTypeFilter(null); setSelectedTags([]); }}
+                  className="mt-4 px-4 py-2 bg-surface-800 hover:bg-surface-700 text-surface-300 text-sm rounded-md transition-colors"
+                >
+                  Clear search & filters
+                </button>
+              </>
+            ) : (
+              <>
+                <span className="text-5xl mb-4">🔐</span>
+                <p className="text-sm">Your vault is empty</p>
+                <p className="text-xs mt-1">Add your first entry or import from another password manager</p>
+                <div className="flex gap-3 mt-4">
+                  <button
+                    onClick={() => setShowImportWizard(true)}
+                    className="px-4 py-2 bg-surface-800 hover:bg-surface-700 text-surface-300 text-sm rounded-md transition-colors"
+                  >
+                    Import Passwords
+                  </button>
+                  <button
+                    onClick={() => setShowAddDropdown(true)}
+                    className="px-4 py-2 bg-accent-600 hover:bg-accent-500 text-white text-sm rounded-md transition-colors"
+                  >
+                    Create First Entry
+                  </button>
+                </div>
+              </>
             )}
           </div>
         ) : (
           <div className="space-y-1">
             {filtered.map((entry) => {
               const f = entryFields[entry.id];
+              // Determine which field matched the search query
+              let matchedField: string | null = null;
+              if (searchQuery) {
+                const q = searchQuery.toLowerCase();
+                const name = (f?.name ?? '').toLowerCase();
+                const user = (f?.username ?? f?.email ?? '').toLowerCase();
+                const notes = (f?.notes ?? f?.content ?? '').toLowerCase();
+                const uriStr = (f?.uri ?? '').toLowerCase();
+                const tagsStr = (f?._tags ?? '').toLowerCase();
+                if (name.includes(q)) matchedField = null; // name match is obvious
+                else if (user.includes(q)) matchedField = 'username';
+                else if (uriStr.includes(q)) matchedField = 'URI';
+                else if (notes.includes(q)) matchedField = 'notes';
+                else if (tagsStr.includes(q)) matchedField = 'tags';
+              }
               return (
                 <div
                   key={entry.id}
@@ -824,6 +919,9 @@ export function Vault() {
                     </p>
                     {(f?.username || f?.email) && (
                       <p className="text-xs text-surface-500 truncate">{f.username || f.email}</p>
+                    )}
+                    {searchQuery && matchedField && (
+                      <p className="text-[10px] text-accent-400/70 mt-0.5">matched in {matchedField}</p>
                     )}
                     {f?._tags && (() => {
                       try {
@@ -877,6 +975,7 @@ export function Vault() {
           onClose={() => setContextMenu(null)}
           onCopyUsername={() => {
             navigator.clipboard.writeText(entryFields[contextMenu.entryId]?.username ?? '');
+            trackLastUsed(contextMenu.entryId);
             setContextMenu(null);
           }}
           onCopyPassword={() => {
@@ -884,6 +983,7 @@ export function Vault() {
             setContextMenu(null);
             withReprompt(eid, async () => {
               await window.api.clipboard.copySecure(entryFields[eid]?.password ?? '');
+              trackLastUsed(eid);
             });
           }}
           onToggleFavorite={async () => {

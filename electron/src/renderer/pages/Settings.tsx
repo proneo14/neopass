@@ -12,6 +12,7 @@ import { SyncSettings } from '../components/SyncSettings';
 import { ServerConfig } from '../components/ServerConfig';
 
 type AutoLockOption = '1' | '5' | '15' | '30' | '60' | 'never';
+type TimeoutActionOption = 'lock' | 'logout';
 
 const AUTO_LOCK_OPTIONS: { value: AutoLockOption; label: string }[] = [
   { value: '1', label: '1 minute' },
@@ -20,6 +21,11 @@ const AUTO_LOCK_OPTIONS: { value: AutoLockOption; label: string }[] = [
   { value: '30', label: '30 minutes' },
   { value: '60', label: '1 hour' },
   { value: 'never', label: 'Never' },
+];
+
+const TIMEOUT_ACTION_OPTIONS: { value: TimeoutActionOption; label: string; description: string }[] = [
+  { value: 'lock', label: 'Lock', description: 'Require master password or biometric to unlock' },
+  { value: 'logout', label: 'Log out', description: 'Clear all data and require full login' },
 ];
 
 function SettingsToggle({ label, description, checked, onChange }: {
@@ -747,7 +753,7 @@ function AppearanceSection() {
 }
 
 export function Settings() {
-  const { email, token, masterKeyHex, autoLockMinutes, setAutoLockMinutes, orgId, orgName, setOrg, clearOrg } = useAuthStore();
+  const { email, token, masterKeyHex, autoLockMinutes, setAutoLockMinutes, timeoutAction, setTimeoutAction, orgId, orgName, setOrg, clearOrg } = useAuthStore();
   const { entries, entryFields, folders } = useVaultStore();
   const refreshNotifications = useNotificationStore((s) => s.refresh);
   const [biometricEnabled, setBiometricEnabled] = useState(false);
@@ -1107,6 +1113,25 @@ export function Settings() {
                 </select>
               </div>
             </div>
+            <div className="px-4 py-3 rounded-md bg-surface-800">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm text-surface-200">Vault Timeout Action</p>
+                  <p className="text-xs text-surface-500 mt-0.5">
+                    {TIMEOUT_ACTION_OPTIONS.find((o) => o.value === timeoutAction)?.description}
+                  </p>
+                </div>
+                <select
+                  value={timeoutAction}
+                  onChange={(e) => setTimeoutAction(e.target.value as TimeoutActionOption)}
+                  className="bg-surface-700 border border-surface-600 text-surface-300 text-xs rounded px-2 py-1 focus:outline-none focus:ring-2 focus:ring-accent-500"
+                >
+                  {TIMEOUT_ACTION_OPTIONS.map((opt) => (
+                    <option key={opt.value} value={opt.value}>{opt.label}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
             <SettingsToggle
               label={hwKeyLoading ? 'Require Hardware Key (saving…)' : 'Require Hardware Key for Login'}
               description="When enabled, a FIDO2 security key (USB/NFC/BLE) is required after password entry"
@@ -1380,6 +1405,52 @@ export function Settings() {
 
         {/* Emergency Access */}
         <EmergencyAccessSection />
+
+        {/* Username & Alias */}
+        <section>
+          <h2 className="text-xs font-semibold text-surface-500 uppercase tracking-wider mb-3">Username & Alias</h2>
+          <div className="space-y-3 bg-surface-800 rounded-lg p-4">
+            <div>
+              <label className="block text-sm font-medium text-surface-300 mb-1">Catch-all Domain</label>
+              <p className="text-xs text-surface-500 mb-2">
+                Set a domain with catch-all email to generate random email aliases (e.g., xyz@yourdomain.com).
+              </p>
+              <input
+                type="text"
+                value={(() => { try { return localStorage.getItem('lgi-pass-catchall-domain') || ''; } catch { return ''; } })()}
+                onChange={(e) => { localStorage.setItem('lgi-pass-catchall-domain', e.target.value); }}
+                placeholder="mydomain.com"
+                className="w-full px-3 py-2 bg-surface-900 border border-surface-600 rounded-md text-surface-100 placeholder-surface-500 focus:outline-none focus:ring-1 focus:ring-accent-500 text-sm"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-surface-300 mb-1">SimpleLogin API Key</label>
+              <p className="text-xs text-surface-500 mb-2">
+                Optional. Enables generating email aliases via SimpleLogin.
+              </p>
+              <input
+                type="password"
+                value={(() => { try { return localStorage.getItem('lgi-pass-simplelogin-key') || ''; } catch { return ''; } })()}
+                onChange={(e) => { localStorage.setItem('lgi-pass-simplelogin-key', e.target.value); }}
+                placeholder="sl_..."
+                className="w-full px-3 py-2 bg-surface-900 border border-surface-600 rounded-md text-surface-100 placeholder-surface-500 focus:outline-none focus:ring-1 focus:ring-accent-500 text-sm"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-surface-300 mb-1">Addy.io API Key</label>
+              <p className="text-xs text-surface-500 mb-2">
+                Optional. Enables generating email aliases via Addy.io (AnonAddy).
+              </p>
+              <input
+                type="password"
+                value={(() => { try { return localStorage.getItem('lgi-pass-addyio-key') || ''; } catch { return ''; } })()}
+                onChange={(e) => { localStorage.setItem('lgi-pass-addyio-key', e.target.value); }}
+                placeholder="API key"
+                className="w-full px-3 py-2 bg-surface-900 border border-surface-600 rounded-md text-surface-100 placeholder-surface-500 focus:outline-none focus:ring-1 focus:ring-accent-500 text-sm"
+              />
+            </div>
+          </div>
+        </section>
 
         {/* Secure Send */}
         <section>

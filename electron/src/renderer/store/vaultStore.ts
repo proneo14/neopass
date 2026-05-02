@@ -23,7 +23,9 @@ interface VaultState {
   entryFields: Record<string, EntryFields>; // id -> decrypted field data
   folders: Folder[];
   searchQuery: string;
-  sortBy: 'name' | 'updated_at' | 'entry_type';
+  sortBy: 'name' | 'updated_at' | 'entry_type' | 'created_at' | 'last_used';
+  favoritesFirst: boolean;
+  lastUsedAt: Record<string, number>; // entry id -> timestamp of last copy
   selectedFolderId: string | null;
   selectedTypeFilter: string | null;
   activeFilter: 'all' | 'favorites' | 'archived' | 'trash';
@@ -49,7 +51,9 @@ interface VaultState {
   updateEntry: (entry: VaultEntry) => void;
   removeEntry: (id: string) => void;
   setSearchQuery: (query: string) => void;
-  setSortBy: (sort: 'name' | 'updated_at' | 'entry_type') => void;
+  setSortBy: (sort: 'name' | 'updated_at' | 'entry_type' | 'created_at' | 'last_used') => void;
+  setFavoritesFirst: (v: boolean) => void;
+  trackLastUsed: (entryId: string) => void;
   setSelectedFolderId: (id: string | null) => void;
   setSelectedTypeFilter: (type: string | null) => void;
   setActiveFilter: (filter: 'all' | 'favorites' | 'archived' | 'trash') => void;
@@ -82,6 +86,8 @@ export const useVaultStore = create<VaultState>((set, get) => ({
   folders: [],
   searchQuery: '',
   sortBy: 'updated_at',
+  favoritesFirst: false,
+  lastUsedAt: (() => { try { const raw = localStorage.getItem('lgi-pass-last-used'); return raw ? JSON.parse(raw) : {}; } catch { return {}; } })(),
   selectedFolderId: null,
   selectedTypeFilter: null,
   activeFilter: 'all',
@@ -112,6 +118,12 @@ export const useVaultStore = create<VaultState>((set, get) => ({
     }),
   setSearchQuery: (searchQuery) => set({ searchQuery }),
   setSortBy: (sortBy) => set({ sortBy }),
+  setFavoritesFirst: (favoritesFirst) => set({ favoritesFirst }),
+  trackLastUsed: (entryId) => set((s) => {
+    const lastUsedAt = { ...s.lastUsedAt, [entryId]: Date.now() };
+    try { localStorage.setItem('lgi-pass-last-used', JSON.stringify(lastUsedAt)); } catch { /* ignore */ }
+    return { lastUsedAt };
+  }),
   setSelectedFolderId: (selectedFolderId) => set({ selectedFolderId }),
   setSelectedTypeFilter: (selectedTypeFilter) => set({ selectedTypeFilter }),
   setActiveFilter: (activeFilter) => set({ activeFilter }),

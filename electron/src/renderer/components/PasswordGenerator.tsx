@@ -1,4 +1,5 @@
 import React, { useState, useCallback } from 'react';
+import { UsernameGenerator } from './UsernameGenerator';
 
 interface PasswordGeneratorProps {
   onUse?: (password: string) => void;
@@ -58,7 +59,7 @@ function getStrengthInfo(pw: string): { label: string; color: string; percent: n
 }
 
 export function PasswordGenerator({ onUse }: PasswordGeneratorProps) {
-  const [mode, setMode] = useState<'password' | 'passphrase'>('password');
+  const [mode, setMode] = useState<'password' | 'passphrase' | 'username'>('password');
   const [length, setLength] = useState(20);
   const [uppercase, setUppercase] = useState(true);
   const [lowercase, setLowercase] = useState(true);
@@ -71,6 +72,7 @@ export function PasswordGenerator({ onUse }: PasswordGeneratorProps) {
   const [copied, setCopied] = useState(false);
 
   const generate = useCallback(() => {
+    if (mode === 'username') return; // Username generator handles its own state
     const pw =
       mode === 'password'
         ? generatePassword(length, uppercase, lowercase, digits, symbols)
@@ -90,6 +92,35 @@ export function PasswordGenerator({ onUse }: PasswordGeneratorProps) {
   };
 
   const strength = getStrengthInfo(generated);
+
+  if (mode === 'username') {
+    return (
+      <div className="space-y-4">
+        {/* Mode toggle */}
+        <div className="flex gap-1 bg-surface-800 rounded-md p-1">
+          <button
+            onClick={() => setMode('password')}
+            className="flex-1 py-1.5 text-xs rounded font-medium transition-colors text-surface-400 hover:text-surface-200"
+          >
+            Password
+          </button>
+          <button
+            onClick={() => setMode('passphrase')}
+            className="flex-1 py-1.5 text-xs rounded font-medium transition-colors text-surface-400 hover:text-surface-200"
+          >
+            Passphrase
+          </button>
+          <button
+            onClick={() => setMode('username')}
+            className="flex-1 py-1.5 text-xs rounded font-medium transition-colors bg-surface-600 text-surface-100"
+          >
+            Username
+          </button>
+        </div>
+        <UsernameGenerator onUse={onUse} />
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-4">
@@ -140,6 +171,12 @@ export function PasswordGenerator({ onUse }: PasswordGeneratorProps) {
           }`}
         >
           Passphrase
+        </button>
+        <button
+          onClick={() => setMode('username')}
+          className="flex-1 py-1.5 text-xs rounded font-medium transition-colors text-surface-400 hover:text-surface-200"
+        >
+          Username
         </button>
       </div>
 

@@ -15,6 +15,8 @@ import type { ShortcutDef } from '../utils/keyboard';
 export function Layout() {
   const navigate = useNavigate();
   const logout = useAuthStore((s) => s.logout);
+  const lock = useAuthStore((s) => s.lock);
+  const timeoutAction = useAuthStore((s) => s.timeoutAction);
   const autoLockMinutes = useAuthStore((s) => s.autoLockMinutes);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastActivityRef = useRef(Date.now());
@@ -30,11 +32,16 @@ export function Layout() {
     if (timerRef.current) clearTimeout(timerRef.current);
     if (autoLockMinutes > 0) {
       timerRef.current = setTimeout(() => {
-        logout();
-        navigate('/login');
+        if (timeoutAction === 'logout') {
+          logout();
+          navigate('/login');
+        } else {
+          lock();
+          navigate('/login', { state: { locked: true } });
+        }
       }, autoLockMinutes * 60_000);
     }
-  }, [autoLockMinutes, logout, navigate]);
+  }, [autoLockMinutes, timeoutAction, logout, lock, navigate]);
 
   useEffect(() => {
     if (autoLockMinutes <= 0) return;
