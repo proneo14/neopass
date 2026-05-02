@@ -1,11 +1,16 @@
-import React, { useEffect, useRef, useCallback } from 'react';
+import React, { useEffect, useRef, useCallback, useState, useMemo } from 'react';
 import { Outlet, useNavigate, Link } from 'react-router-dom';
 import { Sidebar } from './Sidebar';
 import { TitleBar } from './TitleBar';
+import { ShortcutHelp } from './ShortcutHelp';
+import { PasswordGenerator } from './PasswordGenerator';
 import { useAuthStore } from '../store/authStore';
 import { useNotificationStore } from '../store/notificationStore';
 import { useSyncStore } from '../store/syncStore';
+import { useVaultStore } from '../store/vaultStore';
 import { performSync } from '../utils/sync';
+import { useKeyboardShortcuts } from '../utils/keyboard';
+import type { ShortcutDef } from '../utils/keyboard';
 
 export function Layout() {
   const navigate = useNavigate();
@@ -85,8 +90,76 @@ export function Layout() {
     return () => { cleanup?.(); };
   }, [logout, navigate]);
 
+  // ── Keyboard shortcuts ──────────────────────────────────────────────
+  const [showShortcutHelp, setShowShortcutHelp] = useState(false);
+  const [showGenerator, setShowGenerator] = useState(false);
+  const entryFields = useVaultStore((s) => s.entryFields);
+
+  const shortcuts: ShortcutDef[] = useMemo(() => [
+    {
+      key: 'n', ctrl: true, description: 'New vault entry', category: 'Vault',
+      action: () => {
+        navigate('/vault');
+        // Dispatch a custom event that the Vault page listens for
+        setTimeout(() => window.dispatchEvent(new CustomEvent('lgi-new-entry')), 100);
+      },
+    },
+    {
+      key: 'f', ctrl: true, description: 'Focus search bar', category: 'Navigation',
+      action: () => {
+        const el = document.querySelector<HTMLInputElement>('input[placeholder*="Search"]');
+        el?.focus();
+      },
+    },
+    {
+      key: 'g', ctrl: true, description: 'Open password generator', category: 'General',
+      action: () => setShowGenerator((v) => !v),
+    },
+    {
+      key: 'l', ctrl: true, description: 'Lock vault', category: 'General',
+      action: () => { logout(); navigate('/login'); },
+    },
+    {
+      key: ',', ctrl: true, description: 'Open settings', category: 'Navigation',
+      action: () => navigate('/settings'),
+    },
+    {
+      key: 'c', ctrl: true, shift: true, description: 'Copy password', category: 'Entry',
+      action: () => {
+        const match = window.location.hash.match(/\/vault\/([^/]+)$/);
+        if (match) {
+          const fields = entryFields[match[1]];
+          if (fields?.password) window.api?.clipboard?.copySecure?.(fields.password);
+        }
+      },
+    },
+    {
+      key: 'u', ctrl: true, shift: true, description: 'Copy username', category: 'Entry',
+      action: () => {
+        const match = window.location.hash.match(/\/vault\/([^/]+)$/);
+        if (match) {
+          const fields = entryFields[match[1]];
+          if (fields?.username) navigator.clipboard.writeText(fields.username);
+        }
+      },
+    },
+    {
+      key: 'Escape', description: 'Close modal / dialog', category: 'General',
+      action: () => {
+        setShowShortcutHelp(false);
+        setShowGenerator(false);
+      },
+    },
+    {
+      key: '/', ctrl: true, shift: true, description: 'Show keyboard shortcuts', category: 'General',
+      action: () => setShowShortcutHelp((v) => !v),
+    },
+  ], [navigate, logout, entryFields]);
+
+  useKeyboardShortcuts(shortcuts);
+
   return (
-    <div className="flex h-screen w-screen overflow-hidden dark">
+    <div className="flex h-screen w-screen overflow-hidden bg-surface-950">
       <TitleBar />
       <Sidebar />
       <main className="flex-1 overflow-auto bg-surface-950 p-6 pt-10">
@@ -115,6 +188,15 @@ export function Layout() {
         )}
         <Outlet />
       </main>
+      {showShortcutHelp && <ShortcutHelp onClose={() => setShowShortcutHelp(false)} />}
+      {showGenerator && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={() => setShowGenerator(false)}>
+          <div className="bg-surface-800 rounded-lg p-5 w-96 shadow-2xl" onClick={(e) => e.stopPropagation()}>
+            <h3 className="text-sm font-semibold text-surface-100 mb-3">Password Generator</h3>
+            <PasswordGenerator onUse={(pw) => { navigator.clipboard.writeText(pw); setShowGenerator(false); }} />
+          </div>
+        </div>
+      )}
     </div>
   );
 }

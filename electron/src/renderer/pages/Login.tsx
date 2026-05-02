@@ -126,7 +126,7 @@ export function Login() {
   };
 
   return (
-    <div className="flex items-center justify-center h-screen w-screen bg-surface-950 dark">
+    <div className="flex items-center justify-center h-screen w-screen bg-surface-950">
       <div
         className="fixed top-0 left-0 right-0 h-9 z-50"
         style={{ WebkitAppRegion: 'drag' } as React.CSSProperties}

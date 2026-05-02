@@ -2,6 +2,37 @@
 @tailwind components;
 @tailwind utilities;
 
+@layer base {
+  :root {
+    --surface-50: 248 250 252;
+    --surface-100: 241 245 249;
+    --surface-200: 226 232 240;
+    --surface-300: 203 213 225;
+    --surface-400: 148 163 184;
+    --surface-500: 100 116 139;
+    --surface-600: 71 85 105;
+    --surface-700: 51 65 85;
+    --surface-800: 30 41 59;
+    --surface-900: 22 32 50;
+    --surface-950: 15 23 42;
+  }
+
+  /* Light mode: invert the surface scale */
+  :root:not(.dark) {
+    --surface-950: 255 255 255;
+    --surface-900: 248 250 252;
+    --surface-800: 241 245 249;
+    --surface-700: 226 232 240;
+    --surface-600: 203 213 225;
+    --surface-500: 148 163 184;
+    --surface-400: 100 116 139;
+    --surface-300: 71 85 105;
+    --surface-200: 51 65 85;
+    --surface-100: 30 41 59;
+    --surface-50: 15 23 42;
+  }
+}
+
 body {
   @apply bg-surface-950 text-surface-100 antialiased;
   margin: 0;

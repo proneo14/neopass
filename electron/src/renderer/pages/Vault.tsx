@@ -285,7 +285,7 @@ export function Vault() {
   const navigate = useNavigate();
   const location = useLocation();
   const { collId } = useParams<{ collId?: string }>();
-  const { entries, entryFields, addEntry, removeEntry, searchQuery, setSearchQuery, sortBy, setSortBy, selectedTypeFilter, setSelectedTypeFilter, updateEntry, isRepromptApproved, approveReprompt } = useVaultStore();
+  const { entries, entryFields, addEntry, removeEntry, searchQuery, setSearchQuery, sortBy, setSortBy, selectedTypeFilter, setSelectedTypeFilter, updateEntry, isRepromptApproved, approveReprompt, selectedTags, toggleTag, setSelectedTags } = useVaultStore();
   const { token, masterKeyHex } = useAuthStore();
 
   // Derive filter and collection from URL path
@@ -298,12 +298,20 @@ export function Vault() {
   const [showAddDropdown, setShowAddDropdown] = useState(false);
   const [newEntryType, setNewEntryType] = useState<string | null>(null);
   const [showImportWizard, setShowImportWizard] = useState(false);
+  const [showTagsDropdown, setShowTagsDropdown] = useState(false);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; entryId: string } | null>(null);
   const [loading, setLoading] = useState(true);
   const loadingRef = useRef(false);
   const [showRepromptDialog, setShowRepromptDialog] = useState(false);
   const [pendingRepromptAction, setPendingRepromptAction] = useState<(() => void) | null>(null);
   const [pendingRepromptEntryId, setPendingRepromptEntryId] = useState<string | null>(null);
+
+  // Listen for global Ctrl+N event from Layout
+  useEffect(() => {
+    const handler = () => setShowAddDropdown(true);
+    window.addEventListener('lgi-new-entry', handler);
+    return () => window.removeEventListener('lgi-new-entry', handler);
+  }, []);
 
   const filterTitle = selectedCollectionId ? 'Collection' : activeFilter === 'favorites' ? 'Favorites' : activeFilter === 'archived' ? 'Archive' : activeFilter === 'trash' ? 'Trash' : 'Vault';
 
@@ -401,6 +409,8 @@ export function Vault() {
                   fields._uris = JSON.stringify(v);
                 } else if (k === 'reprompt') {
                   fields._reprompt = String(v === 1 || v === '1' ? '1' : '0');
+                } else if (k === 'tags') {
+                  fields._tags = JSON.stringify(v);
                 } else {
                   fields[k] = String(v ?? '');
                 }
@@ -477,6 +487,8 @@ export function Vault() {
                 fields._uris = JSON.stringify(v);
               } else if (k === 'reprompt') {
                 fields._reprompt = String(v === 1 || v === '1' ? '1' : '0');
+              } else if (k === 'tags') {
+                fields._tags = JSON.stringify(v);
               } else {
                 fields[k] = String(v ?? '');
               }
@@ -518,11 +530,37 @@ export function Vault() {
 
 
 
+  // Derive all unique tags from decrypted entries
+  const allTags = useMemo(() => {
+    const counts: Record<string, number> = {};
+    for (const fields of Object.values(entryFields)) {
+      const tagsStr = fields?._tags;
+      if (!tagsStr) continue;
+      try {
+        const tags: string[] = JSON.parse(tagsStr);
+        for (const tag of tags) counts[tag] = (counts[tag] ?? 0) + 1;
+      } catch { /* skip */ }
+    }
+    return Object.entries(counts).sort((a, b) => b[1] - a[1]);
+  }, [entryFields]);
+
   const filtered = useMemo(() => {
     let result = entries;
 
     if (selectedTypeFilter) {
       result = result.filter((e) => e.entry_type === selectedTypeFilter);
+    }
+
+    if (selectedTags.length > 0) {
+      result = result.filter((e) => {
+        const f = entryFields[e.id];
+        const tagsStr = f?._tags;
+        if (!tagsStr) return false;
+        try {
+          const entryTags: string[] = JSON.parse(tagsStr);
+          return selectedTags.every((t) => entryTags.includes(t));
+        } catch { return false; }
+      });
     }
 
     if (searchQuery) {
@@ -544,7 +582,7 @@ export function Vault() {
     });
 
     return result;
-  }, [entries, entryFields, searchQuery, sortBy, selectedTypeFilter]);
+  }, [entries, entryFields, searchQuery, sortBy, selectedTypeFilter, selectedTags]);
 
   const handleContextMenu = (e: React.MouseEvent, entryId: string) => {
     e.preventDefault();
@@ -676,27 +714,72 @@ export function Vault() {
         </select>
       </div>
 
-      {/* Type filter pills */}
-      <div className="flex gap-1.5 mb-4">
-        <button
-          onClick={() => setSelectedTypeFilter(null)}
-          className={`px-2.5 py-1 rounded-full text-xs font-medium transition-colors ${
-            !selectedTypeFilter ? 'bg-accent-600 text-white' : 'bg-surface-800 text-surface-400 hover:bg-surface-700'
-          }`}
-        >
-          All
-        </button>
-        {ENTRY_TYPES.map((type) => (
+      {/* Type filter pills + Tags dropdown */}
+      <div className="flex items-center gap-2 mb-4">
+        <div className="flex gap-1.5">
           <button
-            key={type}
-            onClick={() => setSelectedTypeFilter(selectedTypeFilter === type ? null : type)}
+            onClick={() => setSelectedTypeFilter(null)}
             className={`px-2.5 py-1 rounded-full text-xs font-medium transition-colors ${
-              selectedTypeFilter === type ? 'bg-accent-600 text-white' : 'bg-surface-800 text-surface-400 hover:bg-surface-700'
+              !selectedTypeFilter ? 'bg-accent-600 text-white' : 'bg-surface-800 text-surface-400 hover:bg-surface-700'
             }`}
           >
-            {ENTRY_TYPE_ICONS[type]} {ENTRY_TYPE_LABELS[type]}
+            All
           </button>
-        ))}
+          {ENTRY_TYPES.map((type) => (
+            <button
+              key={type}
+              onClick={() => setSelectedTypeFilter(selectedTypeFilter === type ? null : type)}
+              className={`px-2.5 py-1 rounded-full text-xs font-medium transition-colors ${
+                selectedTypeFilter === type ? 'bg-accent-600 text-white' : 'bg-surface-800 text-surface-400 hover:bg-surface-700'
+              }`}
+            >
+              {ENTRY_TYPE_ICONS[type]} {ENTRY_TYPE_LABELS[type]}
+            </button>
+          ))}
+        </div>
+
+        {/* Tags dropdown */}
+        {allTags.length > 0 && (
+          <div className="relative ml-auto">
+            <button
+              onClick={() => setShowTagsDropdown(!showTagsDropdown)}
+              className={`px-2.5 py-1 rounded-full text-xs font-medium transition-colors flex items-center gap-1 ${
+                selectedTags.length > 0
+                  ? 'bg-accent-600 text-white'
+                  : 'bg-surface-800 text-surface-400 hover:bg-surface-700'
+              }`}
+            >
+              🏷️ Tags{selectedTags.length > 0 && ` (${selectedTags.length})`}
+              <span className="text-[10px]">{showTagsDropdown ? '▲' : '▼'}</span>
+            </button>
+            {showTagsDropdown && (
+              <div className="absolute right-0 top-full mt-1 w-48 bg-surface-800 border border-surface-700 rounded-md shadow-lg z-20 py-1 max-h-60 overflow-auto">
+                {selectedTags.length > 0 && (
+                  <button
+                    onClick={() => { setSelectedTags([]); setShowTagsDropdown(false); }}
+                    className="w-full text-left px-3 py-1.5 text-xs text-surface-400 hover:bg-surface-700 border-b border-surface-700 mb-1"
+                  >
+                    Clear all
+                  </button>
+                )}
+                {allTags.map(([tag, count]) => (
+                  <button
+                    key={tag}
+                    onClick={() => toggleTag(tag)}
+                    className={`w-full flex items-center gap-2 px-3 py-1.5 text-xs transition-colors ${
+                      selectedTags.includes(tag)
+                        ? 'bg-accent-600/20 text-accent-400'
+                        : 'text-surface-200 hover:bg-surface-700'
+                    }`}
+                  >
+                    <span className="flex-1 text-left truncate">{tag}</span>
+                    <span className="text-surface-500">{count}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Entry list */}
@@ -742,6 +825,20 @@ export function Vault() {
                     {(f?.username || f?.email) && (
                       <p className="text-xs text-surface-500 truncate">{f.username || f.email}</p>
                     )}
+                    {f?._tags && (() => {
+                      try {
+                        const tags: string[] = JSON.parse(f._tags);
+                        if (tags.length === 0) return null;
+                        return (
+                          <div className="flex gap-1 mt-0.5 flex-wrap">
+                            {tags.slice(0, 3).map((tag) => (
+                              <span key={tag} className="px-1.5 py-0 rounded text-[10px] bg-accent-600/15 text-accent-400">{tag}</span>
+                            ))}
+                            {tags.length > 3 && <span className="text-[10px] text-surface-500">+{tags.length - 3}</span>}
+                          </div>
+                        );
+                      } catch { return null; }
+                    })()}
                   </div>
                   <div className="flex items-center gap-1.5 shrink-0">
                     {f?._reprompt === '1' && <span className="text-surface-500 text-[11px]" title="Master password re-prompt enabled">🔒</span>}

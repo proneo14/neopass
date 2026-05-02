@@ -1,8 +1,9 @@
-import React, { lazy, Suspense } from 'react';
+import React, { lazy, Suspense, useEffect } from 'react';
 import { HashRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { Layout } from './components/Layout';
 import { AuthGuard } from './components/AuthGuard';
 import { Login } from './pages/Login';
+import { useThemeStore } from './store/themeStore';
 
 // Lazy-load pages so only the active view consumes memory
 const Register = lazy(() => import('./pages/Register').then(m => ({ default: m.Register })));
@@ -20,6 +21,16 @@ function PageLoader() {
 }
 
 export function App() {
+  const resolvedTheme = useThemeStore((s) => s.resolvedTheme);
+
+  useEffect(() => {
+    if (resolvedTheme === 'dark') {
+      document.documentElement.classList.add('dark');
+    } else {
+      document.documentElement.classList.remove('dark');
+    }
+  }, [resolvedTheme]);
+
   return (
     <HashRouter>
       <Suspense fallback={<PageLoader />}>

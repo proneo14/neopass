@@ -141,6 +141,109 @@ function TOTPDisplay({ secret }: { secret: string }) {
   );
 }
 
+/** Tag editing / display component for vault entries. */
+function TagsSection({ editing, editFields, setEditFields, fields }: {
+  editing: boolean;
+  editFields: Record<string, string>;
+  setEditFields: (f: Record<string, string>) => void;
+  fields: Record<string, string>;
+}) {
+  const [tagInput, setTagInput] = useState('');
+  const entryFields = useVaultStore((s) => s.entryFields);
+
+  const currentTags: string[] = (() => {
+    const src = editing ? editFields._tags : fields._tags;
+    if (!src) return [];
+    try { return JSON.parse(src); } catch { return []; }
+  })();
+
+  // All tags across all entries for auto-suggest
+  const allTags = React.useMemo(() => {
+    const set = new Set<string>();
+    for (const f of Object.values(entryFields)) {
+      if (!f?._tags) continue;
+      try {
+        const tags: string[] = JSON.parse(f._tags);
+        tags.forEach((t) => set.add(t));
+      } catch { /* skip */ }
+    }
+    return Array.from(set).sort();
+  }, [entryFields]);
+
+  const suggestions = tagInput.trim()
+    ? allTags.filter((t) => t.toLowerCase().includes(tagInput.toLowerCase()) && !currentTags.includes(t))
+    : [];
+
+  const addTag = (tag: string) => {
+    const trimmed = tag.trim().toLowerCase();
+    if (!trimmed || currentTags.includes(trimmed) || currentTags.length >= 10) return;
+    const next = [...currentTags, trimmed];
+    setEditFields({ ...editFields, _tags: JSON.stringify(next) });
+    setTagInput('');
+  };
+
+  const removeTag = (tag: string) => {
+    const next = currentTags.filter((t) => t !== tag);
+    setEditFields({ ...editFields, _tags: JSON.stringify(next) });
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter' || e.key === ',') {
+      e.preventDefault();
+      addTag(tagInput);
+    }
+  };
+
+  if (!editing && currentTags.length === 0) return null;
+
+  return (
+    <div className="mt-3">
+      <div className="flex items-center gap-2 mb-2">
+        <span className="text-xs text-surface-500">🏷️</span>
+        <span className="text-xs text-surface-400 font-medium">Tags</span>
+      </div>
+      <div className="flex flex-wrap gap-1.5">
+        {currentTags.map((tag) => (
+          <span
+            key={tag}
+            className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-accent-600/15 text-accent-400 text-xs"
+          >
+            {tag}
+            {editing && (
+              <button onClick={() => removeTag(tag)} className="text-accent-400/60 hover:text-accent-400 ml-0.5">×</button>
+            )}
+          </span>
+        ))}
+        {editing && currentTags.length < 10 && (
+          <div className="relative">
+            <input
+              type="text"
+              value={tagInput}
+              onChange={(e) => setTagInput(e.target.value)}
+              onKeyDown={handleKeyDown}
+              placeholder="Add tag…"
+              className="px-2 py-0.5 rounded-md bg-surface-800 border border-surface-700 text-surface-100 text-xs placeholder-surface-500 focus:outline-none focus:ring-1 focus:ring-accent-500 w-24"
+            />
+            {suggestions.length > 0 && (
+              <div className="absolute top-full left-0 mt-1 bg-surface-800 border border-surface-700 rounded-md shadow-lg z-10 max-h-32 overflow-auto">
+                {suggestions.slice(0, 5).map((s) => (
+                  <button
+                    key={s}
+                    onClick={() => addTag(s)}
+                    className="w-full text-left px-2 py-1 text-xs text-surface-200 hover:bg-surface-700"
+                  >
+                    {s}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export function EntryDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -367,6 +470,8 @@ export function EntryDetail() {
         plaintextObj.uris = JSON.parse(v);
       } else if (k === '_reprompt') {
         plaintextObj.reprompt = v === '1' ? 1 : 0;
+      } else if (k === '_tags') {
+        plaintextObj.tags = JSON.parse(v);
       } else {
         plaintextObj[k] = v;
       }
@@ -817,6 +922,9 @@ export function EntryDetail() {
         {/* Live TOTP code — shown when the entry has a totp secret and not editing */}
         {!editing && fields.totp && <TOTPDisplay secret={fields.totp} />}
       </div>
+
+      {/* Tags */}
+      <TagsSection editing={editing} editFields={editFields} setEditFields={setEditFields} fields={fields} />
 
       {/* Password History (for login entries, view mode only) */}
       {entryType === 'login' && !editing && passwordHistory.length > 0 && (

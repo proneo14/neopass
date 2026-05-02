@@ -2,6 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { useAuthStore } from '../store/authStore';
 import { useVaultStore } from '../store/vaultStore';
 import { useNotificationStore } from '../store/notificationStore';
+import { useThemeStore } from '../store/themeStore';
+import { ShortcutHelp } from '../components/ShortcutHelp';
 import { PasswordGenerator } from '../components/PasswordGenerator';
 import { OrgSetupWizard } from '../components/OrgSetupWizard';
 import { EmergencyAccessSection } from '../components/EmergencyAccessSection';
@@ -713,6 +715,37 @@ function ExportModal({ onClose }: { onClose: () => void }) {
   );
 }
 
+function AppearanceSection() {
+  const { theme, setTheme } = useThemeStore();
+  const options: { value: 'light' | 'dark' | 'system'; label: string; icon: string }[] = [
+    { value: 'light', label: 'Light', icon: '☀️' },
+    { value: 'dark', label: 'Dark', icon: '🌙' },
+    { value: 'system', label: 'System', icon: '💻' },
+  ];
+
+  return (
+    <section>
+      <h2 className="text-xs font-semibold text-surface-500 uppercase tracking-wider mb-3">Appearance</h2>
+      <div className="flex gap-2">
+        {options.map((opt) => (
+          <button
+            key={opt.value}
+            onClick={() => setTheme(opt.value)}
+            className={`flex-1 flex items-center justify-center gap-2 px-3 py-2.5 rounded-md text-sm font-medium transition-colors ${
+              theme === opt.value
+                ? 'bg-accent-600 text-white'
+                : 'bg-surface-800 text-surface-300 hover:bg-surface-700'
+            }`}
+          >
+            <span>{opt.icon}</span>
+            <span>{opt.label}</span>
+          </button>
+        ))}
+      </div>
+    </section>
+  );
+}
+
 export function Settings() {
   const { email, token, masterKeyHex, autoLockMinutes, setAutoLockMinutes, orgId, orgName, setOrg, clearOrg } = useAuthStore();
   const { entries, entryFields, folders } = useVaultStore();
@@ -749,6 +782,7 @@ export function Settings() {
   const [showSync, setShowSync] = useState(false);
   const [showServerConfig, setShowServerConfig] = useState(false);
   const [showExport, setShowExport] = useState(false);
+  const [showShortcuts, setShowShortcuts] = useState(false);
   useEffect(() => {
     (async () => {
       const available = await window.api.biometric.isAvailable();
@@ -959,6 +993,9 @@ export function Settings() {
       <h1 className="text-lg font-semibold text-surface-100 mb-6">Settings</h1>
 
       <div className="space-y-6 max-w-lg">
+        {/* Appearance */}
+        <AppearanceSection />
+
         {/* Account */}
         <section>
           <h2 className="text-xs font-semibold text-surface-500 uppercase tracking-wider mb-3">Account</h2>
@@ -1395,6 +1432,12 @@ export function Settings() {
 
         {/* About */}
         <div className="pt-4 border-t border-surface-800">
+          <button
+            onClick={() => setShowShortcuts(true)}
+            className="text-xs text-accent-400 hover:text-accent-300 transition-colors mb-2"
+          >
+            Keyboard Shortcuts →
+          </button>
           <p className="text-xs text-surface-600">LGI Pass v1.0.0</p>
           <p className="text-xs text-surface-700 mt-0.5">Post-quantum encryption: X-Wing KEM + AES-256-GCM</p>
         </div>
@@ -1418,6 +1461,7 @@ export function Settings() {
       {showSync && <SyncSettings onClose={() => setShowSync(false)} />}
       {showServerConfig && <ServerConfig onClose={() => setShowServerConfig(false)} />}
       {showExport && <ExportModal onClose={() => setShowExport(false)} />}
+      {showShortcuts && <ShortcutHelp onClose={() => setShowShortcuts(false)} />}
     </div>
   );
 }

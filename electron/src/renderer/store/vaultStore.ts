@@ -31,6 +31,9 @@ interface VaultState {
   /** Bump to trigger sidebar collection list refresh. */
   collectionsVersion: number;
 
+  /** Selected tags for filtering. */
+  selectedTags: string[];
+
   /** Cache of entry IDs that have been approved for reprompt bypass, with expiry timestamps. */
   repromptApprovals: Record<string, number>;
 
@@ -53,6 +56,8 @@ interface VaultState {
   setSelectedCollectionId: (id: string | null) => void;
   /** Bump to trigger sidebar collection list refresh. */
   bumpCollectionsVersion: () => void;
+  setSelectedTags: (tags: string[]) => void;
+  toggleTag: (tag: string) => void;
 
   /** Grant a 5-minute reprompt approval for a specific entry. */
   approveReprompt: (entryId: string) => void;
@@ -82,6 +87,7 @@ export const useVaultStore = create<VaultState>((set, get) => ({
   activeFilter: 'all',
   selectedCollectionId: null,
   collectionsVersion: 0,
+  selectedTags: [],
   repromptApprovals: {},
   healthFlags: {},
   healthAnalyzed: false,
@@ -111,6 +117,13 @@ export const useVaultStore = create<VaultState>((set, get) => ({
   setActiveFilter: (activeFilter) => set({ activeFilter }),
   setSelectedCollectionId: (selectedCollectionId) => set({ selectedCollectionId }),
   bumpCollectionsVersion: () => set((s) => ({ collectionsVersion: s.collectionsVersion + 1 })),
+  setSelectedTags: (selectedTags) => set({ selectedTags }),
+  toggleTag: (tag) =>
+    set((s) => ({
+      selectedTags: s.selectedTags.includes(tag)
+        ? s.selectedTags.filter((t) => t !== tag)
+        : [...s.selectedTags, tag],
+    })),
 
   approveReprompt: (entryId) =>
     set((s) => ({
