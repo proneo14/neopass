@@ -332,6 +332,37 @@ func (s *Service) GetVerifyKey() []byte {
 	return s.verifyKey
 }
 
+// GenerateTokenPair creates an access + refresh token pair for the given user.
+// Used by SSO login flow after IdP authentication succeeds.
+func (s *Service) GenerateTokenPair(userID, orgID, role string) (accessToken, refreshToken string, err error) {
+	accessToken, err = s.generateAccessToken(userID, orgID, role)
+	if err != nil {
+		return "", "", err
+	}
+	refreshToken, err = s.generateRefreshToken(userID)
+	if err != nil {
+		return "", "", err
+	}
+	return accessToken, refreshToken, nil
+}
+
+// GenerateSSOPartialToken creates a partial token for SSO-authenticated users
+// who still need to enter their master password to unlock the vault.
+func (s *Service) GenerateSSOPartialToken(userID string) (string, error) {
+	now := time.Now()
+	claims := Claims{
+		RegisteredClaims: jwt.RegisteredClaims{
+			ExpiresAt: jwt.NewNumericDate(now.Add(10 * time.Minute)),
+			IssuedAt:  jwt.NewNumericDate(now),
+			Issuer:    "password-manager",
+		},
+		UserID: userID,
+		Is2FA:  true, // reuse the partial-auth flag — vault still locked
+	}
+	token := jwt.NewWithClaims(&MLDSASigningMethod{}, claims)
+	return token.SignedString(s.signingKey)
+}
+
 func (s *Service) generateAccessToken(userID, orgID, role string) (string, error) {
 	now := time.Now()
 	claims := Claims{

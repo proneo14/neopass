@@ -2,10 +2,12 @@ package api
 
 import (
 	"context"
+	"crypto/rand"
 	"database/sql"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
 	"time"
@@ -13,6 +15,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/rs/zerolog/log"
+	"golang.org/x/crypto/bcrypt"
 
 	"github.com/password-manager/password-manager/internal/admin"
 	"github.com/password-manager/password-manager/internal/db"
@@ -22,12 +25,20 @@ import (
 type AdminHandler struct {
 	adminService *admin.Service
 	userRepo     db.UserRepository
+	orgRepo      db.OrgRepository
+	auditRepo    db.AuditRepository
 	sqliteDB     *sql.DB // nil when not using SQLite backend
 }
 
 // NewAdminHandler creates a new AdminHandler.
 func NewAdminHandler(adminService *admin.Service, userRepo db.UserRepository) *AdminHandler {
 	return &AdminHandler{adminService: adminService, userRepo: userRepo}
+}
+
+// SetOrgAndAuditRepo sets org and audit repos for SSO/SCIM admin endpoints.
+func (h *AdminHandler) SetOrgAndAuditRepo(orgRepo db.OrgRepository, auditRepo db.AuditRepository) {
+	h.orgRepo = orgRepo
+	h.auditRepo = auditRepo
 }
 
 // SetSQLiteDB sets the SQLite database reference for migration support.
@@ -711,4 +722,148 @@ func (h *AdminHandler) MigrateToPostgres(w http.ResponseWriter, r *http.Request)
 	}
 
 	writeJSON(w, http.StatusOK, result)
+}
+
+// GenerateSCIMToken generates a new SCIM bearer token for the organization.
+// POST /api/v1/admin/orgs/{id}/scim/generate-token
+func (h *AdminHandler) GenerateSCIMToken(w http.ResponseWriter, r *http.Request) {
+	claims := GetClaims(r.Context())
+	if claims == nil {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	orgID := chi.URLParam(r, "id")
+	if orgID == "" {
+		writeError(w, http.StatusBadRequest, "missing org ID")
+		return
+	}
+	if h.orgRepo == nil {
+		writeError(w, http.StatusNotImplemented, "SCIM requires PostgreSQL")
+		return
+	}
+
+	// Verify admin role
+	member, err := h.orgRepo.GetMember(r.Context(), orgID, claims.UserID)
+	if err != nil || member.Role != "admin" {
+		writeError(w, http.StatusForbidden, "admin access required")
+		return
+	}
+
+	// Generate a random SCIM token
+	tokenBytes := make([]byte, 32)
+	if _, err := rand.Read(tokenBytes); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to generate token")
+		return
+	}
+	token := hex.EncodeToString(tokenBytes)
+
+	// Hash and store
+	hash, err := bcrypt.GenerateFromPassword([]byte(token), bcrypt.DefaultCost)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to hash token")
+		return
+	}
+
+	org, err := h.orgRepo.GetOrg(r.Context(), orgID)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "organization not found")
+		return
+	}
+
+	if err := h.orgRepo.SetSCIMConfig(r.Context(), orgID, org.SCIMEnabled, hash); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to store SCIM token")
+		return
+	}
+
+	// Audit log
+	if h.auditRepo != nil {
+		details, _ := json.Marshal(map[string]string{"action": "scim_token_generated"})
+		_ = h.auditRepo.LogAction(r.Context(), &claims.UserID, &orgID, "scim_token_generated", details)
+	}
+
+	// Return the plaintext token (shown once, cannot be retrieved again)
+	writeJSON(w, http.StatusOK, map[string]string{
+		"token":    token,
+		"warning":  "This token will not be shown again. Store it securely.",
+	})
+}
+
+// GetSCIMConfig returns the SCIM configuration for an org.
+// GET /api/v1/admin/orgs/{id}/scim
+func (h *AdminHandler) GetSCIMConfig(w http.ResponseWriter, r *http.Request) {
+	claims := GetClaims(r.Context())
+	if claims == nil {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	orgID := chi.URLParam(r, "id")
+	if h.orgRepo == nil {
+		writeError(w, http.StatusNotImplemented, "SCIM requires PostgreSQL")
+		return
+	}
+
+	member, err := h.orgRepo.GetMember(r.Context(), orgID, claims.UserID)
+	if err != nil || member.Role != "admin" {
+		writeError(w, http.StatusForbidden, "admin access required")
+		return
+	}
+
+	org, err := h.orgRepo.GetOrg(r.Context(), orgID)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "organization not found")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"scim_enabled":   org.SCIMEnabled,
+		"has_token":      len(org.SCIMTokenHash) > 0,
+		"endpoint":       fmt.Sprintf("/api/v1/scim/v2/%s", orgID),
+	})
+}
+
+// SetSCIMConfig enables or disables SCIM for an organization.
+// PUT /api/v1/admin/orgs/{id}/scim
+func (h *AdminHandler) SetSCIMConfig(w http.ResponseWriter, r *http.Request) {
+	claims := GetClaims(r.Context())
+	if claims == nil {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	orgID := chi.URLParam(r, "id")
+	if h.orgRepo == nil {
+		writeError(w, http.StatusNotImplemented, "SCIM requires PostgreSQL")
+		return
+	}
+
+	member, err := h.orgRepo.GetMember(r.Context(), orgID, claims.UserID)
+	if err != nil || member.Role != "admin" {
+		writeError(w, http.StatusForbidden, "admin access required")
+		return
+	}
+
+	var req struct {
+		Enabled bool `json:"enabled"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	org, err := h.orgRepo.GetOrg(r.Context(), orgID)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "organization not found")
+		return
+	}
+
+	if err := h.orgRepo.SetSCIMConfig(r.Context(), orgID, req.Enabled, org.SCIMTokenHash); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to update SCIM configuration")
+		return
+	}
+
+	if h.auditRepo != nil {
+		details, _ := json.Marshal(map[string]interface{}{"enabled": req.Enabled})
+		_ = h.auditRepo.LogAction(r.Context(), &claims.UserID, &orgID, "scim_config_updated", details)
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }

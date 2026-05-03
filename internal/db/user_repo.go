@@ -22,6 +22,7 @@ type User struct {
 	EncryptedPrivateKey []byte          `json:"-"`
 	Has2FA              bool            `json:"has_2fa"`
 	RequireHWKey        bool            `json:"require_hw_key"`
+	SSOExternalID       *string         `json:"sso_external_id,omitempty"`
 	TokensRevokedAt     *time.Time      `json:"tokens_revoked_at,omitempty"`
 	CreatedAt           time.Time       `json:"created_at"`
 	UpdatedAt           time.Time       `json:"updated_at"`
@@ -75,13 +76,14 @@ func (r *PgUserRepo) GetUserByEmail(ctx context.Context, email string) (User, er
 		       u.public_key, u.encrypted_private_key, u.created_at, u.updated_at,
 		       EXISTS(SELECT 1 FROM totp_secrets t WHERE t.user_id = u.id AND t.verified = true) AS has_2fa,
 		       COALESCE(u.require_hw_key, false),
-		       u.tokens_revoked_at
+		       u.tokens_revoked_at,
+		       u.sso_external_id
 		FROM users u
 		WHERE u.email = $1
 	`, email).Scan(
 		&u.ID, &u.Email, &u.AuthHash, &u.Salt, &u.KDFParams,
 		&u.PublicKey, &u.EncryptedPrivateKey, &u.CreatedAt, &u.UpdatedAt,
-		&u.Has2FA, &u.RequireHWKey, &u.TokensRevokedAt,
+		&u.Has2FA, &u.RequireHWKey, &u.TokensRevokedAt, &u.SSOExternalID,
 	)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -100,13 +102,14 @@ func (r *PgUserRepo) GetUserByID(ctx context.Context, id string) (User, error) {
 		       u.public_key, u.encrypted_private_key, u.created_at, u.updated_at,
 		       EXISTS(SELECT 1 FROM totp_secrets t WHERE t.user_id = u.id AND t.verified = true) AS has_2fa,
 		       COALESCE(u.require_hw_key, false),
-		       u.tokens_revoked_at
+		       u.tokens_revoked_at,
+		       u.sso_external_id
 		FROM users u
 		WHERE u.id = $1
 	`, id).Scan(
 		&u.ID, &u.Email, &u.AuthHash, &u.Salt, &u.KDFParams,
 		&u.PublicKey, &u.EncryptedPrivateKey, &u.CreatedAt, &u.UpdatedAt,
-		&u.Has2FA, &u.RequireHWKey, &u.TokensRevokedAt,
+		&u.Has2FA, &u.RequireHWKey, &u.TokensRevokedAt, &u.SSOExternalID,
 	)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -161,6 +164,46 @@ func (r *PgUserRepo) RevokeUserTokens(ctx context.Context, userID string) error 
 	`, userID)
 	if err != nil {
 		return fmt.Errorf("revoke user tokens: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("user not found")
+	}
+	return nil
+}
+
+// GetUserBySSOExternalID retrieves a user by their SSO external ID.
+func (r *PgUserRepo) GetUserBySSOExternalID(ctx context.Context, externalID string) (User, error) {
+	var u User
+	err := r.pool.QueryRow(ctx, `
+		SELECT u.id, u.email, u.auth_hash, u.salt, u.kdf_params,
+		       u.public_key, u.encrypted_private_key, u.created_at, u.updated_at,
+		       EXISTS(SELECT 1 FROM totp_secrets t WHERE t.user_id = u.id AND t.verified = true) AS has_2fa,
+		       COALESCE(u.require_hw_key, false),
+		       u.tokens_revoked_at,
+		       u.sso_external_id
+		FROM users u
+		WHERE u.sso_external_id = $1
+	`, externalID).Scan(
+		&u.ID, &u.Email, &u.AuthHash, &u.Salt, &u.KDFParams,
+		&u.PublicKey, &u.EncryptedPrivateKey, &u.CreatedAt, &u.UpdatedAt,
+		&u.Has2FA, &u.RequireHWKey, &u.TokensRevokedAt, &u.SSOExternalID,
+	)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return User{}, fmt.Errorf("user not found")
+		}
+		return User{}, fmt.Errorf("get user by sso external id: %w", err)
+	}
+	return u, nil
+}
+
+// SetSSOExternalID sets the SSO external ID for a user.
+func (r *PgUserRepo) SetSSOExternalID(ctx context.Context, userID, externalID string) error {
+	tag, err := r.pool.Exec(ctx, `
+		UPDATE users SET sso_external_id = $2 WHERE id = $1
+	`, userID, externalID)
+	if err != nil {
+		return fmt.Errorf("set sso external id: %w", err)
 	}
 	if tag.RowsAffected() == 0 {
 		return fmt.Errorf("user not found")

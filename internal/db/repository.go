@@ -14,6 +14,8 @@ type UserRepository interface {
 	UpdateUserKeys(ctx context.Context, id string, authHash, salt, publicKey, encryptedPrivateKey []byte) error
 	SetRequireHWKey(ctx context.Context, userID string, require bool) error
 	RevokeUserTokens(ctx context.Context, userID string) error
+	GetUserBySSOExternalID(ctx context.Context, externalID string) (User, error)
+	SetSSOExternalID(ctx context.Context, userID, externalID string) error
 }
 
 // VaultRepository defines the interface for vault entry database operations.
@@ -55,6 +57,8 @@ type OrgRepository interface {
 	SetOrgPolicy(ctx context.Context, orgID string, policy json.RawMessage) error
 	GetUserOrg(ctx context.Context, userID string) (OrgMember, Organization, error)
 	GetInvitationsByEmail(ctx context.Context, email string) ([]Invitation, error)
+	SetSSOConfig(ctx context.Context, orgID string, ssoEnabled bool, ssoConfig json.RawMessage) error
+	SetSCIMConfig(ctx context.Context, orgID string, scimEnabled bool, scimTokenHash []byte) error
 }
 
 // AuditRepository defines the interface for audit log database operations.
