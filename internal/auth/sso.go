@@ -467,7 +467,7 @@ func (s *SSOService) handleOIDCCallback(ctx context.Context, orgID string, cfg *
 	if err != nil {
 		return "", "", fmt.Errorf("exchange code: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20)) // 1MB limit
 	if err != nil {
@@ -539,7 +539,7 @@ func (s *SSOService) discoverOIDC(issuer string) (*oidcDiscoveryDoc, error) {
 	if err != nil {
 		return nil, fmt.Errorf("fetch OIDC discovery: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if err != nil {
