@@ -25,6 +25,7 @@ func Router(authService *auth.Service, totpService *auth.TOTPService, smsService
 	tfaHandler := NewTwoFactorHandler(totpService, smsService, authService)
 	vaultHandler := NewVaultHandler(vaultService)
 	adminHandler := NewAdminHandler(adminService, userRepo)
+	adminHandler.SetOrgAndAuditRepo(orgRepo, auditRepo)
 	if sqliteDB != nil {
 		adminHandler.SetSQLiteDB(sqliteDB)
 	}
@@ -33,6 +34,15 @@ func Router(authService *auth.Service, totpService *auth.TOTPService, smsService
 	sendHandler := NewSendHandler(sendRepo, userRepo)
 	collectionHandler := NewCollectionHandler(collectionRepo, orgRepo, userRepo, auditRepo)
 	emergencyHandler := NewEmergencyAccessHandler(eaRepo, userRepo, vaultRepo, auditRepo, orgRepo, collectionRepo)
+
+	// SSO & SCIM handlers (PostgreSQL-only)
+	var ssoHandler *SSOHandler
+	var scimHandler *SCIMHandler
+	if storageBackend != "sqlite" {
+		ssoService := auth.NewSSOService(orgRepo, userRepo, authService, auditRepo)
+		ssoHandler = NewSSOHandler(ssoService, authService, orgRepo, auditRepo)
+		scimHandler = NewSCIMHandler(userRepo, orgRepo, auditRepo)
+	}
 
 	// Rate limiter for public auth endpoints: 10 requests per minute per IP
 	authLimiter := NewRateLimiter(10, 1*time.Minute)
@@ -52,6 +62,29 @@ func Router(authService *auth.Service, totpService *auth.TOTPService, smsService
 		r.With(authLimiter.RateLimit).Post("/2fa/sms/send", tfaHandler.SendSMS)
 		r.With(authLimiter.RateLimit).Post("/2fa/sms/validate", tfaHandler.ValidateSMS)
 	})
+
+	// Public SSO routes (rate-limited, no auth required — PostgreSQL only)
+	if ssoHandler != nil {
+		ssoLimiter := NewRateLimiter(10, 1*time.Minute)
+		r.Route("/sso/{orgId}", func(r chi.Router) {
+			r.With(ssoLimiter.RateLimit).Get("/login", ssoHandler.Login)
+			r.With(ssoLimiter.RateLimit).Post("/callback", ssoHandler.Callback)
+			r.With(ssoLimiter.RateLimit).Post("/unlock", ssoHandler.Unlock)
+		})
+	}
+
+	// SCIM 2.0 routes (bearer token auth, PostgreSQL only)
+	if scimHandler != nil {
+		r.Route("/scim/v2/{orgId}", func(r chi.Router) {
+			r.Use(scimHandler.SCIMAuthMiddleware)
+			r.Get("/Users", scimHandler.ListUsers)
+			r.Post("/Users", scimHandler.CreateUser)
+			r.Get("/Users/{id}", scimHandler.GetUser)
+			r.Put("/Users/{id}", scimHandler.UpdateUser)
+			r.Patch("/Users/{id}", scimHandler.PatchUser)
+			r.Delete("/Users/{id}", scimHandler.DeleteUser)
+		})
+	}
 
 	// Protected routes
 	r.Group(func(r chi.Router) {
@@ -141,6 +174,17 @@ func Router(authService *auth.Service, totpService *auth.TOTPService, smsService
 				r.Get("/invitations", adminHandler.ListInvitations)
 				r.Get("/audit", adminHandler.GetAuditLog)
 				r.Post("/propagate-keys", adminHandler.PropagateKeys)
+
+				// SSO configuration (admin only)
+				if ssoHandler != nil {
+					r.Get("/sso", ssoHandler.GetSSOConfig)
+					r.Put("/sso", ssoHandler.SetSSOConfig)
+				}
+
+				// SCIM configuration (admin only)
+				r.Post("/scim/generate-token", adminHandler.GenerateSCIMToken)
+				r.Get("/scim", adminHandler.GetSCIMConfig)
+				r.Put("/scim", adminHandler.SetSCIMConfig)
 			})
 
 			// Org-scoped collection routes

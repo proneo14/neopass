@@ -6,12 +6,16 @@ import { TwoFactorSharePanel } from '../components/admin/TwoFactorSharePanel';
 import { PoliciesPanel } from '../components/admin/PoliciesPanel';
 import { AuditLogPanel } from '../components/admin/AuditLogPanel';
 import { CollectionsPanel } from '../components/admin/CollectionsPanel';
+import { SSOPanel } from '../components/admin/SSOPanel';
+import { SCIMPanel } from '../components/admin/SCIMPanel';
 
 const TABS = [
   { id: 'members', label: 'Members', icon: '👥' },
   { id: 'collections', label: 'Collections', icon: '📁' },
   { id: 'vault', label: 'Vault Access', icon: '🔓' },
   { id: '2fa', label: '2FA Sharing', icon: '🔑' },
+  { id: 'sso', label: 'SSO', icon: '🔐' },
+  { id: 'scim', label: 'Directory Sync', icon: '📂' },
   { id: 'policies', label: 'Policies', icon: '📋' },
   { id: 'audit', label: 'Audit Log', icon: '📜' },
 ] as const;
@@ -108,6 +112,8 @@ export function Admin() {
         {activeTab === 'collections' && <CollectionsPanel orgId={orgId} />}
         {activeTab === 'vault' && <VaultAccessPanel orgId={orgId} />}
         {activeTab === '2fa' && <TwoFactorSharePanel orgId={orgId} />}
+        {activeTab === 'sso' && <SSOPanel orgId={orgId} />}
+        {activeTab === 'scim' && <SCIMPanel orgId={orgId} />}
         {activeTab === 'policies' && <PoliciesPanel orgId={orgId} />}
         {activeTab === 'audit' && <AuditLogPanel orgId={orgId} />}
       </div>

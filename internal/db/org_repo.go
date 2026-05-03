@@ -17,6 +17,10 @@ type Organization struct {
 	OrgPublicKey             []byte          `json:"-"`
 	EncryptedOrgPrivateKey   []byte          `json:"-"`
 	Policy                   json.RawMessage `json:"policy,omitempty"`
+	SSOEnabled               bool            `json:"sso_enabled"`
+	SSOConfig                json.RawMessage `json:"sso_config,omitempty"`
+	SCIMEnabled              bool            `json:"scim_enabled"`
+	SCIMTokenHash            []byte          `json:"-"`
 	CreatedAt                time.Time       `json:"created_at"`
 }
 
@@ -69,9 +73,15 @@ func (r *PgOrgRepo) CreateOrg(ctx context.Context, name string, orgPubKey, encOr
 func (r *PgOrgRepo) GetOrg(ctx context.Context, orgID string) (Organization, error) {
 	var org Organization
 	err := r.pool.QueryRow(ctx,
-		`SELECT id, name, org_public_key, encrypted_org_private_key, policy, created_at
+		`SELECT id, name, org_public_key, encrypted_org_private_key, policy,
+		        COALESCE(sso_enabled, false), sso_config,
+		        COALESCE(scim_enabled, false), scim_token_hash,
+		        created_at
 		 FROM organizations WHERE id = $1`, orgID,
-	).Scan(&org.ID, &org.Name, &org.OrgPublicKey, &org.EncryptedOrgPrivateKey, &org.Policy, &org.CreatedAt)
+	).Scan(&org.ID, &org.Name, &org.OrgPublicKey, &org.EncryptedOrgPrivateKey, &org.Policy,
+		&org.SSOEnabled, &org.SSOConfig,
+		&org.SCIMEnabled, &org.SCIMTokenHash,
+		&org.CreatedAt)
 	if err != nil {
 		if err == pgx.ErrNoRows {
 			return Organization{}, fmt.Errorf("organization not found")
@@ -343,4 +353,34 @@ func (r *PgOrgRepo) GetInvitationsByEmail(ctx context.Context, email string) ([]
 		invs = append(invs, inv)
 	}
 	return invs, rows.Err()
+}
+
+// SetSSOConfig updates the SSO configuration for an organization.
+func (r *PgOrgRepo) SetSSOConfig(ctx context.Context, orgID string, ssoEnabled bool, ssoConfig json.RawMessage) error {
+	tag, err := r.pool.Exec(ctx,
+		`UPDATE organizations SET sso_enabled = $2, sso_config = $3 WHERE id = $1`,
+		orgID, ssoEnabled, ssoConfig,
+	)
+	if err != nil {
+		return fmt.Errorf("set sso config: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("organization not found")
+	}
+	return nil
+}
+
+// SetSCIMConfig updates the SCIM configuration for an organization.
+func (r *PgOrgRepo) SetSCIMConfig(ctx context.Context, orgID string, scimEnabled bool, scimTokenHash []byte) error {
+	tag, err := r.pool.Exec(ctx,
+		`UPDATE organizations SET scim_enabled = $2, scim_token_hash = $3 WHERE id = $1`,
+		orgID, scimEnabled, scimTokenHash,
+	)
+	if err != nil {
+		return fmt.Errorf("set scim config: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("organization not found")
+	}
+	return nil
 }

@@ -133,6 +133,31 @@ func (m *MockUserRepo) SetHas2FA(id string, has2fa bool) {
 	}
 }
 
+func (m *MockUserRepo) GetUserBySSOExternalID(ctx context.Context, externalID string) (db.User, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	for _, u := range m.users {
+		if u.SSOExternalID != nil && *u.SSOExternalID == externalID {
+			return u, nil
+		}
+	}
+	return db.User{}, fmt.Errorf("user not found")
+}
+
+func (m *MockUserRepo) SetSSOExternalID(ctx context.Context, userID, externalID string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	user, exists := m.users[userID]
+	if !exists {
+		return fmt.Errorf("user not found")
+	}
+	user.SSOExternalID = &externalID
+	m.users[userID] = user
+	return nil
+}
+
 // MockVaultRepo implements db.VaultRepository in memory.
 type MockVaultRepo struct {
 	mu      sync.Mutex
@@ -532,6 +557,34 @@ func (m *MockOrgRepo) GetInvitationsByEmail(ctx context.Context, email string) (
 		}
 	}
 	return result, nil
+}
+
+func (m *MockOrgRepo) SetSSOConfig(ctx context.Context, orgID string, ssoEnabled bool, ssoConfig json.RawMessage) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	org, exists := m.orgs[orgID]
+	if !exists {
+		return fmt.Errorf("org not found")
+	}
+	org.SSOEnabled = ssoEnabled
+	org.SSOConfig = ssoConfig
+	m.orgs[orgID] = org
+	return nil
+}
+
+func (m *MockOrgRepo) SetSCIMConfig(ctx context.Context, orgID string, scimEnabled bool, scimTokenHash []byte) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	org, exists := m.orgs[orgID]
+	if !exists {
+		return fmt.Errorf("org not found")
+	}
+	org.SCIMEnabled = scimEnabled
+	org.SCIMTokenHash = scimTokenHash
+	m.orgs[orgID] = org
+	return nil
 }
 
 // ---------------------------------------------------------------------------

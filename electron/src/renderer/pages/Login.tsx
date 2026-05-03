@@ -13,6 +13,9 @@ export function Login() {
   const [biometricAvailable, setBiometricAvailable] = useState(false);
   const [biometricLoading, setBiometricLoading] = useState(false);
   const [showManualLogin, setShowManualLogin] = useState(false);
+  const [showSSO, setShowSSO] = useState(false);
+  const [ssoOrgId, setSsoOrgId] = useState('');
+  const [ssoLoading, setSsoLoading] = useState(false);
 
   const login = useAuthStore((s) => s.login);
   const setOrg = useAuthStore((s) => s.setOrg);
@@ -87,6 +90,26 @@ export function Login() {
       }
     })();
   }, []);
+
+  const handleSSOLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!ssoOrgId.trim()) return;
+    setSsoLoading(true);
+    setError('');
+    try {
+      const result = await window.api.auth.ssoLogin(ssoOrgId.trim()) as { redirect_url?: string; error?: string };
+      if (result.error) {
+        setError(result.error);
+      } else if (result.redirect_url) {
+        // Open the SSO IdP login page in the default browser
+        window.open(result.redirect_url, '_blank');
+      }
+    } catch {
+      setError('Failed to initiate SSO login');
+    } finally {
+      setSsoLoading(false);
+    }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -270,6 +293,48 @@ export function Login() {
             Register
           </Link>
         </p>
+
+        {/* SSO Login */}
+        <div className="mt-4">
+          {!showSSO ? (
+            <button
+              type="button"
+              onClick={() => setShowSSO(true)}
+              className="w-full text-center text-xs text-surface-500 hover:text-surface-300 transition-colors"
+            >
+              Sign in with SSO
+            </button>
+          ) : (
+            <div className="p-4 rounded-lg bg-surface-800/50 border border-surface-700">
+              <p className="text-xs text-surface-400 mb-3">Enter your organization identifier to sign in with SSO.</p>
+              <form onSubmit={handleSSOLogin} className="space-y-3">
+                <input
+                  type="text"
+                  value={ssoOrgId}
+                  onChange={(e) => setSsoOrgId(e.target.value)}
+                  className="w-full px-3 py-2 rounded-md bg-surface-800 border border-surface-600 text-surface-100 text-sm placeholder-surface-500 focus:outline-none focus:ring-2 focus:ring-accent-500 focus:border-transparent"
+                  placeholder="Organization ID"
+                />
+                <div className="flex gap-2">
+                  <button
+                    type="submit"
+                    disabled={ssoLoading || !ssoOrgId.trim()}
+                    className="flex-1 py-2 rounded-md bg-accent-600 hover:bg-accent-500 text-white text-xs font-medium transition-colors disabled:opacity-50"
+                  >
+                    {ssoLoading ? 'Redirecting…' : 'Continue with SSO'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setShowSSO(false)}
+                    className="px-3 py-2 rounded-md bg-surface-700 text-surface-300 text-xs hover:bg-surface-600 transition-colors"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </form>
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );

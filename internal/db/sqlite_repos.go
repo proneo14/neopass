@@ -165,6 +165,16 @@ func (r *SQLiteUserRepo) RevokeUserTokens(ctx context.Context, userID string) er
 	return nil
 }
 
+// GetUserBySSOExternalID is not supported in SQLite standalone mode.
+func (r *SQLiteUserRepo) GetUserBySSOExternalID(_ context.Context, _ string) (User, error) {
+	return User{}, fmt.Errorf("SSO features require PostgreSQL")
+}
+
+// SetSSOExternalID is not supported in SQLite standalone mode.
+func (r *SQLiteUserRepo) SetSSOExternalID(_ context.Context, _, _ string) error {
+	return fmt.Errorf("SSO features require PostgreSQL")
+}
+
 // ── SQLite Vault Repo ────────────────────────────────────────────────────────
 
 const sqliteVaultColumns = `id, user_id, org_id, entry_type, encrypted_data, nonce, version, folder_id, is_deleted, is_favorite, is_archived, deleted_at, created_at, updated_at`
@@ -890,6 +900,16 @@ func (r *SQLiteOrgRepo) GetInvitationsByEmail(ctx context.Context, email string)
 		invs = append(invs, inv)
 	}
 	return invs, rows.Err()
+}
+
+// SetSSOConfig is not supported in SQLite standalone mode.
+func (r *SQLiteOrgRepo) SetSSOConfig(_ context.Context, _ string, _ bool, _ json.RawMessage) error {
+	return fmt.Errorf("SSO features require PostgreSQL")
+}
+
+// SetSCIMConfig is not supported in SQLite standalone mode.
+func (r *SQLiteOrgRepo) SetSCIMConfig(_ context.Context, _ string, _ bool, _ []byte) error {
+	return fmt.Errorf("SSO features require PostgreSQL")
 }
 
 // ── SQLite Sync Repo ─────────────────────────────────────────────────────────

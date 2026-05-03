@@ -46,6 +46,16 @@ const api = {
       validateString(data.newPassword, 'newPassword');
       return ipcRenderer.invoke('auth:changePassword', token, data);
     },
+    ssoLogin: (orgId: string): Promise<unknown> => {
+      validateString(orgId, 'orgId');
+      return ipcRenderer.invoke('auth:ssoLogin', orgId);
+    },
+    ssoUnlock: (orgId: string, ssoToken: string, authHash: string): Promise<unknown> => {
+      validateString(orgId, 'orgId');
+      validateString(ssoToken, 'ssoToken');
+      validateString(authHash, 'authHash');
+      return ipcRenderer.invoke('auth:ssoUnlock', orgId, ssoToken, authHash);
+    },
   },
 
   vault: {
@@ -339,6 +349,31 @@ const api = {
       validateString(orgId, 'orgId');
       validateString(masterKey, 'masterKey');
       return ipcRenderer.invoke('admin:propagateKeys', token, orgId, masterKey);
+    },
+    getSSOConfig: (token: string, orgId: string): Promise<unknown> => {
+      validateString(token, 'token');
+      validateString(orgId, 'orgId');
+      return ipcRenderer.invoke('admin:getSSOConfig', token, orgId);
+    },
+    setSSOConfig: (token: string, orgId: string, data: Record<string, unknown>): Promise<unknown> => {
+      validateString(token, 'token');
+      validateString(orgId, 'orgId');
+      return ipcRenderer.invoke('admin:setSSOConfig', token, orgId, data);
+    },
+    getSCIMConfig: (token: string, orgId: string): Promise<unknown> => {
+      validateString(token, 'token');
+      validateString(orgId, 'orgId');
+      return ipcRenderer.invoke('admin:getSCIMConfig', token, orgId);
+    },
+    setSCIMConfig: (token: string, orgId: string, data: Record<string, unknown>): Promise<unknown> => {
+      validateString(token, 'token');
+      validateString(orgId, 'orgId');
+      return ipcRenderer.invoke('admin:setSCIMConfig', token, orgId, data);
+    },
+    generateSCIMToken: (token: string, orgId: string): Promise<unknown> => {
+      validateString(token, 'token');
+      validateString(orgId, 'orgId');
+      return ipcRenderer.invoke('admin:generateSCIMToken', token, orgId);
     },
     listPending2FA: (token: string): Promise<unknown> => {
       validateString(token, 'token');
