@@ -9,6 +9,7 @@ services:
       - internal
     volumes:
       - pgdata:/var/lib/postgresql/data
+
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U pmuser -d password_manager"]
       interval: 3s
@@ -52,3 +53,5 @@ networks:
 
 volumes:
   pgdata:
+    external: true
+    name: password-manager-pgdata
