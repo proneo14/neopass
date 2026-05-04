@@ -425,8 +425,8 @@ func (s *WebhookDeliveryService) TriggerWebhooks(ctx context.Context, orgID, eve
 			continue
 		}
 
-		// Attempt delivery in a goroutine
-		go s.attemptDelivery(context.Background(), wh, delivery.ID, payload)
+		// Attempt delivery in a goroutine (intentionally detached from request context)
+		go s.attemptDelivery(context.Background(), wh, delivery.ID, payload) // #nosec G118 -- webhook delivery must outlive the HTTP request
 	}
 }
 
@@ -479,7 +479,7 @@ func deliverWebhook(url string, secretHash, payload []byte) (int, error) {
 	}
 	defer func() {
 		_, _ = io.Copy(io.Discard, resp.Body)
-		resp.Body.Close()
+		_ = resp.Body.Close()
 	}()
 
 	return resp.StatusCode, nil
