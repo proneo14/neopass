@@ -110,6 +110,9 @@ func main() {
 	var auditRepo db.AuditRepository
 	var eaRepo db.EmergencyAccessRepository
 	var syncRepo db.SyncRepository
+	var roleRepo db.RoleRepository
+	var groupRepo db.GroupRepository
+	var webhookRepo db.WebhookRepository
 	var rawSQLiteDB *sql.DB // raw *sql.DB for migration support
 
 	if cfg.StorageBackend == "sqlite" {
@@ -188,6 +191,14 @@ func main() {
 			RPID:          "localhost",
 			RPOrigins:     []string{"http://localhost"},
 		}, passkeyRepo, hwKeyRepo)
+
+		// Role, group, webhook repos (PostgreSQL-only enterprise features)
+		roleRepo = db.NewPgRoleRepo(database.Pool)
+		groupRepo = db.NewPgGroupRepo(database.Pool)
+		webhookRepo = db.NewPgWebhookRepo(database.Pool)
+		adminService.SetRoleRepo(roleRepo)
+		adminService.SetGroupRepo(groupRepo)
+		adminService.SetWebhookRepo(webhookRepo)
 	}
 
 	// SMS 2FA (works with any backend)
@@ -206,7 +217,11 @@ func main() {
 		})
 
 		if authService != nil {
-			r.Mount("/", api.Router(authService, totpService, smsService, vaultService, adminService, syncService, webauthnService, userRepo, vaultRepo, sendRepo, collectionRepo, orgRepo, auditRepo, eaRepo, syncRepo, cfg.StorageBackend, rawSQLiteDB))
+			r.Mount("/", api.Router(authService, totpService, smsService, vaultService, adminService, syncService, webauthnService, userRepo, vaultRepo, sendRepo, collectionRepo, orgRepo, auditRepo, eaRepo, syncRepo, cfg.StorageBackend, rawSQLiteDB, func(c *api.RouterConfig) {
+				c.RoleRepo = roleRepo
+				c.GroupRepo = groupRepo
+				c.WebhookRepo = webhookRepo
+			}))
 		}
 	})
 

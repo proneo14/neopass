@@ -15,9 +15,10 @@ import (
 
 // Errors
 var (
-	ErrNotAdmin     = fmt.Errorf("admin role required")
-	ErrNotMember    = fmt.Errorf("not a member of organization")
-	ErrNoInvitation = fmt.Errorf("no pending invitation")
+	ErrNotAdmin          = fmt.Errorf("admin role required")
+	ErrNotMember         = fmt.Errorf("not a member of organization")
+	ErrNoInvitation      = fmt.Errorf("no pending invitation")
+	ErrInsufficientPerms = fmt.Errorf("insufficient permissions")
 )
 
 // OrgPolicy defines organization-level security policies.
@@ -37,11 +38,14 @@ type DecryptedEntry struct {
 
 // Service provides admin operations.
 type Service struct {
-	orgRepo    db.OrgRepository
-	userRepo   db.UserRepository
-	vaultRepo  db.VaultRepository
-	auditRepo  db.AuditRepository
+	orgRepo     db.OrgRepository
+	userRepo    db.UserRepository
+	vaultRepo   db.VaultRepository
+	auditRepo   db.AuditRepository
 	passkeyRepo db.PasskeyRepository
+	roleRepo    db.RoleRepository
+	groupRepo   db.GroupRepository
+	webhookRepo db.WebhookRepository
 }
 
 // NewService creates a new admin Service.
@@ -57,6 +61,21 @@ func NewService(orgRepo db.OrgRepository, userRepo db.UserRepository, vaultRepo 
 // SetPasskeyRepo sets the passkey repository (optional, for vault transfer).
 func (s *Service) SetPasskeyRepo(repo db.PasskeyRepository) {
 	s.passkeyRepo = repo
+}
+
+// SetRoleRepo sets the role repository for permission-based access control.
+func (s *Service) SetRoleRepo(repo db.RoleRepository) {
+	s.roleRepo = repo
+}
+
+// SetGroupRepo sets the group repository.
+func (s *Service) SetGroupRepo(repo db.GroupRepository) {
+	s.groupRepo = repo
+}
+
+// SetWebhookRepo sets the webhook repository for SIEM integration.
+func (s *Service) SetWebhookRepo(repo db.WebhookRepository) {
+	s.webhookRepo = repo
 }
 
 // CreateOrg creates a new organization. The caller becomes the admin.
@@ -93,6 +112,19 @@ func (s *Service) CreateOrg(ctx context.Context, adminUserID, orgName string, ad
 	// Store the encrypted org private key for this admin (per-admin key for vault access)
 	if err := s.orgRepo.SetMemberOrgKey(ctx, org.ID, adminUserID, encOrgPrivKey); err != nil {
 		log.Warn().Err(err).Msg("failed to set creator's org key — vault access may require manual propagation")
+	}
+
+	// Seed built-in roles (Admin, Member) for the new org
+	if s.roleRepo != nil {
+		if err := s.roleRepo.SeedBuiltinRoles(ctx, org.ID); err != nil {
+			log.Warn().Err(err).Msg("failed to seed built-in roles")
+		} else {
+			// Assign the Admin role to the creator
+			adminRole, err := s.roleRepo.GetRoleByName(ctx, org.ID, "Admin")
+			if err == nil {
+				_ = s.roleRepo.SetMemberRole(ctx, org.ID, adminUserID, adminRole.ID)
+			}
+		}
 	}
 
 	// Audit log
@@ -153,6 +185,18 @@ func (s *Service) AcceptInvite(ctx context.Context, userID, orgID string, userMa
 	// Add member
 	if err := s.orgRepo.AddMember(ctx, orgID, userID, inv.Role, escrowBlob); err != nil {
 		return err
+	}
+
+	// Assign role_id if role repo is available
+	if s.roleRepo != nil {
+		roleName := "Member"
+		if inv.Role == "admin" {
+			roleName = "Admin"
+		}
+		role, err := s.roleRepo.GetRoleByName(ctx, orgID, roleName)
+		if err == nil {
+			_ = s.roleRepo.SetMemberRole(ctx, orgID, userID, role.ID)
+		}
 	}
 
 	// Mark invitation accepted
@@ -605,7 +649,19 @@ func (s *Service) propagateOrgKey(ctx context.Context, orgID string, orgPrivKey 
 }
 
 // verifyAdmin checks that the user is an admin of the organization.
+// Uses role-based permissions when roleRepo is available, falls back to legacy role check.
 func (s *Service) verifyAdmin(ctx context.Context, orgID, userID string) error {
+	if s.roleRepo != nil {
+		role, err := s.roleRepo.GetMemberRole(ctx, orgID, userID)
+		if err != nil {
+			return ErrNotMember
+		}
+		if !hasPermissionFromRole(role, "*") && role.Name != "Admin" {
+			return ErrNotAdmin
+		}
+		return nil
+	}
+	// Legacy fallback
 	member, err := s.orgRepo.GetMember(ctx, orgID, userID)
 	if err != nil {
 		return ErrNotMember
@@ -616,10 +672,390 @@ func (s *Service) verifyAdmin(ctx context.Context, orgID, userID string) error {
 	return nil
 }
 
+// verifyPermission checks that the user has a specific permission in the organization.
+func (s *Service) verifyPermission(ctx context.Context, orgID, userID, permission string) error {
+	if s.roleRepo != nil {
+		role, err := s.roleRepo.GetMemberRole(ctx, orgID, userID)
+		if err != nil {
+			return ErrNotMember
+		}
+		if !hasPermissionFromRole(role, permission) {
+			return ErrInsufficientPerms
+		}
+		return nil
+	}
+	// Legacy fallback: admin has all perms, member has basic perms
+	member, err := s.orgRepo.GetMember(ctx, orgID, userID)
+	if err != nil {
+		return ErrNotMember
+	}
+	if member.Role == "admin" {
+		return nil
+	}
+	// Members get basic permissions
+	basicPerms := map[string]bool{
+		"vault.read": true, "vault.write": true, "collection.read": true,
+	}
+	if basicPerms[permission] {
+		return nil
+	}
+	return ErrInsufficientPerms
+}
+
+// hasPermissionFromRole checks if a Role has a given permission.
+func hasPermissionFromRole(role db.Role, permission string) bool {
+	var perms []string
+	if err := json.Unmarshal(role.Permissions, &perms); err != nil {
+		return false
+	}
+	for _, p := range perms {
+		if p == "*" || p == permission {
+			return true
+		}
+	}
+	return false
+}
+
 // audit logs an action to the audit_log table, swallowing errors.
 func (s *Service) audit(ctx context.Context, actorID, targetID *string, action string, details map[string]string) {
 	detailsJSON, _ := json.Marshal(details)
 	if err := s.auditRepo.LogAction(ctx, actorID, targetID, action, detailsJSON); err != nil {
 		log.Error().Err(err).Str("action", action).Msg("failed to write audit log")
 	}
+}
+
+// --- Role management ---
+
+// ListRoles returns all roles for an organization.
+func (s *Service) ListRoles(ctx context.Context, adminUserID, orgID string) ([]db.Role, error) {
+	if err := s.verifyPermission(ctx, orgID, adminUserID, "org.policy"); err != nil {
+		if err == ErrInsufficientPerms {
+			return nil, ErrNotAdmin
+		}
+		return nil, err
+	}
+	if s.roleRepo == nil {
+		return nil, fmt.Errorf("roles not supported")
+	}
+	return s.roleRepo.ListRoles(ctx, orgID)
+}
+
+// CreateRole creates a custom role.
+func (s *Service) CreateRole(ctx context.Context, adminUserID, orgID string, name, description string, permissions []string) (db.Role, error) {
+	if err := s.verifyPermission(ctx, orgID, adminUserID, "org.policy"); err != nil {
+		if err == ErrInsufficientPerms {
+			return db.Role{}, ErrNotAdmin
+		}
+		return db.Role{}, err
+	}
+	if s.roleRepo == nil {
+		return db.Role{}, fmt.Errorf("roles not supported")
+	}
+
+	permsJSON, _ := json.Marshal(permissions)
+	role, err := s.roleRepo.CreateRole(ctx, db.Role{
+		OrgID:       orgID,
+		Name:        name,
+		Description: description,
+		Permissions: permsJSON,
+		IsBuiltin:   false,
+	})
+	if err != nil {
+		return db.Role{}, err
+	}
+
+	s.audit(ctx, &adminUserID, nil, "role_created", map[string]string{
+		"org_id": orgID, "role_name": name,
+	})
+	return role, nil
+}
+
+// UpdateRole updates a custom role's name, description, and permissions.
+func (s *Service) UpdateRole(ctx context.Context, adminUserID, orgID, roleID string, name, description string, permissions []string) error {
+	if err := s.verifyPermission(ctx, orgID, adminUserID, "org.policy"); err != nil {
+		if err == ErrInsufficientPerms {
+			return ErrNotAdmin
+		}
+		return err
+	}
+	if s.roleRepo == nil {
+		return fmt.Errorf("roles not supported")
+	}
+
+	// Prevent saving a role with no permissions
+	if len(permissions) == 0 {
+		return fmt.Errorf("at least one permission is required")
+	}
+
+	// Protect built-in Admin role: must always have "*" permission
+	existing, err := s.roleRepo.GetRole(ctx, roleID)
+	if err != nil {
+		return fmt.Errorf("role not found")
+	}
+	if existing.IsBuiltin && existing.Name == "Admin" {
+		hasWildcard := false
+		for _, p := range permissions {
+			if p == "*" {
+				hasWildcard = true
+				break
+			}
+		}
+		if !hasWildcard {
+			return fmt.Errorf("built-in Admin role must retain the * (superadmin) permission")
+		}
+	}
+
+	permsJSON, _ := json.Marshal(permissions)
+	if err := s.roleRepo.UpdateRole(ctx, db.Role{
+		ID:          roleID,
+		Name:        name,
+		Description: description,
+		Permissions: permsJSON,
+	}); err != nil {
+		return err
+	}
+
+	s.audit(ctx, &adminUserID, nil, "role_updated", map[string]string{
+		"org_id": orgID, "role_id": roleID, "role_name": name,
+	})
+	return nil
+}
+
+// DeleteRole deletes a custom role.
+func (s *Service) DeleteRole(ctx context.Context, adminUserID, orgID, roleID string) error {
+	if err := s.verifyPermission(ctx, orgID, adminUserID, "org.policy"); err != nil {
+		if err == ErrInsufficientPerms {
+			return ErrNotAdmin
+		}
+		return err
+	}
+	if s.roleRepo == nil {
+		return fmt.Errorf("roles not supported")
+	}
+
+	if err := s.roleRepo.DeleteRole(ctx, roleID); err != nil {
+		return err
+	}
+
+	s.audit(ctx, &adminUserID, nil, "role_deleted", map[string]string{
+		"org_id": orgID, "role_id": roleID,
+	})
+	return nil
+}
+
+// SetMemberRole assigns a role to a member.
+func (s *Service) SetMemberRole(ctx context.Context, adminUserID, orgID, targetUserID, roleID string) error {
+	if err := s.verifyAdmin(ctx, orgID, adminUserID); err != nil {
+		return err
+	}
+	if s.roleRepo == nil {
+		return fmt.Errorf("roles not supported")
+	}
+
+	if err := s.roleRepo.SetMemberRole(ctx, orgID, targetUserID, roleID); err != nil {
+		return err
+	}
+
+	s.audit(ctx, &adminUserID, &targetUserID, "member_role_changed", map[string]string{
+		"org_id": orgID, "role_id": roleID,
+	})
+	return nil
+}
+
+// --- Group management ---
+
+// ListGroups returns all groups for an organization.
+func (s *Service) ListGroups(ctx context.Context, adminUserID, orgID string) ([]db.Group, error) {
+	if err := s.verifyPermission(ctx, orgID, adminUserID, "org.policy"); err != nil {
+		if err == ErrInsufficientPerms {
+			return nil, ErrNotAdmin
+		}
+		return nil, err
+	}
+	if s.groupRepo == nil {
+		return nil, fmt.Errorf("groups not supported")
+	}
+	return s.groupRepo.ListGroups(ctx, orgID)
+}
+
+// CreateGroup creates a new group.
+func (s *Service) CreateGroup(ctx context.Context, adminUserID, orgID, name string) (db.Group, error) {
+	if err := s.verifyPermission(ctx, orgID, adminUserID, "org.policy"); err != nil {
+		if err == ErrInsufficientPerms {
+			return db.Group{}, ErrNotAdmin
+		}
+		return db.Group{}, err
+	}
+	if s.groupRepo == nil {
+		return db.Group{}, fmt.Errorf("groups not supported")
+	}
+
+	group, err := s.groupRepo.CreateGroup(ctx, db.Group{
+		OrgID: orgID,
+		Name:  name,
+	})
+	if err != nil {
+		return db.Group{}, err
+	}
+
+	s.audit(ctx, &adminUserID, nil, "group_created", map[string]string{
+		"org_id": orgID, "group_name": name,
+	})
+	return group, nil
+}
+
+// UpdateGroup updates a group's name.
+func (s *Service) UpdateGroup(ctx context.Context, adminUserID, orgID, groupID, name string) error {
+	if err := s.verifyPermission(ctx, orgID, adminUserID, "org.policy"); err != nil {
+		if err == ErrInsufficientPerms {
+			return ErrNotAdmin
+		}
+		return err
+	}
+	if s.groupRepo == nil {
+		return fmt.Errorf("groups not supported")
+	}
+
+	if err := s.groupRepo.UpdateGroup(ctx, db.Group{ID: groupID, Name: name}); err != nil {
+		return err
+	}
+
+	s.audit(ctx, &adminUserID, nil, "group_updated", map[string]string{
+		"org_id": orgID, "group_id": groupID, "group_name": name,
+	})
+	return nil
+}
+
+// DeleteGroup deletes a group.
+func (s *Service) DeleteGroup(ctx context.Context, adminUserID, orgID, groupID string) error {
+	if err := s.verifyPermission(ctx, orgID, adminUserID, "org.policy"); err != nil {
+		if err == ErrInsufficientPerms {
+			return ErrNotAdmin
+		}
+		return err
+	}
+	if s.groupRepo == nil {
+		return fmt.Errorf("groups not supported")
+	}
+
+	if err := s.groupRepo.DeleteGroup(ctx, groupID); err != nil {
+		return err
+	}
+
+	s.audit(ctx, &adminUserID, nil, "group_deleted", map[string]string{
+		"org_id": orgID, "group_id": groupID,
+	})
+	return nil
+}
+
+// AddGroupMember adds a user to a group.
+func (s *Service) AddGroupMember(ctx context.Context, adminUserID, orgID, groupID, userID string) error {
+	if err := s.verifyPermission(ctx, orgID, adminUserID, "org.policy"); err != nil {
+		if err == ErrInsufficientPerms {
+			return ErrNotAdmin
+		}
+		return err
+	}
+	if s.groupRepo == nil {
+		return fmt.Errorf("groups not supported")
+	}
+
+	if err := s.groupRepo.AddGroupMember(ctx, groupID, userID); err != nil {
+		return err
+	}
+
+	s.audit(ctx, &adminUserID, &userID, "group_member_added", map[string]string{
+		"org_id": orgID, "group_id": groupID,
+	})
+	return nil
+}
+
+// RemoveGroupMember removes a user from a group.
+func (s *Service) RemoveGroupMember(ctx context.Context, adminUserID, orgID, groupID, userID string) error {
+	if err := s.verifyPermission(ctx, orgID, adminUserID, "org.policy"); err != nil {
+		if err == ErrInsufficientPerms {
+			return ErrNotAdmin
+		}
+		return err
+	}
+	if s.groupRepo == nil {
+		return fmt.Errorf("groups not supported")
+	}
+
+	if err := s.groupRepo.RemoveGroupMember(ctx, groupID, userID); err != nil {
+		return err
+	}
+
+	s.audit(ctx, &adminUserID, &userID, "group_member_removed", map[string]string{
+		"org_id": orgID, "group_id": groupID,
+	})
+	return nil
+}
+
+// ListGroupMembers returns members of a group.
+func (s *Service) ListGroupMembers(ctx context.Context, adminUserID, orgID, groupID string) ([]db.GroupMember, error) {
+	if err := s.verifyPermission(ctx, orgID, adminUserID, "org.policy"); err != nil {
+		if err == ErrInsufficientPerms {
+			return nil, ErrNotAdmin
+		}
+		return nil, err
+	}
+	if s.groupRepo == nil {
+		return nil, fmt.Errorf("groups not supported")
+	}
+	return s.groupRepo.ListGroupMembers(ctx, groupID)
+}
+
+// ListCollectionGroups returns the groups assigned to a collection.
+func (s *Service) ListCollectionGroups(ctx context.Context, adminUserID, orgID, collectionID string) ([]db.CollectionGroup, error) {
+	if err := s.verifyPermission(ctx, orgID, adminUserID, "collection.manage"); err != nil {
+		if err == ErrInsufficientPerms {
+			return nil, ErrNotAdmin
+		}
+		return nil, err
+	}
+	if s.groupRepo == nil {
+		return nil, fmt.Errorf("groups not supported")
+	}
+	return s.groupRepo.ListCollectionGroups(ctx, collectionID)
+}
+
+// AddCollectionGroup assigns a group to a collection with a permission level.
+func (s *Service) AddCollectionGroup(ctx context.Context, adminUserID, orgID string, cg db.CollectionGroup) error {
+	if err := s.verifyPermission(ctx, orgID, adminUserID, "collection.manage"); err != nil {
+		if err == ErrInsufficientPerms {
+			return ErrNotAdmin
+		}
+		return err
+	}
+	if s.groupRepo == nil {
+		return fmt.Errorf("groups not supported")
+	}
+	if err := s.groupRepo.AddCollectionGroup(ctx, cg); err != nil {
+		return err
+	}
+	s.audit(ctx, &adminUserID, nil, "collection_group_added", map[string]string{
+		"org_id": orgID, "collection_id": cg.CollectionID, "group_id": cg.GroupID,
+	})
+	return nil
+}
+
+// RemoveCollectionGroup removes a group from a collection.
+func (s *Service) RemoveCollectionGroup(ctx context.Context, adminUserID, orgID, collectionID, groupID string) error {
+	if err := s.verifyPermission(ctx, orgID, adminUserID, "collection.manage"); err != nil {
+		if err == ErrInsufficientPerms {
+			return ErrNotAdmin
+		}
+		return err
+	}
+	if s.groupRepo == nil {
+		return fmt.Errorf("groups not supported")
+	}
+	if err := s.groupRepo.RemoveCollectionGroup(ctx, collectionID, groupID); err != nil {
+		return err
+	}
+	s.audit(ctx, &adminUserID, nil, "collection_group_removed", map[string]string{
+		"org_id": orgID, "collection_id": collectionID, "group_id": groupID,
+	})
+	return nil
 }

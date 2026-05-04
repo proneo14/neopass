@@ -1312,6 +1312,277 @@ public class SecureClip {
     } catch { return { error: 'Failed to connect to backend' }; }
   });
 
+  // --- Roles ---
+  ipcMain.handle('admin:listRoles', async (_event, token: string, orgId: string) => {
+    const api = getApiBase();
+    if (!api) return { error: 'Backend not available' };
+    try {
+      const res = await fetch(`${api}/api/v1/admin/orgs/${encodeURIComponent(orgId)}/roles`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      return await res.json();
+    } catch { return { error: 'Failed to connect to backend' }; }
+  });
+
+  ipcMain.handle('admin:createRole', async (_event, token: string, orgId: string, data: { name: string; description: string; permissions: string[] }) => {
+    const api = getApiBase();
+    if (!api) return { error: 'Backend not available' };
+    try {
+      const res = await fetch(`${api}/api/v1/admin/orgs/${encodeURIComponent(orgId)}/roles`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify(data),
+      });
+      return await res.json();
+    } catch { return { error: 'Failed to connect to backend' }; }
+  });
+
+  ipcMain.handle('admin:updateRole', async (_event, token: string, orgId: string, roleId: string, data: { name: string; description: string; permissions: string[] }) => {
+    const api = getApiBase();
+    if (!api) return { error: 'Backend not available' };
+    try {
+      const res = await fetch(`${api}/api/v1/admin/orgs/${encodeURIComponent(orgId)}/roles/${encodeURIComponent(roleId)}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify(data),
+      });
+      return await res.json();
+    } catch { return { error: 'Failed to connect to backend' }; }
+  });
+
+  ipcMain.handle('admin:deleteRole', async (_event, token: string, orgId: string, roleId: string) => {
+    const api = getApiBase();
+    if (!api) return { error: 'Backend not available' };
+    try {
+      const res = await fetch(`${api}/api/v1/admin/orgs/${encodeURIComponent(orgId)}/roles/${encodeURIComponent(roleId)}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      return await res.json();
+    } catch { return { error: 'Failed to connect to backend' }; }
+  });
+
+  ipcMain.handle('admin:setMemberRole', async (_event, token: string, orgId: string, userId: string, roleId: string) => {
+    const api = getApiBase();
+    if (!api) return { error: 'Backend not available' };
+    try {
+      const res = await fetch(`${api}/api/v1/admin/orgs/${encodeURIComponent(orgId)}/members/${encodeURIComponent(userId)}/role`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ role_id: roleId }),
+      });
+      return await res.json();
+    } catch { return { error: 'Failed to connect to backend' }; }
+  });
+
+  // --- Groups ---
+  ipcMain.handle('admin:listGroups', async (_event, token: string, orgId: string) => {
+    const api = getApiBase();
+    if (!api) return { error: 'Backend not available' };
+    try {
+      const res = await fetch(`${api}/api/v1/admin/orgs/${encodeURIComponent(orgId)}/groups`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      return await res.json();
+    } catch { return { error: 'Failed to connect to backend' }; }
+  });
+
+  ipcMain.handle('admin:createGroup', async (_event, token: string, orgId: string, name: string) => {
+    const api = getApiBase();
+    if (!api) return { error: 'Backend not available' };
+    try {
+      const res = await fetch(`${api}/api/v1/admin/orgs/${encodeURIComponent(orgId)}/groups`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ name }),
+      });
+      return await res.json();
+    } catch { return { error: 'Failed to connect to backend' }; }
+  });
+
+  ipcMain.handle('admin:updateGroup', async (_event, token: string, orgId: string, groupId: string, name: string) => {
+    const api = getApiBase();
+    if (!api) return { error: 'Backend not available' };
+    try {
+      const res = await fetch(`${api}/api/v1/admin/orgs/${encodeURIComponent(orgId)}/groups/${encodeURIComponent(groupId)}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ name }),
+      });
+      return await res.json();
+    } catch { return { error: 'Failed to connect to backend' }; }
+  });
+
+  ipcMain.handle('admin:deleteGroup', async (_event, token: string, orgId: string, groupId: string) => {
+    const api = getApiBase();
+    if (!api) return { error: 'Backend not available' };
+    try {
+      const res = await fetch(`${api}/api/v1/admin/orgs/${encodeURIComponent(orgId)}/groups/${encodeURIComponent(groupId)}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      return await res.json();
+    } catch { return { error: 'Failed to connect to backend' }; }
+  });
+
+  ipcMain.handle('admin:listGroupMembers', async (_event, token: string, orgId: string, groupId: string) => {
+    const api = getApiBase();
+    if (!api) return { error: 'Backend not available' };
+    try {
+      const res = await fetch(`${api}/api/v1/admin/orgs/${encodeURIComponent(orgId)}/groups/${encodeURIComponent(groupId)}/members`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      return await res.json();
+    } catch { return { error: 'Failed to connect to backend' }; }
+  });
+
+  ipcMain.handle('admin:addGroupMember', async (_event, token: string, orgId: string, groupId: string, userId: string) => {
+    const api = getApiBase();
+    if (!api) return { error: 'Backend not available' };
+    try {
+      const res = await fetch(`${api}/api/v1/admin/orgs/${encodeURIComponent(orgId)}/groups/${encodeURIComponent(groupId)}/members`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ user_id: userId }),
+      });
+      return await res.json();
+    } catch { return { error: 'Failed to connect to backend' }; }
+  });
+
+  ipcMain.handle('admin:removeGroupMember', async (_event, token: string, orgId: string, groupId: string, userId: string) => {
+    const api = getApiBase();
+    if (!api) return { error: 'Backend not available' };
+    try {
+      const res = await fetch(`${api}/api/v1/admin/orgs/${encodeURIComponent(orgId)}/groups/${encodeURIComponent(groupId)}/members/${encodeURIComponent(userId)}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      return await res.json();
+    } catch { return { error: 'Failed to connect to backend' }; }
+  });
+
+  // --- Collection-Group assignments ---
+  ipcMain.handle('admin:listCollectionGroups', async (_event, token: string, orgId: string, collectionId: string) => {
+    const api = getApiBase();
+    if (!api) return { error: 'Backend not available' };
+    try {
+      const res = await fetch(`${api}/api/v1/admin/orgs/${encodeURIComponent(orgId)}/collections/${encodeURIComponent(collectionId)}/groups`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const text = await res.text();
+      try { return JSON.parse(text); } catch { return { error: text || `HTTP ${res.status}` }; }
+    } catch (e: unknown) { return { error: `Failed to connect to backend: ${e instanceof Error ? e.message : String(e)}` }; }
+  });
+
+  ipcMain.handle('admin:addCollectionGroup', async (_event, token: string, orgId: string, collectionId: string, groupId: string, permission: string, masterKey: string) => {
+    const api = getApiBase();
+    if (!api) return { error: 'Backend not available' };
+    const url = `${api}/api/v1/admin/orgs/${encodeURIComponent(orgId)}/collections/${encodeURIComponent(collectionId)}/groups`;
+    console.log('[addCollectionGroup] POST', url, { group_id: groupId, permission });
+    try {
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ group_id: groupId, permission, master_key: masterKey }),
+      });
+      const text = await res.text();
+      console.log('[addCollectionGroup] response:', res.status, text);
+      try { return JSON.parse(text); } catch { return { error: text || `HTTP ${res.status}` }; }
+    } catch (e: unknown) { console.error('[addCollectionGroup] fetch error:', e); return { error: `Failed to connect to backend: ${e instanceof Error ? e.message : String(e)}` }; }
+  });
+
+  ipcMain.handle('admin:removeCollectionGroup', async (_event, token: string, orgId: string, collectionId: string, groupId: string) => {
+    const api = getApiBase();
+    if (!api) return { error: 'Backend not available' };
+    try {
+      const res = await fetch(`${api}/api/v1/admin/orgs/${encodeURIComponent(orgId)}/collections/${encodeURIComponent(collectionId)}/groups/${encodeURIComponent(groupId)}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const text = await res.text();
+      try { return JSON.parse(text); } catch { return { error: text || `HTTP ${res.status}` }; }
+    } catch (e: unknown) { return { error: `Failed to connect to backend: ${e instanceof Error ? e.message : String(e)}` }; }
+  });
+
+  // --- SIEM / Webhooks ---
+  ipcMain.handle('admin:exportEvents', async (_event, token: string, orgId: string, params: { format?: string; since?: string; until?: string; limit?: number }) => {
+    const api = getApiBase();
+    if (!api) return { error: 'Backend not available' };
+    try {
+      const qs = new URLSearchParams();
+      if (params.format) qs.set('format', params.format);
+      if (params.since) qs.set('since', params.since);
+      if (params.until) qs.set('until', params.until);
+      if (params.limit) qs.set('limit', String(params.limit));
+      const res = await fetch(`${api}/api/v1/admin/orgs/${encodeURIComponent(orgId)}/events/export?${qs.toString()}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const text = await res.text();
+      return { data: text, format: params.format || 'json' };
+    } catch { return { error: 'Failed to connect to backend' }; }
+  });
+
+  ipcMain.handle('admin:listWebhooks', async (_event, token: string, orgId: string) => {
+    const api = getApiBase();
+    if (!api) return { error: 'Backend not available' };
+    try {
+      const res = await fetch(`${api}/api/v1/admin/orgs/${encodeURIComponent(orgId)}/webhooks`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      return await res.json();
+    } catch { return { error: 'Failed to connect to backend' }; }
+  });
+
+  ipcMain.handle('admin:createWebhook', async (_event, token: string, orgId: string, data: { url: string; events: string[]; secret?: string }) => {
+    const api = getApiBase();
+    if (!api) return { error: 'Backend not available' };
+    try {
+      const res = await fetch(`${api}/api/v1/admin/orgs/${encodeURIComponent(orgId)}/webhooks`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify(data),
+      });
+      return await res.json();
+    } catch { return { error: 'Failed to connect to backend' }; }
+  });
+
+  ipcMain.handle('admin:deleteWebhook', async (_event, token: string, orgId: string, webhookId: string) => {
+    const api = getApiBase();
+    if (!api) return { error: 'Backend not available' };
+    try {
+      const res = await fetch(`${api}/api/v1/admin/orgs/${encodeURIComponent(orgId)}/webhooks/${encodeURIComponent(webhookId)}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      return await res.json();
+    } catch { return { error: 'Failed to connect to backend' }; }
+  });
+
+  ipcMain.handle('admin:toggleWebhook', async (_event, token: string, orgId: string, webhookId: string, enabled: boolean) => {
+    const api = getApiBase();
+    if (!api) return { error: 'Backend not available' };
+    try {
+      const res = await fetch(`${api}/api/v1/admin/orgs/${encodeURIComponent(orgId)}/webhooks/${encodeURIComponent(webhookId)}/toggle`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ enabled }),
+      });
+      return await res.json();
+    } catch { return { error: 'Failed to connect to backend' }; }
+  });
+
+  ipcMain.handle('admin:testWebhook', async (_event, token: string, orgId: string, webhookId: string) => {
+    const api = getApiBase();
+    if (!api) return { error: 'Backend not available' };
+    try {
+      const res = await fetch(`${api}/api/v1/admin/orgs/${encodeURIComponent(orgId)}/webhooks/${encodeURIComponent(webhookId)}/test`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      return await res.json();
+    } catch { return { error: 'Failed to connect to backend' }; }
+  });
+
   // SSO login flow
   ipcMain.handle('auth:ssoLogin', async (_event, orgId: string) => {
     const api = getApiBase();

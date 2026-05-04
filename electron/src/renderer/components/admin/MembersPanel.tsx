@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useAuthStore } from '../../store/authStore';
-import type { OrgMember, Invitation } from '../../types/admin';
+import type { OrgMember, Invitation, Role } from '../../types/admin';
 
 interface Props {
   orgId: string;
@@ -17,6 +17,8 @@ export function MembersPanel({ orgId }: Props) {
   const [inviteRole, setInviteRole] = useState('member');
   const [inviting, setInviting] = useState(false);
   const [confirmRemove, setConfirmRemove] = useState<string | null>(null);
+  const [roles, setRoles] = useState<Role[]>([]);
+  const [changingRole, setChangingRole] = useState<string | null>(null);
 
   const { token, userId } = useAuthStore();
 
@@ -25,9 +27,10 @@ export function MembersPanel({ orgId }: Props) {
     setLoading(true);
     setError('');
     try {
-      const [membersResult, invResult] = await Promise.all([
+      const [membersResult, invResult, rolesResult] = await Promise.all([
         window.api.admin.listMembers(token, orgId),
         window.api.admin.listInvitations(token, orgId),
+        window.api.admin.listRoles(token, orgId),
       ]);
 
       const mr = membersResult as OrgMember[] | { error: string };
@@ -40,6 +43,11 @@ export function MembersPanel({ orgId }: Props) {
       const ir = invResult as Invitation[] | { error: string };
       if (!('error' in ir)) {
         setInvitations(ir);
+      }
+
+      const rr = rolesResult as Role[] | { error: string };
+      if (!('error' in rr)) {
+        setRoles(rr);
       }
     } catch {
       setError('Failed to load members');
@@ -156,8 +164,16 @@ export function MembersPanel({ orgId }: Props) {
               onChange={(e) => setInviteRole(e.target.value)}
               className="bg-surface-900 border border-surface-600 text-surface-100 text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-accent-500"
             >
-              <option value="member">Member</option>
-              <option value="admin">Admin</option>
+              {roles.length > 0 ? (
+                roles.map((r) => (
+                  <option key={r.id} value={r.name.toLowerCase()}>{r.name}</option>
+                ))
+              ) : (
+                <>
+                  <option value="member">Member</option>
+                  <option value="admin">Admin</option>
+                </>
+              )}
             </select>
           </div>
           <div className="flex gap-2">
@@ -205,13 +221,57 @@ export function MembersPanel({ orgId }: Props) {
                   </div>
                 </div>
               <div className="flex items-center gap-3">
-                <span className={`text-xs px-2 py-0.5 rounded-full ${
-                  member.role === 'admin'
-                    ? 'bg-amber-500/10 text-amber-400'
-                    : 'bg-surface-600/50 text-surface-400'
-                }`}>
-                  {member.role}
-                </span>
+                {changingRole === member.user_id ? (
+                  <select
+                    defaultValue={member.role_id || ''}
+                    onChange={async (e) => {
+                      const selectedRoleId = e.target.value;
+                      if (selectedRoleId && token) {
+                        setError('');
+                        try {
+                          const result = await window.api.admin.setMemberRole(token, orgId, member.user_id, selectedRoleId) as { error?: string };
+                          if (result?.error) { setError(result.error); }
+                          setChangingRole(null);
+                          await loadData();
+                        } catch { setError('Failed to change role'); }
+                      }
+                      setChangingRole(null);
+                    }}
+                    onBlur={() => setChangingRole(null)}
+                    autoFocus
+                    className="bg-surface-900 border border-surface-600 text-surface-100 text-xs rounded px-2 py-1 focus:outline-none focus:border-accent-500"
+                  >
+                    <option value="" disabled>Select role...</option>
+                    {roles.map((r) => (
+                      <option key={r.id} value={r.id}>{r.name}</option>
+                    ))}
+                  </select>
+                ) : (
+                  <>
+                    {(() => {
+                      const matchedRole = member.role_id ? roles.find(r => r.id === member.role_id) : null;
+                      const displayName = matchedRole?.name || member.role;
+                      const isAdmin = matchedRole ? matchedRole.permissions.includes('*') : member.role === 'admin';
+                      return (
+                        <span className={`text-xs px-2 py-0.5 rounded-full ${
+                          isAdmin
+                            ? 'bg-amber-500/10 text-amber-400'
+                            : 'bg-surface-600/50 text-surface-400'
+                        }`}>
+                          {displayName}
+                        </span>
+                      );
+                    })()}
+                    {member.user_id !== userId && roles.length > 0 && (
+                      <button
+                        onClick={() => setChangingRole(member.user_id)}
+                        className="text-xs text-accent-400 hover:text-accent-300 transition-colors"
+                      >
+                        Change
+                      </button>
+                    )}
+                  </>
+                )}
                 {member.user_id !== userId && (
                   confirmRemove === member.user_id ? (
                     <div className="flex gap-1">

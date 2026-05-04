@@ -375,6 +375,141 @@ const api = {
       validateString(orgId, 'orgId');
       return ipcRenderer.invoke('admin:generateSCIMToken', token, orgId);
     },
+    // --- Roles ---
+    listRoles: (token: string, orgId: string): Promise<unknown> => {
+      validateString(token, 'token');
+      validateString(orgId, 'orgId');
+      return ipcRenderer.invoke('admin:listRoles', token, orgId);
+    },
+    createRole: (token: string, orgId: string, data: { name: string; description: string; permissions: string[] }): Promise<unknown> => {
+      validateString(token, 'token');
+      validateString(orgId, 'orgId');
+      validateObject(data, 'data');
+      return ipcRenderer.invoke('admin:createRole', token, orgId, data);
+    },
+    updateRole: (token: string, orgId: string, roleId: string, data: { name: string; description: string; permissions: string[] }): Promise<unknown> => {
+      validateString(token, 'token');
+      validateString(orgId, 'orgId');
+      validateString(roleId, 'roleId');
+      validateObject(data, 'data');
+      return ipcRenderer.invoke('admin:updateRole', token, orgId, roleId, data);
+    },
+    deleteRole: (token: string, orgId: string, roleId: string): Promise<unknown> => {
+      validateString(token, 'token');
+      validateString(orgId, 'orgId');
+      validateString(roleId, 'roleId');
+      return ipcRenderer.invoke('admin:deleteRole', token, orgId, roleId);
+    },
+    setMemberRole: (token: string, orgId: string, userId: string, roleId: string): Promise<unknown> => {
+      validateString(token, 'token');
+      validateString(orgId, 'orgId');
+      validateString(userId, 'userId');
+      validateString(roleId, 'roleId');
+      return ipcRenderer.invoke('admin:setMemberRole', token, orgId, userId, roleId);
+    },
+    // --- Groups ---
+    listGroups: (token: string, orgId: string): Promise<unknown> => {
+      validateString(token, 'token');
+      validateString(orgId, 'orgId');
+      return ipcRenderer.invoke('admin:listGroups', token, orgId);
+    },
+    createGroup: (token: string, orgId: string, name: string): Promise<unknown> => {
+      validateString(token, 'token');
+      validateString(orgId, 'orgId');
+      validateString(name, 'name');
+      return ipcRenderer.invoke('admin:createGroup', token, orgId, name);
+    },
+    updateGroup: (token: string, orgId: string, groupId: string, name: string): Promise<unknown> => {
+      validateString(token, 'token');
+      validateString(orgId, 'orgId');
+      validateString(groupId, 'groupId');
+      validateString(name, 'name');
+      return ipcRenderer.invoke('admin:updateGroup', token, orgId, groupId, name);
+    },
+    deleteGroup: (token: string, orgId: string, groupId: string): Promise<unknown> => {
+      validateString(token, 'token');
+      validateString(orgId, 'orgId');
+      validateString(groupId, 'groupId');
+      return ipcRenderer.invoke('admin:deleteGroup', token, orgId, groupId);
+    },
+    listGroupMembers: (token: string, orgId: string, groupId: string): Promise<unknown> => {
+      validateString(token, 'token');
+      validateString(orgId, 'orgId');
+      validateString(groupId, 'groupId');
+      return ipcRenderer.invoke('admin:listGroupMembers', token, orgId, groupId);
+    },
+    addGroupMember: (token: string, orgId: string, groupId: string, userId: string): Promise<unknown> => {
+      validateString(token, 'token');
+      validateString(orgId, 'orgId');
+      validateString(groupId, 'groupId');
+      validateString(userId, 'userId');
+      return ipcRenderer.invoke('admin:addGroupMember', token, orgId, groupId, userId);
+    },
+    removeGroupMember: (token: string, orgId: string, groupId: string, userId: string): Promise<unknown> => {
+      validateString(token, 'token');
+      validateString(orgId, 'orgId');
+      validateString(groupId, 'groupId');
+      validateString(userId, 'userId');
+      return ipcRenderer.invoke('admin:removeGroupMember', token, orgId, groupId, userId);
+    },
+    // --- Collection-Group assignments ---
+    listCollectionGroups: (token: string, orgId: string, collectionId: string): Promise<unknown> => {
+      validateString(token, 'token');
+      validateString(orgId, 'orgId');
+      validateString(collectionId, 'collectionId');
+      return ipcRenderer.invoke('admin:listCollectionGroups', token, orgId, collectionId);
+    },
+    addCollectionGroup: (token: string, orgId: string, collectionId: string, groupId: string, permission: string, masterKey: string): Promise<unknown> => {
+      validateString(token, 'token');
+      validateString(orgId, 'orgId');
+      validateString(collectionId, 'collectionId');
+      validateString(groupId, 'groupId');
+      validateString(permission, 'permission');
+      validateString(masterKey, 'masterKey');
+      return ipcRenderer.invoke('admin:addCollectionGroup', token, orgId, collectionId, groupId, permission, masterKey);
+    },
+    removeCollectionGroup: (token: string, orgId: string, collectionId: string, groupId: string): Promise<unknown> => {
+      validateString(token, 'token');
+      validateString(orgId, 'orgId');
+      validateString(collectionId, 'collectionId');
+      validateString(groupId, 'groupId');
+      return ipcRenderer.invoke('admin:removeCollectionGroup', token, orgId, collectionId, groupId);
+    },
+    // --- SIEM / Webhooks ---
+    exportEvents: (token: string, orgId: string, params: Record<string, unknown>): Promise<unknown> => {
+      validateString(token, 'token');
+      validateString(orgId, 'orgId');
+      return ipcRenderer.invoke('admin:exportEvents', token, orgId, params);
+    },
+    listWebhooks: (token: string, orgId: string): Promise<unknown> => {
+      validateString(token, 'token');
+      validateString(orgId, 'orgId');
+      return ipcRenderer.invoke('admin:listWebhooks', token, orgId);
+    },
+    createWebhook: (token: string, orgId: string, data: Record<string, unknown>): Promise<unknown> => {
+      validateString(token, 'token');
+      validateString(orgId, 'orgId');
+      validateObject(data, 'data');
+      return ipcRenderer.invoke('admin:createWebhook', token, orgId, data);
+    },
+    deleteWebhook: (token: string, orgId: string, webhookId: string): Promise<unknown> => {
+      validateString(token, 'token');
+      validateString(orgId, 'orgId');
+      validateString(webhookId, 'webhookId');
+      return ipcRenderer.invoke('admin:deleteWebhook', token, orgId, webhookId);
+    },
+    toggleWebhook: (token: string, orgId: string, webhookId: string, enabled: boolean): Promise<unknown> => {
+      validateString(token, 'token');
+      validateString(orgId, 'orgId');
+      validateString(webhookId, 'webhookId');
+      return ipcRenderer.invoke('admin:toggleWebhook', token, orgId, webhookId, enabled);
+    },
+    testWebhook: (token: string, orgId: string, webhookId: string): Promise<unknown> => {
+      validateString(token, 'token');
+      validateString(orgId, 'orgId');
+      validateString(webhookId, 'webhookId');
+      return ipcRenderer.invoke('admin:testWebhook', token, orgId, webhookId);
+    },
     listPending2FA: (token: string): Promise<unknown> => {
       validateString(token, 'token');
       return ipcRenderer.invoke('auth:listPending2FA', token);

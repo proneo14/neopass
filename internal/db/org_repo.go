@@ -30,6 +30,7 @@ type OrgMember struct {
 	UserID    string    `json:"user_id"`
 	Email     string    `json:"email,omitempty"`
 	Role      string    `json:"role"`
+	RoleID    string    `json:"role_id,omitempty"`
 	JoinedAt  time.Time `json:"joined_at"`
 }
 
@@ -170,9 +171,10 @@ func (r *PgOrgRepo) SetMemberOrgKey(ctx context.Context, orgID, userID string, e
 // ListMembers returns all members of an organization.
 func (r *PgOrgRepo) ListMembers(ctx context.Context, orgID string) ([]OrgMember, error) {
 	rows, err := r.pool.Query(ctx,
-		`SELECT om.org_id, om.user_id, u.email, om.role, om.joined_at
+		`SELECT om.org_id, om.user_id, u.email, COALESCE(rl.name, om.role), COALESCE(om.role_id::text, ''), om.joined_at
 		 FROM org_members om
 		 JOIN users u ON u.id = om.user_id
+		 LEFT JOIN roles rl ON rl.id = om.role_id
 		 WHERE om.org_id = $1
 		 ORDER BY om.joined_at`, orgID,
 	)
@@ -184,7 +186,7 @@ func (r *PgOrgRepo) ListMembers(ctx context.Context, orgID string) ([]OrgMember,
 	var members []OrgMember
 	for rows.Next() {
 		var m OrgMember
-		if err := rows.Scan(&m.OrgID, &m.UserID, &m.Email, &m.Role, &m.JoinedAt); err != nil {
+		if err := rows.Scan(&m.OrgID, &m.UserID, &m.Email, &m.Role, &m.RoleID, &m.JoinedAt); err != nil {
 			return nil, fmt.Errorf("scan member: %w", err)
 		}
 		members = append(members, m)

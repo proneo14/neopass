@@ -15,10 +15,57 @@ import (
 	"github.com/password-manager/password-manager/internal/vault"
 )
 
+// RouterConfig holds all the dependencies needed to build the API router.
+type RouterConfig struct {
+	AuthService    *auth.Service
+	TOTPService    *auth.TOTPService
+	SMSService     *auth.SMSService
+	VaultService   *vault.Service
+	AdminService   *admin.Service
+	SyncService    *syncsvc.Service
+	WebauthnService *auth.WebAuthnService
+	UserRepo       db.UserRepository
+	VaultRepo      db.VaultRepository
+	SendRepo       db.SendRepository
+	CollectionRepo db.CollectionRepository
+	OrgRepo        db.OrgRepository
+	AuditRepo      db.AuditRepository
+	EARepo         db.EmergencyAccessRepository
+	SyncRepo       db.SyncRepository
+	RoleRepo       db.RoleRepository
+	GroupRepo      db.GroupRepository
+	WebhookRepo    db.WebhookRepository
+	StorageBackend string
+	SQLiteDB       *sql.DB
+}
+
 // Router sets up all API v1 routes.
 // storageBackend should be "sqlite" or "postgres".
 // sqliteDB is the raw SQLite *sql.DB for migration support (nil when using postgres).
-func Router(authService *auth.Service, totpService *auth.TOTPService, smsService *auth.SMSService, vaultService *vault.Service, adminService *admin.Service, syncService *syncsvc.Service, webauthnService *auth.WebAuthnService, userRepo db.UserRepository, vaultRepo db.VaultRepository, sendRepo db.SendRepository, collectionRepo db.CollectionRepository, orgRepo db.OrgRepository, auditRepo db.AuditRepository, eaRepo db.EmergencyAccessRepository, syncRepo db.SyncRepository, storageBackend string, sqliteDB *sql.DB) chi.Router {
+func Router(authService *auth.Service, totpService *auth.TOTPService, smsService *auth.SMSService, vaultService *vault.Service, adminService *admin.Service, syncService *syncsvc.Service, webauthnService *auth.WebAuthnService, userRepo db.UserRepository, vaultRepo db.VaultRepository, sendRepo db.SendRepository, collectionRepo db.CollectionRepository, orgRepo db.OrgRepository, auditRepo db.AuditRepository, eaRepo db.EmergencyAccessRepository, syncRepo db.SyncRepository, storageBackend string, sqliteDB *sql.DB, opts ...func(*RouterConfig)) chi.Router {
+	cfg := &RouterConfig{
+		AuthService:    authService,
+		TOTPService:    totpService,
+		SMSService:     smsService,
+		VaultService:   vaultService,
+		AdminService:   adminService,
+		SyncService:    syncService,
+		WebauthnService: webauthnService,
+		UserRepo:       userRepo,
+		VaultRepo:      vaultRepo,
+		SendRepo:       sendRepo,
+		CollectionRepo: collectionRepo,
+		OrgRepo:        orgRepo,
+		AuditRepo:      auditRepo,
+		EARepo:         eaRepo,
+		SyncRepo:       syncRepo,
+		StorageBackend: storageBackend,
+		SQLiteDB:       sqliteDB,
+	}
+	for _, opt := range opts {
+		opt(cfg)
+	}
+
 	r := chi.NewRouter()
 
 	authHandler := NewAuthHandler(authService)
@@ -26,6 +73,7 @@ func Router(authService *auth.Service, totpService *auth.TOTPService, smsService
 	vaultHandler := NewVaultHandler(vaultService)
 	adminHandler := NewAdminHandler(adminService, userRepo)
 	adminHandler.SetOrgAndAuditRepo(orgRepo, auditRepo)
+	adminHandler.SetCollectionRepo(collectionRepo)
 	if sqliteDB != nil {
 		adminHandler.SetSQLiteDB(sqliteDB)
 	}
@@ -35,13 +83,17 @@ func Router(authService *auth.Service, totpService *auth.TOTPService, smsService
 	collectionHandler := NewCollectionHandler(collectionRepo, orgRepo, userRepo, auditRepo)
 	emergencyHandler := NewEmergencyAccessHandler(eaRepo, userRepo, vaultRepo, auditRepo, orgRepo, collectionRepo)
 
-	// SSO & SCIM handlers (PostgreSQL-only)
+	// SSO, SCIM, & SIEM handlers (PostgreSQL-only)
 	var ssoHandler *SSOHandler
 	var scimHandler *SCIMHandler
+	var siemHandler *SIEMHandler
 	if storageBackend != "sqlite" {
 		ssoService := auth.NewSSOService(orgRepo, userRepo, authService, auditRepo)
 		ssoHandler = NewSSOHandler(ssoService, authService, orgRepo, auditRepo)
 		scimHandler = NewSCIMHandler(userRepo, orgRepo, auditRepo)
+		if cfg.WebhookRepo != nil {
+			siemHandler = NewSIEMHandler(cfg.WebhookRepo, auditRepo, orgRepo, userRepo, cfg.RoleRepo)
+		}
 	}
 
 	// Rate limiter for public auth endpoints: 10 requests per minute per IP
@@ -185,12 +237,49 @@ func Router(authService *auth.Service, totpService *auth.TOTPService, smsService
 				r.Post("/scim/generate-token", adminHandler.GenerateSCIMToken)
 				r.Get("/scim", adminHandler.GetSCIMConfig)
 				r.Put("/scim", adminHandler.SetSCIMConfig)
+
+				// Role management
+				r.Route("/roles", func(r chi.Router) {
+					r.Get("/", adminHandler.ListRoles)
+					r.Post("/", adminHandler.CreateRole)
+					r.Put("/{roleId}", adminHandler.UpdateRole)
+					r.Delete("/{roleId}", adminHandler.DeleteRole)
+				})
+				r.Put("/members/{uid}/role", adminHandler.SetMemberRole)
+
+				// Group management
+				r.Route("/groups", func(r chi.Router) {
+					r.Get("/", adminHandler.ListGroups)
+					r.Post("/", adminHandler.CreateGroup)
+					r.Put("/{gid}", adminHandler.UpdateGroup)
+					r.Delete("/{gid}", adminHandler.DeleteGroup)
+					r.Get("/{gid}/members", adminHandler.ListGroupMembers)
+					r.Post("/{gid}/members", adminHandler.AddGroupMember)
+					r.Delete("/{gid}/members/{uid}", adminHandler.RemoveGroupMember)
+				})
+
+				// SIEM integration
+				if siemHandler != nil {
+					r.Get("/events/export", siemHandler.ExportEvents)
+					r.Route("/webhooks", func(r chi.Router) {
+						r.Get("/", siemHandler.ListWebhooks)
+						r.Post("/", siemHandler.CreateWebhook)
+						r.Delete("/{webhookId}", siemHandler.DeleteWebhook)
+						r.Put("/{webhookId}/toggle", siemHandler.ToggleWebhook)
+						r.Post("/{webhookId}/test", siemHandler.TestWebhook)
+					})
+				}
 			})
 
 			// Org-scoped collection routes
 			r.Route("/orgs/{orgId}/collections", func(r chi.Router) {
 				r.Post("/", collectionHandler.CreateCollection)
 				r.Get("/", collectionHandler.ListOrgCollections)
+
+				// Collection-group assignments
+				r.Get("/{collId}/groups", adminHandler.ListCollectionGroups)
+				r.Post("/{collId}/groups", adminHandler.AddCollectionGroup)
+				r.Delete("/{collId}/groups/{gid}", adminHandler.RemoveCollectionGroup)
 			})
 		})
 

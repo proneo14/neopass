@@ -5,11 +5,14 @@ import (
 	"crypto/rand"
 	"crypto/subtle"
 	"encoding/hex"
+	"encoding/json"
+	"fmt"
 	"net/http"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/rs/zerolog/log"
 
 	"github.com/password-manager/password-manager/internal/auth"
@@ -83,6 +86,98 @@ func extractBearerToken(r *http.Request) string {
 		return ""
 	}
 	return parts[1]
+}
+
+// RequirePermission returns middleware that checks if the authenticated user has
+// the specified permission within the organization identified by the "id" or "orgId"
+// URL parameter. It uses the granular role-based permission system.
+// If roleRepo is nil, it falls back to checking the legacy role == "admin" for
+// any permission starting with "org.".
+func RequirePermission(roleRepo db.RoleRepository, orgRepo db.OrgRepository, permission string) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			claims := GetClaims(r.Context())
+			if claims == nil {
+				writeError(w, http.StatusUnauthorized, "unauthorized")
+				return
+			}
+
+			// Determine org ID from URL params
+			orgID := chi.URLParam(r, "id")
+			if orgID == "" {
+				orgID = chi.URLParam(r, "orgId")
+			}
+			if orgID == "" {
+				writeError(w, http.StatusBadRequest, "missing organization ID")
+				return
+			}
+
+			if roleRepo != nil {
+				role, err := roleRepo.GetMemberRole(r.Context(), orgID, claims.UserID)
+				if err != nil {
+					writeError(w, http.StatusForbidden, "not a member of this organization")
+					return
+				}
+
+				if !HasPermission(role, permission) {
+					writeError(w, http.StatusForbidden, "insufficient permissions: requires "+permission)
+					return
+				}
+			} else {
+				// Fallback: legacy role check
+				member, err := orgRepo.GetMember(r.Context(), orgID, claims.UserID)
+				if err != nil {
+					writeError(w, http.StatusForbidden, "not a member of this organization")
+					return
+				}
+				if member.Role != "admin" {
+					writeError(w, http.StatusForbidden, "admin role required")
+					return
+				}
+			}
+
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
+// HasPermission checks if a role has a given permission.
+// The wildcard "*" permission grants access to everything.
+func HasPermission(role db.Role, permission string) bool {
+	var perms []string
+	if err := json.Unmarshal(role.Permissions, &perms); err != nil {
+		return false
+	}
+	for _, p := range perms {
+		if p == "*" || p == permission {
+			return true
+		}
+	}
+	return false
+}
+
+// CheckPermission is a helper used in handlers to verify permission without middleware.
+// Returns the role and nil error if the user has the permission, or an error otherwise.
+func CheckPermission(ctx context.Context, roleRepo db.RoleRepository, orgRepo db.OrgRepository, orgID, userID, permission string) (db.Role, error) {
+	if roleRepo != nil {
+		role, err := roleRepo.GetMemberRole(ctx, orgID, userID)
+		if err != nil {
+			return db.Role{}, fmt.Errorf("not a member of this organization")
+		}
+		if !HasPermission(role, permission) {
+			return role, fmt.Errorf("insufficient permissions: requires %s", permission)
+		}
+		return role, nil
+	}
+	// Fallback: legacy check
+	member, err := orgRepo.GetMember(ctx, orgID, userID)
+	if err != nil {
+		return db.Role{}, fmt.Errorf("not a member of this organization")
+	}
+	if member.Role != "admin" {
+		return db.Role{}, fmt.Errorf("admin role required")
+	}
+	return db.Role{Name: "Admin"}, nil
 }
 
 // RateLimiter provides per-IP rate limiting for sensitive endpoints.

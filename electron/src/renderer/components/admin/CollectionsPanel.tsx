@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuthStore } from '../../store/authStore';
 import { useVaultStore } from '../../store/vaultStore';
+import type { Group, CollectionGroup } from '../../types/admin';
 
 interface CollectionItem {
   id: string;
@@ -48,6 +49,12 @@ export function CollectionsPanel({ orgId }: Props) {
   const [renamingCollection, setRenamingCollection] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState('');
   const [renaming, setRenaming] = useState(false);
+  const [collectionGroups, setCollectionGroups] = useState<CollectionGroup[]>([]);
+  const [loadingGroups, setLoadingGroups] = useState(false);
+  const [orgGroups, setOrgGroups] = useState<Group[]>([]);
+  const [addGroupId, setAddGroupId] = useState('');
+  const [addGroupPerm, setAddGroupPerm] = useState('read');
+  const [addingGroup, setAddingGroup] = useState(false);
 
   const { token, masterKeyHex, userId } = useAuthStore();
   const bumpCollectionsVersion = useVaultStore((s) => s.bumpCollectionsVersion);
@@ -99,13 +106,42 @@ export function CollectionsPanel({ orgId }: Props) {
     setLoadingMembers(false);
   };
 
+  // Load org groups for the dropdown
+  useEffect(() => {
+    if (!token || !orgId) return;
+    (async () => {
+      try {
+        const result = await window.api.admin.listGroups(token, orgId) as Group[] | { error: string };
+        if (!('error' in result) && Array.isArray(result)) {
+          setOrgGroups(result);
+        }
+      } catch { /* ignore */ }
+    })();
+  }, [token, orgId]);
+
+  const loadCollectionGroups = async (collId: string) => {
+    if (!token || !orgId) return;
+    setLoadingGroups(true);
+    try {
+      const result = await window.api.admin.listCollectionGroups(token, orgId, collId) as CollectionGroup[] | { error: string };
+      if ('error' in result) {
+        console.error('loadCollectionGroups error:', (result as { error: string }).error);
+      } else if (Array.isArray(result)) {
+        setCollectionGroups(result);
+      }
+    } catch (e) { console.error('loadCollectionGroups exception:', e); }
+    setLoadingGroups(false);
+  };
+
   const handleSelectCollection = (collId: string) => {
     if (selectedCollection === collId) {
       setSelectedCollection(null);
       setMembers([]);
+      setCollectionGroups([]);
     } else {
       setSelectedCollection(collId);
       loadMembers(collId);
+      loadCollectionGroups(collId);
     }
   };
 
@@ -505,6 +541,91 @@ export function CollectionsPanel({ orgId }: Props) {
                       {addingMember ? '...' : 'Add'}
                     </button>
                   </div>
+                </div>
+
+                {/* Groups section */}
+                <div className="pt-2 border-t border-surface-700">
+                  <div className="text-xs font-medium text-surface-300 uppercase tracking-wide mb-2">Groups</div>
+                  {loadingGroups ? (
+                    <div className="text-xs text-surface-400">Loading groups...</div>
+                  ) : (
+                    <div className="space-y-2">
+                      {collectionGroups.map((cg) => (
+                        <div key={cg.group_id} className="flex items-center justify-between py-1">
+                          <span className="text-sm text-surface-200">{cg.group_name || cg.group_id}</span>
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs px-2 py-0.5 rounded bg-surface-700 text-surface-300">{cg.permission}</span>
+                            <button
+                              onClick={async () => {
+                                if (!token || !orgId) return;
+                                try {
+                                  await window.api.admin.removeCollectionGroup(token, orgId, coll.id, cg.group_id);
+                                  loadCollectionGroups(coll.id);
+                                } catch { /* ignore */ }
+                              }}
+                              className="text-xs text-red-400 hover:text-red-300"
+                            >
+                              Remove
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                      {collectionGroups.length === 0 && (
+                        <div className="text-xs text-surface-400">No groups assigned</div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Add group */}
+                  {orgGroups.length > 0 && (
+                    <div className="mt-2">
+                      <div className="flex gap-2">
+                        <select
+                          value={addGroupId}
+                          onChange={(e) => setAddGroupId(e.target.value)}
+                          className="flex-1 text-xs px-2 py-1.5 rounded bg-surface-900 border border-surface-600 text-surface-200"
+                        >
+                          <option value="">Select a group...</option>
+                          {orgGroups
+                            .filter((g) => !collectionGroups.some((cg) => cg.group_id === g.id))
+                            .map((g) => (
+                              <option key={g.id} value={g.id}>{g.name}</option>
+                            ))}
+                        </select>
+                        <select
+                          value={addGroupPerm}
+                          onChange={(e) => setAddGroupPerm(e.target.value)}
+                          className="text-xs px-2 py-1.5 rounded bg-surface-900 border border-surface-600 text-surface-200"
+                        >
+                          <option value="read">Read</option>
+                          <option value="manage">Manage</option>
+                        </select>
+                        <button
+                          onClick={async () => {
+                            if (!token || !orgId || !addGroupId || !masterKeyHex) return;
+                            setAddingGroup(true);
+                            try {
+                              const result = await window.api.admin.addCollectionGroup(token, orgId, coll.id, addGroupId, addGroupPerm, masterKeyHex) as { error?: string };
+                              if (result.error) {
+                                setError(result.error);
+                              } else {
+                                setAddGroupId('');
+                                loadCollectionGroups(coll.id);
+                                loadCollections();
+                              }
+                            } catch {
+                              setError('Failed to add group');
+                            }
+                            setAddingGroup(false);
+                          }}
+                          disabled={addingGroup || !addGroupId}
+                          className="px-3 py-1.5 text-xs font-medium rounded bg-accent-600 hover:bg-accent-500 text-white disabled:opacity-50"
+                        >
+                          {addingGroup ? '...' : 'Add'}
+                        </button>
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
             )}

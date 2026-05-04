@@ -232,3 +232,106 @@ type EmergencyAccessRepository interface {
 	ListByGranteeEmail(ctx context.Context, email string) ([]EmergencyAccess, error)
 	AutoApproveExpired(ctx context.Context) (int, error)
 }
+
+// Role represents a custom role with granular permissions.
+type Role struct {
+	ID          string          `json:"id"`
+	OrgID       string          `json:"org_id"`
+	Name        string          `json:"name"`
+	Description string          `json:"description,omitempty"`
+	Permissions json.RawMessage `json:"permissions"`
+	IsBuiltin   bool            `json:"is_builtin"`
+	CreatedAt   time.Time       `json:"created_at"`
+}
+
+// Group represents a user group within an organization.
+type Group struct {
+	ID         string    `json:"id"`
+	OrgID      string    `json:"org_id"`
+	Name       string    `json:"name"`
+	ExternalID string    `json:"external_id,omitempty"`
+	CreatedAt  time.Time `json:"created_at"`
+}
+
+// GroupMember represents a user's membership in a group.
+type GroupMember struct {
+	GroupID string `json:"group_id"`
+	UserID  string `json:"user_id"`
+	Email   string `json:"email,omitempty"`
+}
+
+// CollectionGroup represents a group's assignment to a collection.
+type CollectionGroup struct {
+	CollectionID string `json:"collection_id"`
+	GroupID      string `json:"group_id"`
+	GroupName    string `json:"group_name,omitempty"`
+	Permission   string `json:"permission"`
+	EncryptedKey []byte `json:"encrypted_key"`
+}
+
+// Webhook represents a SIEM webhook configuration.
+type Webhook struct {
+	ID         string    `json:"id"`
+	OrgID      string    `json:"org_id"`
+	URL        string    `json:"url"`
+	Events     []string  `json:"events"`
+	SecretHash []byte    `json:"-"`
+	Enabled    bool      `json:"enabled"`
+	CreatedAt  time.Time `json:"created_at"`
+}
+
+// WebhookDelivery represents a webhook delivery attempt.
+type WebhookDelivery struct {
+	ID            string     `json:"id"`
+	WebhookID     string     `json:"webhook_id"`
+	EventID       string     `json:"event_id"`
+	Status        string     `json:"status"`
+	ResponseCode  *int       `json:"response_code,omitempty"`
+	Attempts      int        `json:"attempts"`
+	LastAttemptAt *time.Time `json:"last_attempt_at,omitempty"`
+	CreatedAt     time.Time  `json:"created_at"`
+}
+
+// RoleRepository defines the interface for role database operations.
+type RoleRepository interface {
+	CreateRole(ctx context.Context, role Role) (Role, error)
+	GetRole(ctx context.Context, roleID string) (Role, error)
+	GetRoleByName(ctx context.Context, orgID, name string) (Role, error)
+	ListRoles(ctx context.Context, orgID string) ([]Role, error)
+	UpdateRole(ctx context.Context, role Role) error
+	DeleteRole(ctx context.Context, roleID string) error
+	SeedBuiltinRoles(ctx context.Context, orgID string) error
+	GetMemberRole(ctx context.Context, orgID, userID string) (Role, error)
+	SetMemberRole(ctx context.Context, orgID, userID, roleID string) error
+}
+
+// GroupRepository defines the interface for group database operations.
+type GroupRepository interface {
+	CreateGroup(ctx context.Context, group Group) (Group, error)
+	GetGroup(ctx context.Context, groupID string) (Group, error)
+	ListGroups(ctx context.Context, orgID string) ([]Group, error)
+	UpdateGroup(ctx context.Context, group Group) error
+	DeleteGroup(ctx context.Context, groupID string) error
+	AddGroupMember(ctx context.Context, groupID, userID string) error
+	RemoveGroupMember(ctx context.Context, groupID, userID string) error
+	ListGroupMembers(ctx context.Context, groupID string) ([]GroupMember, error)
+	ListUserGroups(ctx context.Context, userID string) ([]Group, error)
+	AddCollectionGroup(ctx context.Context, cg CollectionGroup) error
+	RemoveCollectionGroup(ctx context.Context, collectionID, groupID string) error
+	ListCollectionGroups(ctx context.Context, collectionID string) ([]CollectionGroup, error)
+	UpdateCollectionGroupPermission(ctx context.Context, collectionID, groupID, permission string) error
+}
+
+// WebhookRepository defines the interface for SIEM webhook database operations.
+type WebhookRepository interface {
+	CreateWebhook(ctx context.Context, webhook Webhook) (Webhook, error)
+	GetWebhook(ctx context.Context, webhookID string) (Webhook, error)
+	ListWebhooks(ctx context.Context, orgID string) ([]Webhook, error)
+	DeleteWebhook(ctx context.Context, webhookID string) error
+	SetWebhookEnabled(ctx context.Context, webhookID string, enabled bool) error
+	GetMatchingWebhooks(ctx context.Context, orgID, action string) ([]Webhook, error)
+	CreateDelivery(ctx context.Context, delivery WebhookDelivery) (WebhookDelivery, error)
+	UpdateDelivery(ctx context.Context, deliveryID, status string, responseCode *int) error
+	ListRecentDeliveries(ctx context.Context, webhookID string, limit int) ([]WebhookDelivery, error)
+	GetPendingDeliveries(ctx context.Context, limit int) ([]WebhookDelivery, error)
+}

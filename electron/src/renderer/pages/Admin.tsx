@@ -8,19 +8,45 @@ import { AuditLogPanel } from '../components/admin/AuditLogPanel';
 import { CollectionsPanel } from '../components/admin/CollectionsPanel';
 import { SSOPanel } from '../components/admin/SSOPanel';
 import { SCIMPanel } from '../components/admin/SCIMPanel';
+import { RolesPanel } from '../components/admin/RolesPanel';
+import { GroupsPanel } from '../components/admin/GroupsPanel';
+import { IntegrationsPanel } from '../components/admin/IntegrationsPanel';
 
-const TABS = [
-  { id: 'members', label: 'Members', icon: '👥' },
-  { id: 'collections', label: 'Collections', icon: '📁' },
-  { id: 'vault', label: 'Vault Access', icon: '🔓' },
-  { id: '2fa', label: '2FA Sharing', icon: '🔑' },
-  { id: 'sso', label: 'SSO', icon: '🔐' },
-  { id: 'scim', label: 'Directory Sync', icon: '📂' },
-  { id: 'policies', label: 'Policies', icon: '📋' },
-  { id: 'audit', label: 'Audit Log', icon: '📜' },
+const SECTIONS = [
+  {
+    label: 'People',
+    items: [
+      { id: 'members', label: 'Members', icon: '👥' },
+      { id: 'roles', label: 'Roles', icon: '🎭' },
+      { id: 'groups', label: 'Groups', icon: '🏘️' },
+    ],
+  },
+  {
+    label: 'Data',
+    items: [
+      { id: 'collections', label: 'Collections', icon: '📁' },
+      { id: 'vault', label: 'Vault Access', icon: '🔓' },
+      { id: '2fa', label: '2FA Sharing', icon: '🔑' },
+    ],
+  },
+  {
+    label: 'Identity',
+    items: [
+      { id: 'sso', label: 'SSO', icon: '🔐' },
+      { id: 'scim', label: 'Directory Sync', icon: '📂' },
+    ],
+  },
+  {
+    label: 'Security',
+    items: [
+      { id: 'policies', label: 'Policies', icon: '📋' },
+      { id: 'audit', label: 'Audit Log', icon: '📜' },
+      { id: 'integrations', label: 'Integrations', icon: '🔗' },
+    ],
+  },
 ] as const;
 
-type TabId = (typeof TABS)[number]['id'];
+type TabId = (typeof SECTIONS)[number]['items'][number]['id'];
 
 export function Admin() {
   const [activeTab, setActiveTab] = useState<TabId>('members');
@@ -78,44 +104,71 @@ export function Admin() {
     );
   }
 
+  const activeSection = SECTIONS.find((s) => s.items.some((i) => i.id === activeTab));
+  const activeItem = activeSection?.items.find((i) => i.id === activeTab);
+
   return (
-    <div className="flex flex-col h-full">
-      {/* Header */}
-      <div className="flex items-center justify-between px-6 py-4 border-b border-surface-800">
-        <div>
-          <h1 className="text-lg font-semibold text-surface-100">Admin Dashboard</h1>
-          <p className="text-xs text-surface-400 mt-0.5">{orgName || orgId}</p>
+    <div className="flex h-full">
+      {/* Sidebar */}
+      <div className="w-48 flex-shrink-0 border-r border-surface-800 bg-surface-950/50 overflow-y-auto">
+        <div className="px-4 py-4">
+          <h1 className="text-sm font-semibold text-surface-100 truncate">Admin</h1>
+          <p className="text-xs text-surface-500 mt-0.5 truncate">{orgName || orgId}</p>
         </div>
+        <nav className="px-2 pb-4 space-y-4">
+          {SECTIONS.map((section) => (
+            <div key={section.label}>
+              <div className="px-2 mb-1 text-[10px] uppercase tracking-wider text-surface-500 font-medium">
+                {section.label}
+              </div>
+              {section.items.map((item) => (
+                <button
+                  key={item.id}
+                  onClick={() => setActiveTab(item.id)}
+                  className={`w-full flex items-center gap-2 px-2 py-1.5 rounded-lg text-sm transition-colors ${
+                    activeTab === item.id
+                      ? 'bg-accent-600/15 text-accent-400'
+                      : 'text-surface-400 hover:bg-surface-800 hover:text-surface-200'
+                  }`}
+                >
+                  <span className="text-xs w-5 text-center flex-shrink-0">{item.icon}</span>
+                  {item.label}
+                </button>
+              ))}
+            </div>
+          ))}
+        </nav>
       </div>
 
-      {/* Tabs */}
-      <div className="flex border-b border-surface-800 px-6">
-        {TABS.map((tab) => (
-          <button
-            key={tab.id}
-            onClick={() => setActiveTab(tab.id)}
-            className={`px-4 py-3 text-sm font-medium transition-colors border-b-2 -mb-px ${
-              activeTab === tab.id
-                ? 'text-accent-400 border-accent-500'
-                : 'text-surface-400 border-transparent hover:text-surface-200 hover:border-surface-600'
-            }`}
-          >
-            <span className="mr-1.5">{tab.icon}</span>
-            {tab.label}
-          </button>
-        ))}
-      </div>
+      {/* Content */}
+      <div className="flex-1 flex flex-col min-w-0">
+        {/* Content Header */}
+        <div className="flex items-center gap-2 px-6 py-3 border-b border-surface-800">
+          {activeItem && (
+            <>
+              <span className="text-sm">{activeItem.icon}</span>
+              <h2 className="text-sm font-medium text-surface-100">{activeItem.label}</h2>
+              {activeSection && (
+                <span className="text-xs text-surface-500">· {activeSection.label}</span>
+              )}
+            </>
+          )}
+        </div>
 
-      {/* Tab Content */}
-      <div className="flex-1 overflow-y-auto p-6">
-        {activeTab === 'members' && <MembersPanel orgId={orgId} />}
-        {activeTab === 'collections' && <CollectionsPanel orgId={orgId} />}
-        {activeTab === 'vault' && <VaultAccessPanel orgId={orgId} />}
-        {activeTab === '2fa' && <TwoFactorSharePanel orgId={orgId} />}
-        {activeTab === 'sso' && <SSOPanel orgId={orgId} />}
-        {activeTab === 'scim' && <SCIMPanel orgId={orgId} />}
-        {activeTab === 'policies' && <PoliciesPanel orgId={orgId} />}
-        {activeTab === 'audit' && <AuditLogPanel orgId={orgId} />}
+        {/* Panel */}
+        <div className="flex-1 overflow-y-auto p-6">
+          {activeTab === 'members' && <MembersPanel orgId={orgId} />}
+          {activeTab === 'roles' && <RolesPanel orgId={orgId} />}
+          {activeTab === 'groups' && <GroupsPanel orgId={orgId} />}
+          {activeTab === 'collections' && <CollectionsPanel orgId={orgId} />}
+          {activeTab === 'vault' && <VaultAccessPanel orgId={orgId} />}
+          {activeTab === '2fa' && <TwoFactorSharePanel orgId={orgId} />}
+          {activeTab === 'sso' && <SSOPanel orgId={orgId} />}
+          {activeTab === 'scim' && <SCIMPanel orgId={orgId} />}
+          {activeTab === 'policies' && <PoliciesPanel orgId={orgId} />}
+          {activeTab === 'audit' && <AuditLogPanel orgId={orgId} />}
+          {activeTab === 'integrations' && <IntegrationsPanel orgId={orgId} />}
+        </div>
       </div>
     </div>
   );
