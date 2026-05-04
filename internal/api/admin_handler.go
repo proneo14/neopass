@@ -1447,6 +1447,9 @@ func (h *AdminHandler) RemoveCollectionGroup(w http.ResponseWriter, r *http.Requ
 	collID := chi.URLParam(r, "collId")
 	groupID := chi.URLParam(r, "gid")
 
+	// Get group members before removing the mapping
+	groupMembers, _ := h.adminService.ListGroupMembers(r.Context(), claims.UserID, orgID, groupID)
+
 	if err := h.adminService.RemoveCollectionGroup(r.Context(), claims.UserID, orgID, collID, groupID); err != nil {
 		if errors.Is(err, admin.ErrNotAdmin) {
 			writeError(w, http.StatusForbidden, "admin role required")
@@ -1456,5 +1459,37 @@ func (h *AdminHandler) RemoveCollectionGroup(w http.ResponseWriter, r *http.Requ
 		writeError(w, http.StatusInternalServerError, "failed to remove group from collection")
 		return
 	}
+
+	// Remove group members from collection_members
+	// NEVER remove the acting admin — they hold the collection key for future operations
+	if len(groupMembers) > 0 {
+		// Get remaining groups on this collection
+		remainingGroups, _ := h.adminService.ListCollectionGroups(r.Context(), claims.UserID, orgID, collID)
+		// Build set of users still covered by other groups
+		stillCovered := make(map[string]bool)
+		for _, rg := range remainingGroups {
+			rgMembers, _ := h.adminService.ListGroupMembers(r.Context(), claims.UserID, orgID, rg.GroupID)
+			for _, m := range rgMembers {
+				stillCovered[m.UserID] = true
+			}
+		}
+		var removedCount int
+		for _, gm := range groupMembers {
+			// Never remove the admin performing the action
+			if gm.UserID == claims.UserID {
+				continue
+			}
+			if stillCovered[gm.UserID] {
+				continue
+			}
+			if err := h.collectionRepo.RemoveCollectionMember(r.Context(), collID, gm.UserID); err != nil {
+				log.Warn().Err(err).Str("user_id", gm.UserID).Msg("failed to remove group member from collection")
+				continue
+			}
+			removedCount++
+		}
+		log.Info().Int("removed", removedCount).Int("total", len(groupMembers)).Msg("removed group members from collection")
+	}
+
 	writeJSON(w, http.StatusOK, map[string]string{"status": "removed"})
 }

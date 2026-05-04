@@ -561,6 +561,8 @@ export function CollectionsPanel({ orgId }: Props) {
                                 try {
                                   await window.api.admin.removeCollectionGroup(token, orgId, coll.id, cg.group_id);
                                   loadCollectionGroups(coll.id);
+                                  loadMembers(coll.id);
+                                  loadCollections();
                                 } catch { /* ignore */ }
                               }}
                               className="text-xs text-red-400 hover:text-red-300"
@@ -611,6 +613,7 @@ export function CollectionsPanel({ orgId }: Props) {
                               } else {
                                 setAddGroupId('');
                                 loadCollectionGroups(coll.id);
+                                loadMembers(coll.id);
                                 loadCollections();
                               }
                             } catch {
