@@ -445,7 +445,9 @@ func TestEmergencyAccessHandler_Invite(t *testing.T) {
 	}
 
 	var resp map[string]interface{}
-	json.NewDecoder(w.Body).Decode(&resp)
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode invite response: %v", err)
+	}
 	if resp["id"] == nil {
 		t.Error("expected id in invite response")
 	}
@@ -468,7 +470,9 @@ func TestEmergencyAccessHandler_ListGranted(t *testing.T) {
 	}
 
 	var granted []map[string]interface{}
-	json.NewDecoder(w.Body).Decode(&granted)
+	if err := json.NewDecoder(w.Body).Decode(&granted); err != nil {
+		t.Fatalf("decode granted list: %v", err)
+	}
 	if len(granted) != 1 {
 		t.Errorf("expected 1 granted EA, got %d", len(granted))
 	}
@@ -484,7 +488,9 @@ func TestEmergencyAccessHandler_Delete(t *testing.T) {
 		"wait_time_days": 3,
 	})
 	var resp map[string]interface{}
-	json.NewDecoder(w.Body).Decode(&resp)
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode invite response: %v", err)
+	}
 	eaID := resp["id"].(string)
 
 	// Delete
@@ -496,7 +502,9 @@ func TestEmergencyAccessHandler_Delete(t *testing.T) {
 	// List should be empty
 	lw := makeAuthRequest(router, http.MethodGet, "/emergency-access/granted", grantorToken, nil)
 	var granted []map[string]interface{}
-	json.NewDecoder(lw.Body).Decode(&granted)
+	if err := json.NewDecoder(lw.Body).Decode(&granted); err != nil {
+		t.Fatalf("decode granted list: %v", err)
+	}
 	if len(granted) != 0 {
 		t.Errorf("expected 0 granted after delete, got %d", len(granted))
 	}

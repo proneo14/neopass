@@ -2,6 +2,7 @@ package integration_test
 
 import (
 	"bytes"
+	"context"
 	"encoding/hex"
 	"encoding/json"
 	"net/http"
@@ -380,7 +381,7 @@ func TestPurgeSends(t *testing.T) {
 	sendRepo.bySlug["exp-slug-2"] = "expired-2"
 	sendRepo.mu.Unlock()
 
-	purged, err := sendRepo.PurgeExpiredSends(nil)
+	purged, err := sendRepo.PurgeExpiredSends(context.Background())
 	if err != nil {
 		t.Fatalf("purge failed: %v", err)
 	}
