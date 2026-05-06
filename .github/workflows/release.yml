@@ -96,13 +96,13 @@ jobs:
         with:
           go-version-file: go.mod
       - name: Build server
-        run: go build -trimpath -ldflags="-s -w" -o bin/server${{ matrix.ext }} ./cmd/server/main.go
+        run: go build -trimpath -ldflags="-s -w" -o bin/server${{ matrix.ext }} ./cmd/server/
         env:
           CGO_ENABLED: "0"
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
       - name: Build native host
-        run: go build -trimpath -ldflags="-s -w" -o bin/qpm-native-host${{ matrix.ext }} ./cmd/nativehost/main.go
+        run: go build -trimpath -ldflags="-s -w" -o bin/qpm-native-host${{ matrix.ext }} ./cmd/nativehost/
         env:
           CGO_ENABLED: "0"
           GOOS: ${{ matrix.goos }}
