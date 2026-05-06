@@ -2,17 +2,78 @@ name: Release
 
 on:
   push:
+    branches: [main]
     tags:
       - "v*"
 
 permissions:
   contents: write
+  actions: write
 
 jobs:
+  # ── Auto-version ───────────────────────────────────────────
+  version:
+    name: Determine Version
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.version.outputs.tag }}
+      version: ${{ steps.version.outputs.version }}
+      skipped: ${{ steps.version.outputs.skipped }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Compute next version
+        id: version
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            # Manual tag push — use that tag
+            TAG="${GITHUB_REF#refs/tags/}"
+            echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+            echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+            echo "skipped=false" >> "$GITHUB_OUTPUT"
+          else
+            # Push to main — auto-increment patch
+            LATEST=$(git tag -l 'v*' --sort=-v:refname | head -1)
+            if [ -z "$LATEST" ]; then
+              NEXT="v0.1.0"
+            else
+              # Parse semver and increment patch
+              VERSION="${LATEST#v}"
+              MAJOR=$(echo "$VERSION" | cut -d. -f1)
+              MINOR=$(echo "$VERSION" | cut -d. -f2)
+              PATCH=$(echo "$VERSION" | cut -d. -f3)
+              NEXT="v${MAJOR}.${MINOR}.$((PATCH + 1))"
+            fi
+
+            # Skip if HEAD is already tagged (e.g. release.yml triggered by its own tag)
+            HEAD_TAGS=$(git tag --points-at HEAD)
+            if echo "$HEAD_TAGS" | grep -q "^v"; then
+              echo "skipped=true" >> "$GITHUB_OUTPUT"
+              echo "tag=" >> "$GITHUB_OUTPUT"
+              echo "version=" >> "$GITHUB_OUTPUT"
+              echo "HEAD already tagged — skipping release"
+              exit 0
+            fi
+
+            echo "tag=$NEXT" >> "$GITHUB_OUTPUT"
+            echo "version=${NEXT#v}" >> "$GITHUB_OUTPUT"
+            echo "skipped=false" >> "$GITHUB_OUTPUT"
+            echo "Next version: $NEXT"
+
+            # Create and push the tag
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git tag -a "$NEXT" -m "Auto-release $NEXT"
+            git push origin "$NEXT"
+          fi
+
   # ── Build Go binaries for all platforms ─────────────────────
   go-binaries:
     name: Go Build (${{ matrix.suffix }})
     runs-on: ubuntu-latest
+    needs: [version]
+    if: needs.version.outputs.skipped == 'false'
     strategy:
       matrix:
         include:
@@ -55,6 +116,8 @@ jobs:
   extensions:
     name: Extension (${{ matrix.browser }})
     runs-on: ubuntu-latest
+    needs: [version]
+    if: needs.version.outputs.skipped == 'false'
     strategy:
       matrix:
         browser: [chrome, firefox, edge]
@@ -80,7 +143,8 @@ jobs:
   electron-windows:
     name: Electron (Windows)
     runs-on: windows-latest
-    needs: [go-binaries]
+    needs: [version, go-binaries]
+    if: needs.version.outputs.skipped == 'false'
     defaults:
       run:
         working-directory: electron
@@ -108,7 +172,8 @@ jobs:
   electron-macos:
     name: Electron (macOS)
     runs-on: macos-latest
-    needs: [go-binaries]
+    needs: [version, go-binaries]
+    if: needs.version.outputs.skipped == 'false'
     defaults:
       run:
         working-directory: electron
@@ -135,7 +200,8 @@ jobs:
   electron-linux:
     name: Electron (Linux)
     runs-on: ubuntu-latest
-    needs: [go-binaries]
+    needs: [version, go-binaries]
+    if: needs.version.outputs.skipped == 'false'
     defaults:
       run:
         working-directory: electron
@@ -164,6 +230,8 @@ jobs:
   docker:
     name: Docker Image
     runs-on: ubuntu-latest
+    needs: [version]
+    if: needs.version.outputs.skipped == 'false'
     permissions:
       contents: read
       packages: write
@@ -175,15 +243,12 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Extract version
-        id: version
-        run: echo "tag=${GITHUB_REF#refs/tags/v}" >> "$GITHUB_OUTPUT"
       - uses: docker/build-push-action@v6
         with:
           context: .
           push: true
           tags: |
-            ghcr.io/${{ github.repository }}:${{ steps.version.outputs.tag }}
+            ghcr.io/${{ github.repository }}:${{ needs.version.outputs.version }}
             ghcr.io/${{ github.repository }}:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
@@ -192,7 +257,8 @@ jobs:
   release:
     name: Create Release
     runs-on: ubuntu-latest
-    needs: [electron-windows, electron-macos, electron-linux, extensions, docker]
+    needs: [version, electron-windows, electron-macos, electron-linux, extensions, docker]
+    if: needs.version.outputs.skipped == 'false'
     steps:
       - uses: actions/checkout@v4
 
@@ -206,6 +272,7 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ needs.version.outputs.tag }}
           generate_release_notes: true
           files: |
             artifacts/electron-windows/*.exe
@@ -215,3 +282,15 @@ jobs:
             artifacts/extension-chrome/*.zip
             artifacts/extension-firefox/*.zip
             artifacts/extension-edge/*.zip
+
+      - name: Delete intermediate artifacts
+        uses: geekyeggo/delete-artifact@v5
+        with:
+          name: |
+            go-binaries-*
+            electron-windows
+            electron-macos
+            electron-linux
+            extension-chrome
+            extension-firefox
+            extension-edge

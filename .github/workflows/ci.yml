@@ -97,7 +97,7 @@ jobs:
         with:
           name: go-binaries-${{ matrix.suffix }}
           path: bin/
-          retention-days: 14
+          retention-days: 7
 
   # ── Docker ──────────────────────────────────────────────────
   docker:
@@ -169,125 +169,7 @@ jobs:
         with:
           name: electron-build
           path: electron/dist/
-          retention-days: 7
-
-  # ── Release Installers ──────────────────────────────────────
-  release-windows:
-    name: Release Installer (Windows)
-    runs-on: windows-latest
-    needs: [electron-test, go-build]
-    defaults:
-      run:
-        working-directory: electron
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 24
-          cache: npm
-          cache-dependency-path: electron/package-lock.json
-      - name: Download Windows Go binaries
-        uses: actions/download-artifact@v4
-        with:
-          name: go-binaries-windows
-          path: bin
-      - name: Rename binaries for electron-builder
-        shell: bash
-        run: |
-          ls -la ../bin/
-          cp ../bin/server-windows.exe ../bin/server.exe
-          cp ../bin/qpm-native-host-windows.exe ../bin/qpm-native-host.exe
-      - run: npm ci
-      - run: npm run build
-      - name: Build Windows installer
-        run: npx electron-builder --win --publish never
-      - name: Upload Windows installer
-        uses: actions/upload-artifact@v4
-        with:
-          name: installer-windows
-          path: |
-            electron/release/*.exe
-          retention-days: 14
-
-  release-linux:
-    name: Release Installer (Linux)
-    runs-on: ubuntu-latest
-    needs: [electron-test, go-build]
-    defaults:
-      run:
-        working-directory: electron
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 24
-          cache: npm
-          cache-dependency-path: electron/package-lock.json
-      - name: Download Linux Go binaries
-        uses: actions/download-artifact@v4
-        with:
-          name: go-binaries-linux
-          path: bin
-      - name: Rename binaries for electron-builder
-        run: |
-          ls -la ../bin/
-          cp ../bin/server-linux ../bin/server
-          cp ../bin/qpm-native-host-linux ../bin/qpm-native-host
-          chmod +x ../bin/server ../bin/qpm-native-host
-      - run: npm ci
-      - run: npm run build
-      - name: Build Linux installers
-        run: npx electron-builder --linux --publish never
-      - name: Upload Linux installers
-        uses: actions/upload-artifact@v4
-        with:
-          name: installer-linux
-          path: |
-            electron/release/*.AppImage
-            electron/release/*.deb
-          retention-days: 14
-
-  release-mac:
-    name: Release Installer (macOS)
-    runs-on: macos-latest
-    needs: [electron-test, go-build]
-    defaults:
-      run:
-        working-directory: electron
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 24
-          cache: npm
-          cache-dependency-path: electron/package-lock.json
-      - name: Download macOS Go binaries
-        uses: actions/download-artifact@v4
-        with:
-          name: go-binaries-darwin
-          path: bin
-      - name: Download macOS ARM64 Go binaries
-        uses: actions/download-artifact@v4
-        with:
-          name: go-binaries-darwin-arm64
-          path: bin
-      - name: Rename binaries for electron-builder
-        run: |
-          ls -la ../bin/
-          cp ../bin/server-darwin ../bin/server
-          cp ../bin/qpm-native-host-darwin ../bin/qpm-native-host
-          chmod +x ../bin/server ../bin/qpm-native-host
-      - run: npm ci
-      - run: npm run build
-      - name: Build macOS installer
-        run: npx electron-builder --mac --publish never
-      - name: Upload macOS installer
-        uses: actions/upload-artifact@v4
-        with:
-          name: installer-macos
-          path: |
-            electron/release/*.dmg
-          retention-days: 14
+          retention-days: 3
 
   # ── Browser Extension ───────────────────────────────────────
   extension-lint:
@@ -351,4 +233,4 @@ jobs:
         with:
           name: extension-${{ matrix.browser }}
           path: extension/lgi-pass-${{ matrix.browser }}.zip
-          retention-days: 14
+          retention-days: 3
