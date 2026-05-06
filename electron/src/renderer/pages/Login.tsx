@@ -168,17 +168,34 @@ export function Login() {
         {/* Biometric primary unlock */}
         {biometricAvailable && (
           <div className="mb-4">
-            <button
-              type="button"
-              disabled={biometricLoading}
-              onClick={handleBiometricUnlock}
-              className="w-full py-3 rounded-md bg-accent-600 hover:bg-accent-500 text-white text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
-            >
-              <span>🔓</span>
-              {biometricLoading ? 'Verifying…' : 'Unlock with Biometrics'}
-            </button>
+            {biometricLoading ? (
+              <div className="flex flex-col items-center gap-3 py-4">
+                <span className="text-3xl animate-pulse">👆</span>
+                <p className="text-sm text-surface-300">Touch your fingerprint sensor or look at your camera</p>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    try { await window.api.biometric.cancel(); } catch { /* ignore */ }
+                    setBiometricLoading(false);
+                    setShowManualLogin(true);
+                  }}
+                  className="mt-1 text-xs text-surface-500 hover:text-surface-300 transition-colors"
+                >
+                  Cancel
+                </button>
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={handleBiometricUnlock}
+                className="w-full py-3 rounded-md bg-accent-600 hover:bg-accent-500 text-white text-sm font-medium transition-colors flex items-center justify-center gap-2"
+              >
+                <span>🔓</span>
+                Unlock with Biometrics
+              </button>
+            )}
 
-            {!showManualLogin && (
+            {!showManualLogin && !biometricLoading && (
               <button
                 type="button"
                 onClick={() => setShowManualLogin(true)}

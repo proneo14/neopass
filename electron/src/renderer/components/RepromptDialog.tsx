@@ -90,20 +90,30 @@ export function RepromptDialog({ onVerified, onCancel }: RepromptDialogProps) {
         <div className="px-5 py-4 space-y-4">
           {/* Biometric option (shown first if available) */}
           {biometricAvailable && (
-            <button
-              onClick={handleBiometric}
-              disabled={loading}
-              className="w-full py-2.5 rounded-md bg-accent-600 hover:bg-accent-500 text-white text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
-            >
-              {loading ? (
-                <span className="animate-pulse">Verifying…</span>
-              ) : (
-                <>
-                  <span>🔐</span>
-                  Verify with Biometrics
-                </>
-              )}
-            </button>
+            loading ? (
+              <div className="flex flex-col items-center gap-2 py-3">
+                <span className="text-2xl animate-pulse">👆</span>
+                <p className="text-xs text-surface-300">Touch your fingerprint sensor or look at your camera</p>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    try { await window.api.biometric.cancel(); } catch { /* ignore */ }
+                    setLoading(false);
+                  }}
+                  className="text-xs text-surface-500 hover:text-surface-300 transition-colors"
+                >
+                  Cancel
+                </button>
+              </div>
+            ) : (
+              <button
+                onClick={handleBiometric}
+                className="w-full py-2.5 rounded-md bg-accent-600 hover:bg-accent-500 text-white text-sm font-medium transition-colors flex items-center justify-center gap-2"
+              >
+                <span>🔐</span>
+                Verify with Biometrics
+              </button>
+            )
           )}
 
           {biometricAvailable && (

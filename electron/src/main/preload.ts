@@ -156,6 +156,8 @@ const api = {
       ipcRenderer.invoke('biometric:unlock'),
     verify: (): Promise<{ success: boolean; error?: string }> =>
       ipcRenderer.invoke('biometric:verify'),
+    cancel: (): Promise<{ success: boolean; error?: string }> =>
+      ipcRenderer.invoke('biometric:cancel'),
     disable: (): Promise<{ success: boolean; error?: string }> =>
       ipcRenderer.invoke('biometric:disable'),
   },

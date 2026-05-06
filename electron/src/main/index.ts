@@ -14,6 +14,7 @@ import {
   disableBiometric,
   warmUpBiometric,
   promptBiometric,
+  cancelBiometric,
 } from './biometric';
 
 let mainWindow: BrowserWindow | null = null;
@@ -1792,6 +1793,15 @@ public class SecureClip {
   ipcMain.handle('biometric:verify', async () => {
     try {
       await verifyBiometric();
+      return { success: true };
+    } catch (err) {
+      return { success: false, error: (err as Error).message };
+    }
+  });
+
+  ipcMain.handle('biometric:cancel', async () => {
+    try {
+      await cancelBiometric();
       return { success: true };
     } catch (err) {
       return { success: false, error: (err as Error).message };

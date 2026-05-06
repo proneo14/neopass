@@ -1,4 +1,4 @@
-import { systemPreferences, safeStorage, BrowserWindow, app } from 'electron';
+import { systemPreferences, safeStorage, app } from 'electron';
 import path from 'path';
 import fs from 'fs';
 import crypto from 'crypto';
@@ -101,82 +101,207 @@ function getHelloScriptPath(): string {
  */
 function ensureHelloScript(): string {
   const scriptPath = getHelloScriptPath();
+  // Use Windows Biometric Framework (WinBio) instead of UserConsentVerifier
+  // so that only fingerprint / face recognition is accepted — no PIN fallback.
   const script = [
-    '# Load WinRT + .NET runtime',
-    '[Windows.Security.Credentials.UI.UserConsentVerifier,Windows.Security.Credentials.UI,ContentType=WindowsRuntime] | Out-Null',
-    'Add-Type -AssemblyName System.Runtime.WindowsRuntime',
-    '',
-    '# P/Invoke for window focus management',
+    '# WinBio-based biometric daemon — fingerprint/face only, no PIN',
     'Add-Type -TypeDefinition @"',
     'using System;',
+    'using System.Collections.Concurrent;',
     'using System.Runtime.InteropServices;',
-    'public class WinFocus {',
-    '  [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hWnd);',
-    '  [DllImport("user32.dll")] public static extern void keybd_event(byte bVk, byte bScan, uint dwFlags, UIntPtr dwExtraInfo);',
-    '  [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);',
-    '  public static void ForceForeground(IntPtr hWnd) {',
-    '    // Simulate an Alt key press/release so Windows allows SetForegroundWindow',
-    '    keybd_event(0xA4, 0, 0, UIntPtr.Zero);',        // VK_LMENU down
-    '    keybd_event(0xA4, 0, 2, UIntPtr.Zero);',        // VK_LMENU up
-    '    ShowWindow(hWnd, 5);',                           // SW_SHOW
-    '    SetForegroundWindow(hWnd);',
-    '  }',
+    'using System.Security.Principal;',
+    'using System.Threading;',
+    'using System.Threading.Tasks;',
+    '',
+    'public class WinBio {',
+    '    public const int FINGERPRINT = 0x00000008;',
+    '    public const int FACIAL = 0x00000010;',
+    '    public const int POOL_SYSTEM = 1;',
+    '    public const int FLAG_DEFAULT = 0;',
+    '    public const int SUBTYPE_ANY = 0xFF;',
+    '    public const int ID_TYPE_SID = 3;',
+    '    public const int S_OK = 0;',
+    '',
+    '    [StructLayout(LayoutKind.Sequential)]',
+    '    public struct WINBIO_IDENTITY {',
+    '        public int Type;',
+    '        public int AccountSidSize;',
+    '        [MarshalAs(UnmanagedType.ByValArray, SizeConst = 68)]',
+    '        public byte[] AccountSid;',
+    '    }',
+    '',
+    '    [DllImport("winbio.dll")]',
+    '    public static extern int WinBioEnumBiometricUnits(',
+    '        int Factor, out IntPtr UnitSchemaArray, out int UnitCount);',
+    '',
+    '    [DllImport("winbio.dll")]',
+    '    public static extern int WinBioOpenSession(',
+    '        int Factor, int PoolType, int Flags,',
+    '        IntPtr UnitArray, int UnitCount, IntPtr DatabaseId,',
+    '        out IntPtr SessionHandle);',
+    '',
+    '    [DllImport("winbio.dll")]',
+    '    public static extern int WinBioVerify(',
+    '        IntPtr SessionHandle, ref WINBIO_IDENTITY Identity,',
+    '        int SubFactor, out int UnitId,',
+    '        [MarshalAs(UnmanagedType.U1)] out bool Match,',
+    '        out int RejectDetail);',
+    '',
+    '    [DllImport("winbio.dll")]',
+    '    public static extern int WinBioCloseSession(IntPtr SessionHandle);',
+    '',
+    '    [DllImport("winbio.dll")]',
+    '    public static extern void WinBioFree(IntPtr Address);',
+    '',
+    '    [DllImport("winbio.dll")]',
+    '    public static extern int WinBioCancel(IntPtr SessionHandle);',
+    '',
+    '    private static IntPtr _session = IntPtr.Zero;',
+    '    private static readonly object _lock = new object();',
+    '',
+    '    public static int CountUnits(int factor) {',
+    '        IntPtr arr; int count;',
+    '        int hr = WinBioEnumBiometricUnits(factor, out arr, out count);',
+    '        if (arr != IntPtr.Zero) WinBioFree(arr);',
+    '        return (hr == S_OK) ? count : 0;',
+    '    }',
+    '',
+    '    public static WINBIO_IDENTITY CurrentUser() {',
+    '        var id = new WINBIO_IDENTITY();',
+    '        id.Type = ID_TYPE_SID;',
+    '        var sid = WindowsIdentity.GetCurrent().User;',
+    '        byte[] b = new byte[sid.BinaryLength];',
+    '        sid.GetBinaryForm(b, 0);',
+    '        id.AccountSidSize = b.Length;',
+    '        id.AccountSid = new byte[68];',
+    '        Array.Copy(b, id.AccountSid, b.Length);',
+    '        return id;',
+    '    }',
+    '',
+    '    public static string Verify(int factor) {',
+    '        IntPtr session;',
+    '        int hr = WinBioOpenSession(factor, POOL_SYSTEM, FLAG_DEFAULT,',
+    '            IntPtr.Zero, 0, IntPtr.Zero, out session);',
+    '        if (hr != S_OK) return "ERROR:OpenSession:0x" + hr.ToString("X8");',
+    '',
+    '        lock (_lock) { _session = session; }',
+    '        try {',
+    '            var identity = CurrentUser();',
+    '            int maxRetries = 3;',
+    '            for (int attempt = 0; attempt < maxRetries; attempt++) {',
+    '                int unitId; bool match; int reject;',
+    '                hr = WinBioVerify(session, ref identity, SUBTYPE_ANY,',
+    '                    out unitId, out match, out reject);',
+    '                if (hr == S_OK && match) return "VERIFIED";',
+    '                if (hr == unchecked((int)0x80098004)) return "FAILED:Canceled";',
+    '                if (hr == unchecked((int)0x80098011)) return "FAILED:NotEnrolled";',
+    '                if (hr == unchecked((int)0x80098005)) {',
+    '                    if (attempt < maxRetries - 1) continue;',
+    '                    return "FAILED:NoMatch";',
+    '                }',
+    '                if (hr == unchecked((int)0x80098003)) {',
+    '                    if (attempt < maxRetries - 1) continue;',
+    '                    return "FAILED:BadCapture";',
+    '                }',
+    '                return "FAILED:0x" + hr.ToString("X8");',
+    '            }',
+    '            return "FAILED:MaxRetries";',
+    '        } finally {',
+    '            lock (_lock) { _session = IntPtr.Zero; }',
+    '            WinBioCloseSession(session);',
+    '        }',
+    '    }',
+    '',
+    '    public static void Cancel() {',
+    '        lock (_lock) {',
+    '            if (_session != IntPtr.Zero) WinBioCancel(_session);',
+    '        }',
+    '    }',
+    '}',
+    '',
+    'public class BioDaemon {',
+    '    private static ConcurrentQueue<string> _queue = new ConcurrentQueue<string>();',
+    '',
+    '    public static void Run() {',
+    '        var reader = new Thread(() => {',
+    '            try {',
+    '                string line;',
+    '                while ((line = Console.In.ReadLine()) != null)',
+    '                    _queue.Enqueue(line);',
+    '            } catch { }',
+    '        });',
+    '        reader.IsBackground = true;',
+    '        reader.Start();',
+    '',
+    '        Console.Out.WriteLine("READY");',
+    '        Console.Out.Flush();',
+    '',
+    '        while (true) {',
+    '            string line = WaitForCommand();',
+    '            if (line == null || line == "EXIT") break;',
+    '            string result = ProcessCommand(line);',
+    '            if (result != null) {',
+    '                Console.Out.WriteLine(result);',
+    '                Console.Out.Flush();',
+    '            }',
+    '        }',
+    '    }',
+    '',
+    '    private static string WaitForCommand() {',
+    '        string result;',
+    '        while (!_queue.TryDequeue(out result))',
+    '            Thread.Sleep(10);',
+    '        return result;',
+    '    }',
+    '',
+    '    private static string ProcessCommand(string line) {',
+    '        if (line == "CHECK") {',
+    '            try {',
+    '                int fp = WinBio.CountUnits(WinBio.FINGERPRINT);',
+    '                int face = WinBio.CountUnits(WinBio.FACIAL);',
+    '                return (fp > 0 || face > 0) ? "Available" : "DeviceNotPresent";',
+    '            } catch (Exception ex) {',
+    '                return "ERROR:" + ex.Message;',
+    '            }',
+    '        }',
+    '',
+    '        if (line.StartsWith("VERIFY:")) {',
+    '            try {',
+    '                int fp = WinBio.CountUnits(WinBio.FINGERPRINT);',
+    '                int face = WinBio.CountUnits(WinBio.FACIAL);',
+    '                int factor = fp > 0 ? WinBio.FINGERPRINT',
+    '                           : face > 0 ? WinBio.FACIAL : 0;',
+    '                if (factor == 0) return "FAILED:NoHardware";',
+    '',
+    '                var task = Task.Run(() => WinBio.Verify(factor));',
+    '                while (!task.IsCompleted) {',
+    '                    string cmd;',
+    '                    if (_queue.TryDequeue(out cmd)) {',
+    '                        if (cmd == "CANCEL") WinBio.Cancel();',
+    '                        else if (cmd == "EXIT") {',
+    '                            WinBio.Cancel();',
+    '                            return null;',
+    '                        }',
+    '                    }',
+    '                    Thread.Sleep(50);',
+    '                }',
+    '                return task.Result;',
+    '            } catch (Exception ex) {',
+    '                return "ERROR:" + ex.Message;',
+    '            }',
+    '        }',
+    '',
+    '        if (line == "CANCEL") {',
+    '            WinBio.Cancel();',
+    '            return null;',
+    '        }',
+    '',
+    '        return "ERROR:Unknown command";',
+    '    }',
     '}',
     '"@',
     '',
-    '# Cache the AsTask method once',
-    '$asTaskMethods = [System.WindowsRuntimeSystemExtensions].GetMethods() | Where-Object { $_.Name -eq "AsTask" -and $_.GetParameters().Count -eq 1 -and $_.GetParameters()[0].ParameterType.Name -eq "IAsyncOperation``1" }',
-    '$asTask = $asTaskMethods[0]',
-    '',
-    '# Signal ready',
-    'Write-Output "READY"',
-    '[Console]::Out.Flush()',
-    '',
-    '# Command loop',
-    'while ($true) {',
-    '  $line = [Console]::In.ReadLine()',
-    '  if ($line -eq $null -or $line -eq "EXIT") { break }',
-    '',
-    '  if ($line -eq "CHECK") {',
-    '    try {',
-    '      $op = [Windows.Security.Credentials.UI.UserConsentVerifier]::CheckAvailabilityAsync()',
-    '      $g = $asTask.MakeGenericMethod([Windows.Security.Credentials.UI.UserConsentVerifierAvailability])',
-    '      $t = $g.Invoke($null, @($op))',
-    '      $t.Wait()',
-    '      Write-Output $t.Result',
-    '    } catch {',
-    '      Write-Output "ERROR:$_"',
-    '    }',
-    '  }',
-    '  elseif ($line.StartsWith("VERIFY:")) {',
-    '    $reason = $line.Substring(7)',
-    '    try {',
-    '      $op = [Windows.Security.Credentials.UI.UserConsentVerifier]::RequestVerificationAsync($reason)',
-      '      # Retry bringing the dialog to front',
-      '      for ($i = 0; $i -lt 5; $i++) {',
-      '        Start-Sleep -Milliseconds 200',
-      '        foreach ($pname in @("CredentialUIBroker","consent","SecurityHealthSystray","UserAccountBroker","LogonUI","SystemSettings")) {',
-      '          $p = Get-Process -Name $pname -ErrorAction SilentlyContinue | Select-Object -First 1',
-      '          if ($p -and $p.MainWindowHandle -ne [IntPtr]::Zero) { [WinFocus]::ForceForeground($p.MainWindowHandle); break }',
-      '        }',
-      '      }',
-    '      $g = $asTask.MakeGenericMethod([Windows.Security.Credentials.UI.UserConsentVerificationResult])',
-    '      $t = $g.Invoke($null, @($op))',
-    '      $t.Wait()',
-    '      if ($t.Result -eq [Windows.Security.Credentials.UI.UserConsentVerificationResult]::Verified) {',
-    '        Write-Output "VERIFIED"',
-    '      } else {',
-    '        Write-Output "FAILED:$($t.Result)"',
-    '      }',
-    '    } catch {',
-    '      Write-Output "ERROR:$_"',
-    '    }',
-    '  }',
-    '  else {',
-    '    Write-Output "ERROR:Unknown command"',
-    '  }',
-    '  [Console]::Out.Flush()',
-    '}',
+    '[BioDaemon]::Run()',
   ].join('\n');
   fs.writeFileSync(scriptPath, script, 'utf-8');
   return scriptPath;
@@ -452,6 +577,9 @@ export async function verifyBiometric(): Promise<void> {
 /**
  * Trigger the OS biometric prompt (Windows Hello / Touch ID).
  * Throws if the user cancels or the prompt is unavailable.
+ *
+ * On Windows this uses the Windows Biometric Framework directly so that
+ * only fingerprint / face recognition is accepted — PIN is never offered.
  */
 export async function promptBiometric(reason: string): Promise<void> {
   // macOS: use Electron's built-in Touch ID prompt
@@ -464,21 +592,9 @@ export async function promptBiometric(reason: string): Promise<void> {
     }
   }
 
-  // Windows: invoke Windows Hello via UWP UserConsentVerifier
+  // Windows: invoke biometric-only verification via WinBio daemon
   if (process.platform === 'win32') {
-    const win = BrowserWindow.getFocusedWindow() || BrowserWindow.getAllWindows()[0];
-    const wasOnTop = win?.isAlwaysOnTop() ?? false;
-    if (win) {
-      win.setAlwaysOnTop(false);
-    }
-    try {
-      await promptWindowsHello(reason);
-    } finally {
-      if (win) {
-        if (wasOnTop) win.setAlwaysOnTop(true);
-        win.focus();
-      }
-    }
+    await promptWindowsHello(reason);
     return;
   }
 
@@ -486,17 +602,44 @@ export async function promptBiometric(reason: string): Promise<void> {
 }
 
 /**
- * Invoke Windows Hello fingerprint/face/PIN prompt via the persistent PowerShell daemon.
+ * Cancel a pending biometric verification (e.g. when the user clicks Cancel
+ * in the Electron UI). On Windows this sends CANCEL to the WinBio daemon
+ * which calls WinBioCancel on the active session.
+ */
+export async function cancelBiometric(): Promise<void> {
+  if (process.platform === 'win32' && helloProcess?.stdin) {
+    helloProcess.stdin.write('CANCEL\n');
+  }
+}
+
+/**
+ * Invoke biometric verification (fingerprint / face only) via the persistent
+ * PowerShell WinBio daemon.  PIN is never offered as a fallback.
  */
 async function promptWindowsHello(reason: string): Promise<void> {
   const safeReason = reason.replace(/'/g, "''").replace(/\n/g, ' ');
   const output = await windowsHelloCommand(`VERIFY:${safeReason}`);
-  console.log('[biometric] Windows Hello result:', output);
+  console.log('[biometric] WinBio result:', output);
   if (output === 'VERIFIED') return;
-  if (output.startsWith('ERROR:')) {
-    throw new Error(`Windows Hello error: ${output.slice(6)}`);
+  if (output === 'FAILED:Canceled') {
+    throw new Error('Biometric authentication was cancelled');
   }
-  throw new Error('Windows Hello verification was not approved');
+  if (output === 'FAILED:NotEnrolled') {
+    throw new Error('No biometric data enrolled. Please set up fingerprint or face recognition in Windows Settings > Accounts > Sign-in options, then try again.');
+  }
+  if (output === 'FAILED:NoMatch') {
+    throw new Error('Biometric did not match. Please try again.');
+  }
+  if (output === 'FAILED:BadCapture') {
+    throw new Error('Could not read biometric. Please try again.');
+  }
+  if (output === 'FAILED:NoHardware') {
+    throw new Error('No biometric hardware detected on this device.');
+  }
+  if (output.startsWith('ERROR:')) {
+    throw new Error(`Biometric error: ${output.slice(6)}`);
+  }
+  throw new Error('Biometric verification was not approved');
 }
 
 function lengthPrefix(buf: Buffer): Buffer {
