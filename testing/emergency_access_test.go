@@ -101,8 +101,12 @@ func TestEmergencyAccess_InitiateRecovery(t *testing.T) {
 		AccessType:   "view",
 		WaitTimeDays: 3,
 	})
-	eaRepo.SetGranteeID(context.Background(), ea.ID, granteeID)
-	eaRepo.UpdateStatus(context.Background(), ea.ID, "accepted")
+	if err := eaRepo.SetGranteeID(context.Background(), ea.ID, granteeID); err != nil {
+		t.Fatalf("SetGranteeID failed: %v", err)
+	}
+	if err := eaRepo.UpdateStatus(context.Background(), ea.ID, "accepted"); err != nil {
+		t.Fatalf("UpdateStatus failed: %v", err)
+	}
 
 	// Initiate recovery
 	err := eaRepo.InitiateRecovery(context.Background(), ea.ID)

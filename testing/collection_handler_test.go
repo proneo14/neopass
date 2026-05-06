@@ -98,7 +98,9 @@ func TestAddMember(t *testing.T) {
 	collRepo, _, _, adminID, orgID := setupCollectionTest(t)
 
 	coll, _ := collRepo.CreateCollection(context.Background(), db.Collection{OrgID: orgID})
-	collRepo.AddCollectionMember(context.Background(), coll.ID, adminID, []byte("key"), "manage")
+	if err := collRepo.AddCollectionMember(context.Background(), coll.ID, adminID, []byte("key"), "manage"); err != nil {
+		t.Fatalf("AddCollectionMember (admin) failed: %v", err)
+	}
 
 	// Add a read-only member
 	memberID := "member-user-1"
@@ -129,10 +131,14 @@ func TestCollectionPermission_ReadOnly(t *testing.T) {
 	collRepo, _, _, adminID, orgID := setupCollectionTest(t)
 
 	coll, _ := collRepo.CreateCollection(context.Background(), db.Collection{OrgID: orgID})
-	collRepo.AddCollectionMember(context.Background(), coll.ID, adminID, []byte("key"), "manage")
+	if err := collRepo.AddCollectionMember(context.Background(), coll.ID, adminID, []byte("key"), "manage"); err != nil {
+		t.Fatalf("AddCollectionMember (admin) failed: %v", err)
+	}
 
 	readMember := "reader-1"
-	collRepo.AddCollectionMember(context.Background(), coll.ID, readMember, []byte("rkey"), "read")
+	if err := collRepo.AddCollectionMember(context.Background(), coll.ID, readMember, []byte("rkey"), "read"); err != nil {
+		t.Fatalf("AddCollectionMember (read) failed: %v", err)
+	}
 
 	// Verify read member cannot have write permission
 	members, _ := collRepo.GetCollectionMembers(context.Background(), coll.ID)
@@ -159,7 +165,9 @@ func TestCollectionPermission_Write(t *testing.T) {
 	coll, _ := collRepo.CreateCollection(context.Background(), db.Collection{OrgID: orgID})
 
 	writeUser := "writer-1"
-	collRepo.AddCollectionMember(context.Background(), coll.ID, writeUser, []byte("wkey"), "write")
+	if err := collRepo.AddCollectionMember(context.Background(), coll.ID, writeUser, []byte("wkey"), "write"); err != nil {
+		t.Fatalf("AddCollectionMember (write) failed: %v", err)
+	}
 
 	// Writer can add entries
 	err := collRepo.AddEntryToCollection(context.Background(), coll.ID, "entry-1", "login", []byte("encdata"), []byte("nonce"))
@@ -180,7 +188,9 @@ func TestCollectionPermission_Manage(t *testing.T) {
 	collRepo, _, _, adminID, orgID := setupCollectionTest(t)
 
 	coll, _ := collRepo.CreateCollection(context.Background(), db.Collection{OrgID: orgID})
-	collRepo.AddCollectionMember(context.Background(), coll.ID, adminID, []byte("key"), "manage")
+	if err := collRepo.AddCollectionMember(context.Background(), coll.ID, adminID, []byte("key"), "manage"); err != nil {
+		t.Fatalf("AddCollectionMember (admin) failed: %v", err)
+	}
 
 	// Manager can add/remove members
 	newUser := "user-2"
@@ -206,8 +216,12 @@ func TestDeleteCollection(t *testing.T) {
 	collRepo, _, _, adminID, orgID := setupCollectionTest(t)
 
 	coll, _ := collRepo.CreateCollection(context.Background(), db.Collection{OrgID: orgID})
-	collRepo.AddCollectionMember(context.Background(), coll.ID, adminID, []byte("key"), "manage")
-	collRepo.AddEntryToCollection(context.Background(), coll.ID, "entry-1", "login", []byte("data"), []byte("nonce"))
+	if err := collRepo.AddCollectionMember(context.Background(), coll.ID, adminID, []byte("key"), "manage"); err != nil {
+		t.Fatalf("AddCollectionMember failed: %v", err)
+	}
+	if err := collRepo.AddEntryToCollection(context.Background(), coll.ID, "entry-1", "login", []byte("data"), []byte("nonce")); err != nil {
+		t.Fatalf("AddEntryToCollection failed: %v", err)
+	}
 
 	// Delete
 	err := collRepo.DeleteCollection(context.Background(), coll.ID)
@@ -289,7 +303,9 @@ func setupCollectionRouter(t *testing.T) (chi.Router, string, string, *MockColle
 	regRouter.ServeHTTP(regW, regReq)
 
 	var regResp auth.RegisterResponse
-	json.NewDecoder(regW.Body).Decode(&regResp)
+	if err := json.NewDecoder(regW.Body).Decode(&regResp); err != nil {
+		t.Fatalf("decode register response: %v", err)
+	}
 
 	return r, regResp.AccessToken, regResp.UserID, collRepo, orgRepo
 }
@@ -303,7 +319,9 @@ func TestListUserCollections_Empty(t *testing.T) {
 	}
 
 	var colls []map[string]interface{}
-	json.NewDecoder(w.Body).Decode(&colls)
+	if err := json.NewDecoder(w.Body).Decode(&colls); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
 	if len(colls) != 0 {
 		t.Errorf("expected 0 collections, got %d", len(colls))
 	}
@@ -314,10 +332,14 @@ func TestListUserCollections_WithMembership(t *testing.T) {
 
 	// Create org and collection, add user as member
 	org, _ := orgRepo.CreateOrg(context.Background(), "Org", []byte("pub"), []byte("priv"))
-	orgRepo.AddMember(context.Background(), org.ID, userID, "admin", nil)
+	if err := orgRepo.AddMember(context.Background(), org.ID, userID, "admin", nil); err != nil {
+		t.Fatalf("AddMember failed: %v", err)
+	}
 
 	coll, _ := collRepo.CreateCollection(context.Background(), db.Collection{OrgID: org.ID, NameEncrypted: []byte("name"), NameNonce: []byte("nonce")})
-	collRepo.AddCollectionMember(context.Background(), coll.ID, userID, []byte("enckey"), "manage")
+	if err := collRepo.AddCollectionMember(context.Background(), coll.ID, userID, []byte("enckey"), "manage"); err != nil {
+		t.Fatalf("AddCollectionMember failed: %v", err)
+	}
 
 	w := makeAuthRequest(router, http.MethodGet, "/collections", token, nil)
 	if w.Code != http.StatusOK {
@@ -325,7 +347,9 @@ func TestListUserCollections_WithMembership(t *testing.T) {
 	}
 
 	var colls []map[string]interface{}
-	json.NewDecoder(w.Body).Decode(&colls)
+	if err := json.NewDecoder(w.Body).Decode(&colls); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
 	if len(colls) != 1 {
 		t.Errorf("expected 1 collection, got %d", len(colls))
 	}
