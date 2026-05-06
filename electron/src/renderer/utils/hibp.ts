@@ -87,3 +87,41 @@ export async function checkBreaches(
 
   return results;
 }
+
+export interface EmailBreachResult {
+  name: string;
+  domain: string;
+  breachDate: string;
+  dataClasses: string[];
+}
+
+/**
+ * Check if an email address has appeared in known data breaches.
+ * Requires a HIBP API key (paid subscription) for the breachedaccount endpoint.
+ */
+export async function checkEmailBreach(
+  email: string,
+  apiKey: string,
+): Promise<EmailBreachResult[]> {
+  const encoded = encodeURIComponent(email);
+  const resp = await fetch(
+    `https://haveibeenpwned.com/api/v3/breachedaccount/${encoded}?truncateResponse=false`,
+    {
+      headers: {
+        'hibp-api-key': apiKey,
+        'user-agent': 'LGI-Pass-PasswordManager',
+      },
+    },
+  );
+
+  if (resp.status === 404) return []; // no breaches found
+  if (!resp.ok) throw new Error(`HIBP email breach check failed: ${resp.status}`);
+
+  const data = await resp.json();
+  return (data as any[]).map((b) => ({
+    name: b.Name,
+    domain: b.Domain,
+    breachDate: b.BreachDate,
+    dataClasses: b.DataClasses ?? [],
+  }));
+}

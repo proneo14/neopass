@@ -113,6 +113,8 @@ export function Sidebar() {
           </NavLink>
         ))}
 
+        <FoldersSidebarSection />
+
         {orgId && <CollectionsSidebarSection />}
 
         {role === 'admin' && orgId && (
@@ -179,6 +181,57 @@ export function Sidebar() {
         </div>
       </div>
     </aside>
+  );
+}
+
+// Folders sidebar section — collapsible folder tree
+function FoldersSidebarSection() {
+  const { token } = useAuthStore();
+  const [folders, setFolders] = useState<{ id: string; name: string }[]>([]);
+  const [collapsed, setCollapsed] = useState(false);
+
+  useEffect(() => {
+    if (!token) return;
+    let cancelled = false;
+    const load = async () => {
+      try {
+        const result = await window.api.vault.listFolders(token) as Array<{ id: string; name: string }> | { error: string };
+        if (cancelled || 'error' in result) return;
+        setFolders(result);
+      } catch { /* ignore */ }
+    };
+    load();
+    return () => { cancelled = true; };
+  }, [token]);
+
+  if (folders.length === 0) return null;
+
+  return (
+    <>
+      <button
+        onClick={() => setCollapsed(!collapsed)}
+        className="mx-3 mt-4 mb-2 flex items-center gap-1 text-[10px] font-semibold text-surface-500 uppercase tracking-widest hover:text-surface-300 transition-colors"
+      >
+        <span className={`transition-transform ${collapsed ? '-rotate-90' : ''}`}>▾</span>
+        <span>Folders</span>
+      </button>
+      {!collapsed && folders.map((folder) => (
+        <NavLink
+          key={folder.id}
+          to={`/vault?folder=${folder.id}`}
+          className={({ isActive }) =>
+            `w-full flex items-center gap-3 px-3 py-2 rounded-md text-sm transition-colors ${
+              isActive
+                ? 'bg-accent-600/20 text-accent-400'
+                : 'text-surface-300 hover:bg-surface-800 hover:text-surface-100'
+            }`
+          }
+        >
+          <span>📂</span>
+          <span className="truncate">{folder.name}</span>
+        </NavLink>
+      ))}
+    </>
   );
 }
 

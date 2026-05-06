@@ -41,7 +41,7 @@ export function SSHKeys() {
   };
 
   const handleCreate = async (fields: Record<string, string>) => {
-    if (!token || !masterKeyHex) return;
+    if (!token || !masterKeyHex) throw new Error('Not authenticated');
     const plaintextObj: Record<string, unknown> = {};
     for (const [k, v] of Object.entries(fields)) {
       if (k === '_reprompt') plaintextObj.reprompt = v === '1' ? 1 : 0;
@@ -49,7 +49,7 @@ export function SSHKeys() {
     }
     const plaintext = JSON.stringify(plaintextObj);
     const encResult = await window.api.vault.encrypt(masterKeyHex, plaintext) as { encrypted_data: string; nonce: string; error?: string };
-    if (encResult.error) return;
+    if (encResult.error) throw new Error(encResult.error);
 
     const createResult = await window.api.vault.create(token, {
       entry_type: 'ssh_key',
@@ -57,7 +57,7 @@ export function SSHKeys() {
       nonce: encResult.nonce,
     }) as { id: string; entry_type: string; encrypted_data: string; nonce: string; version: number; folder_id: string | null; created_at: string; updated_at: string; error?: string };
 
-    if (createResult.error) return;
+    if (createResult.error) throw new Error(createResult.error);
 
     addEntry(
       {
@@ -128,7 +128,7 @@ export function SSHKeys() {
               <button
                 key={entry.id}
                 onClick={() => navigate(`/vault/${entry.id}`)}
-                className="w-full flex items-center gap-3 px-4 py-3 rounded-md bg-surface-800 hover:bg-surface-700 transition-colors text-left"
+                className="w-full flex items-center gap-3 px-4 py-3 rounded-md hover:bg-surface-700 transition-colors text-left"
               >
                 <span className="text-xl shrink-0">🗝️</span>
                 <div className="flex-1 min-w-0">
@@ -166,26 +166,24 @@ export function SSHKeys() {
 
 function NewSSHKeyModal({ onCancel, onSave }: {
   onCancel: () => void;
-  onSave: (fields: Record<string, string>) => void;
+  onSave: (fields: Record<string, string>) => Promise<void>;
 }) {
   const [name, setName] = useState('');
   const [publicKey, setPublicKey] = useState('');
   const [privateKey, setPrivateKey] = useState('');
   const [passphrase, setPassphrase] = useState('');
   const [notes, setNotes] = useState('');
-  const [generating, setGenerating] = useState(false);
   const [keyType, setKeyType] = useState('ed25519');
+  const [generating, setGenerating] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
 
   const fingerprint = useMemo(() => {
-    // Simple fingerprint derivation from public key (display only)
     if (!publicKey.trim()) return '';
     try {
-      // Extract base64 portion of the public key
       const parts = publicKey.trim().split(/\s+/);
       if (parts.length >= 2) {
-        // Hash the base64 key data for a fingerprint-like display
         const keyData = parts[1];
-        // Use a simple hash display — real fingerprint would use SHA-256 of raw key bytes
         return `SHA256:${keyData.slice(0, 43)}`;
       }
     } catch { /* ignore */ }
@@ -194,8 +192,8 @@ function NewSSHKeyModal({ onCancel, onSave }: {
 
   const handleGenerate = async () => {
     setGenerating(true);
+    setError('');
     try {
-      // Generate Ed25519 key pair using Node.js crypto via IPC
       const result = await window.api.ssh.generateKeyPair(keyType) as {
         publicKey?: string;
         privateKey?: string;
@@ -203,30 +201,38 @@ function NewSSHKeyModal({ onCancel, onSave }: {
         error?: string;
       };
       if (result.error) {
-        console.error('Key generation failed:', result.error);
+        setError(result.error);
       } else {
         if (result.publicKey) setPublicKey(result.publicKey);
         if (result.privateKey) setPrivateKey(result.privateKey);
       }
     } catch {
-      console.error('Key generation failed');
+      setError('Key generation failed');
     } finally {
       setGenerating(false);
     }
   };
 
-  const handleSave = () => {
-    const fields: Record<string, string> = {
-      name: name.trim() || 'Unnamed SSH Key',
-      publicKey,
-      privateKey,
-      fingerprint: fingerprint,
-      keyType,
-      passphrase,
-      notes,
-      _reprompt: '0',
-    };
-    onSave(fields);
+  const handleSave = async () => {
+    setError('');
+    setSaving(true);
+    try {
+      const fields: Record<string, string> = {
+        name: name.trim() || 'Unnamed SSH Key',
+        publicKey,
+        privateKey,
+        fingerprint: fingerprint,
+        keyType,
+        passphrase,
+        notes,
+        _reprompt: '0',
+      };
+      await onSave(fields);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to save');
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
@@ -318,6 +324,12 @@ function NewSSHKeyModal({ onCancel, onSave }: {
               <span className="text-xs text-surface-300 font-mono">{fingerprint}</span>
             </div>
           )}
+
+          {error && (
+            <div className="text-sm text-red-400 bg-red-400/10 px-3 py-2 rounded-md">
+              {error}
+            </div>
+          )}
         </div>
 
         <div className="flex gap-3 mt-6">
@@ -326,10 +338,10 @@ function NewSSHKeyModal({ onCancel, onSave }: {
           </button>
           <button
             onClick={handleSave}
-            disabled={!name.trim() && !publicKey.trim() && !privateKey.trim()}
+            disabled={saving || !name.trim() || (!publicKey.trim() && !privateKey.trim())}
             className="flex-1 py-2 rounded-md bg-accent-600 hover:bg-accent-500 disabled:opacity-50 text-white text-sm font-medium transition-colors"
           >
-            Save
+            {saving ? 'Saving…' : 'Save'}
           </button>
         </div>
       </div>

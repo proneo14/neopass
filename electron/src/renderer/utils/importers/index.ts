@@ -5,6 +5,7 @@ export { parseLastPassCSV } from './lastpass';
 export { parseChromeCSV } from './chrome';
 export { parseFirefoxCSV } from './firefox';
 export { parseKeePassXML } from './keepass';
+export { parseDashlaneCSV } from './dashlane';
 
 import { parseBitwardenCSV, parseBitwardenJSON } from './bitwarden';
 import { parse1PasswordCSV } from './onepassword';
@@ -12,6 +13,7 @@ import { parseLastPassCSV } from './lastpass';
 import { parseChromeCSV } from './chrome';
 import { parseFirefoxCSV } from './firefox';
 import { parseKeePassXML } from './keepass';
+import { parseDashlaneCSV } from './dashlane';
 import type { ImportResult } from './types';
 
 export interface ImportSource {
@@ -29,6 +31,7 @@ export const IMPORT_SOURCES: ImportSource[] = [
   { id: 'chrome', name: 'Chrome / Edge', icon: '🌐', formats: 'CSV export', accept: '.csv' },
   { id: 'firefox', name: 'Firefox', icon: '🦊', formats: 'CSV export', accept: '.csv' },
   { id: 'keepass', name: 'KeePass', icon: '🗝️', formats: 'XML export (KDBX)', accept: '.xml' },
+  { id: 'dashlane', name: 'Dashlane', icon: '🛡️', formats: 'CSV export', accept: '.csv' },
 ];
 
 /**
@@ -49,6 +52,8 @@ export function parseImportFile(sourceId: string, fileContent: string, fileName:
       return parseFirefoxCSV(fileContent);
     case 'keepass':
       return parseKeePassXML(fileContent);
+    case 'dashlane':
+      return parseDashlaneCSV(fileContent);
     default:
       return { entries: [], errors: [`Unknown source: ${sourceId}`] };
   }

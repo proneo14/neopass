@@ -21,6 +21,7 @@ export interface HealthReport {
   oldPasswords: PasswordHealthEntry[]; // not changed in > 90 days
   insecureURIs: PasswordHealthEntry[]; // http:// URIs
   breachedPasswords: PasswordHealthEntry[]; // populated after HIBP check
+  missingTotp: PasswordHealthEntry[]; // login entries on 2FA-supporting sites without TOTP
   overallScore: number; // 0-100
 }
 
@@ -114,6 +115,45 @@ export function findInsecureURIs(entries: PasswordHealthEntry[]): PasswordHealth
   });
 }
 
+// Popular sites that support 2FA/TOTP
+const TOTP_SUPPORTED_DOMAINS = new Set([
+  'google.com', 'github.com', 'gitlab.com', 'bitbucket.org',
+  'amazon.com', 'aws.amazon.com', 'facebook.com', 'twitter.com', 'x.com',
+  'microsoft.com', 'live.com', 'outlook.com', 'apple.com',
+  'dropbox.com', 'slack.com', 'discord.com', 'reddit.com',
+  'linkedin.com', 'instagram.com', 'twitch.tv', 'paypal.com',
+  'stripe.com', 'digitalocean.com', 'cloudflare.com', 'heroku.com',
+  'npmjs.com', 'pypi.org', 'docker.com', 'hub.docker.com',
+  'coinbase.com', 'binance.com', 'kraken.com',
+  'proton.me', 'protonmail.com', 'tutanota.com',
+  'namecheap.com', 'godaddy.com', 'hover.com',
+  'wordpress.com', 'tumblr.com', 'evernote.com',
+]);
+
+/**
+ * Find login entries whose URI matches a known 2FA-supporting site
+ * but do not have TOTP configured.
+ * @param entries - password health entries (login type only)
+ * @param entryIdsWithTotp - set of entry IDs that already have TOTP secrets
+ */
+export function findMissingTOTP(
+  entries: PasswordHealthEntry[],
+  entryIdsWithTotp: Set<string>,
+): PasswordHealthEntry[] {
+  return entries.filter((e) => {
+    if (entryIdsWithTotp.has(e.entryId)) return false;
+    if (!e.uri) return false;
+    try {
+      const hostname = new URL(e.uri).hostname.replace(/^www\./, '');
+      // Check exact match or parent domain
+      return TOTP_SUPPORTED_DOMAINS.has(hostname) ||
+        Array.from(TOTP_SUPPORTED_DOMAINS).some((d) => hostname.endsWith('.' + d));
+    } catch {
+      return false;
+    }
+  });
+}
+
 export function calculateOverallScore(report: Omit<HealthReport, 'overallScore'>): number {
   if (report.totalLogins === 0) return 100;
 
@@ -136,11 +176,12 @@ export function calculateOverallScore(report: Omit<HealthReport, 'overallScore'>
   return Math.max(0, Math.round(score));
 }
 
-export function analyzeVault(entries: PasswordHealthEntry[]): Omit<HealthReport, 'breachedPasswords'> {
+export function analyzeVault(entries: PasswordHealthEntry[], entryIdsWithTotp: Set<string> = new Set()): Omit<HealthReport, 'breachedPasswords'> {
   const weakPasswords = findWeakPasswords(entries);
   const reusedGroups = findReusedPasswords(entries);
   const oldPasswords = findOldPasswords(entries);
   const insecureURIs = findInsecureURIs(entries);
+  const missingTotp = findMissingTOTP(entries, entryIdsWithTotp);
 
   const partial = {
     totalLogins: entries.length,
@@ -148,6 +189,7 @@ export function analyzeVault(entries: PasswordHealthEntry[]): Omit<HealthReport,
     reusedGroups,
     oldPasswords,
     insecureURIs,
+    missingTotp,
   };
 
   return {

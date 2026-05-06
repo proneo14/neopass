@@ -96,6 +96,7 @@ var validEntryTypes = map[string]bool{
 	"secure_note": true,
 	"credit_card": true,
 	"identity":    true,
+	"ssh_key":     true,
 }
 
 // CreateEntry stores a new encrypted vault entry.

@@ -111,7 +111,7 @@ function EntryRow({
   );
 }
 
-type SectionKey = 'breached' | 'weak' | 'reused' | 'old' | 'insecure';
+type SectionKey = 'breached' | 'weak' | 'reused' | 'old' | 'insecure' | 'missingTotp';
 
 export function HealthReport() {
   const navigate = useNavigate();
@@ -222,6 +222,7 @@ export function HealthReport() {
         oldPasswords: [],
         insecureURIs: [],
         breachedPasswords: [],
+        missingTotp: [],
         overallScore: 100,
       });
       return;
@@ -361,6 +362,13 @@ export function HealthReport() {
           severity={report.insecureURIs.length > 0 ? 'warning' : 'success'}
           onClick={() => toggleSection('insecure')}
         />
+        <StatCard
+          icon="🔐"
+          label="Missing 2FA / TOTP"
+          count={report.missingTotp.length}
+          severity={report.missingTotp.length > 0 ? 'info' : 'success'}
+          onClick={() => toggleSection('missingTotp')}
+        />
       </div>
 
       {/* Breach Check Banner */}
@@ -451,6 +459,14 @@ export function HealthReport() {
         </Section>
       )}
 
+      {expandedSection === 'missingTotp' && report.missingTotp.length > 0 && (
+        <Section title="Missing TOTP" subtitle="These entries are on sites that support two-factor authentication but don't have TOTP configured.">
+          {report.missingTotp.map((e) => (
+            <EntryRow key={e.entryId} entry={e} badge="No 2FA" badgeColor="bg-blue-500/20 text-blue-400" onClick={() => navigate(`/vault/${e.entryId}`, { state: { edit: true } })} />
+          ))}
+        </Section>
+      )}
+
       {expandedSection && (() => {
         const sectionData: Record<SectionKey, unknown[]> = {
           breached: report.breachedPasswords,
@@ -458,6 +474,7 @@ export function HealthReport() {
           reused: report.reusedGroups,
           old: report.oldPasswords,
           insecure: report.insecureURIs,
+          missingTotp: report.missingTotp,
         };
         return sectionData[expandedSection].length === 0 ? (
           <div className="text-center py-8 text-surface-500 text-sm">

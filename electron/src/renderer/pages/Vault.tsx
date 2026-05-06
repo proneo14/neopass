@@ -311,6 +311,7 @@ export function Vault() {
   const location = useLocation();
   const { collId } = useParams<{ collId?: string }>();
   const { entries, entryFields, addEntry, removeEntry, searchQuery, setSearchQuery, sortBy, setSortBy, selectedTypeFilter, setSelectedTypeFilter, updateEntry, isRepromptApproved, approveReprompt, selectedTags, toggleTag, setSelectedTags, favoritesFirst, setFavoritesFirst, lastUsedAt, trackLastUsed } = useVaultStore();
+  const healthFlags = useVaultStore((s) => s.healthFlags);
   const { token, masterKeyHex } = useAuthStore();
 
   // Derive filter and collection from URL path
@@ -330,6 +331,7 @@ export function Vault() {
   const [showRepromptDialog, setShowRepromptDialog] = useState(false);
   const [pendingRepromptAction, setPendingRepromptAction] = useState<(() => void) | null>(null);
   const [pendingRepromptEntryId, setPendingRepromptEntryId] = useState<string | null>(null);
+  const collectionEntryIdsRef = useRef<Set<string>>(new Set());
 
   // Listen for global Ctrl+N event from Layout
   useEffect(() => {
@@ -372,8 +374,7 @@ export function Vault() {
     let cancelled = false;
     setLoading(true);
 
-    // Clear entries immediately when switching views to prevent stale data flash
-    useVaultStore.getState().setEntries([]);
+    // Note: we no longer clear entries here to avoid wiping SSH keys from the store
 
     // Check for pending vault import from org leave
     window.api.vault.importExport(token).then((res) => {
@@ -458,8 +459,18 @@ export function Vault() {
           }
 
           if (!cancelled) {
-            useVaultStore.getState().setEntries(loadedEntries);
-            for (const [id, f] of Object.entries(loadedFields)) {
+            // Preserve SSH keys (and their fields) when switching to a collection view
+            const existing = useVaultStore.getState();
+            const sshKeys = existing.entries.filter(e => e.entry_type === 'ssh_key');
+            const sshFields: Record<string, Record<string, string>> = {};
+            for (const k of sshKeys) {
+              if (existing.entryFields[k.id]) sshFields[k.id] = existing.entryFields[k.id];
+            }
+            const collIds = new Set(loadedEntries.map(e => e.id));
+            collectionEntryIdsRef.current = collIds;
+            const merged = [...loadedEntries, ...sshKeys.filter(k => !collIds.has(k.id))];
+            useVaultStore.getState().setEntries(merged);
+            for (const [id, f] of Object.entries({ ...sshFields, ...loadedFields })) {
               useVaultStore.getState().updateEntryFields(id, f);
             }
             setLoading(false);
@@ -468,6 +479,7 @@ export function Vault() {
         }
 
         // Build query params based on active filter
+        collectionEntryIdsRef.current = new Set(); // Not in a collection view
         let filterParam: string | undefined;
         if (activeFilter === 'favorites') filterParam = 'favorite=true';
         else if (activeFilter === 'archived') filterParam = 'filter=archived';
@@ -570,7 +582,10 @@ export function Vault() {
   }, [entryFields]);
 
   const filtered = useMemo(() => {
-    let result = entries;
+    // Exclude SSH keys from the vault list unless they belong to the current collection
+    let result = selectedCollectionId
+      ? entries.filter((e) => e.entry_type !== 'ssh_key' || collectionEntryIdsRef.current.has(e.id))
+      : entries.filter((e) => e.entry_type !== 'ssh_key');
 
     if (selectedTypeFilter) {
       result = result.filter((e) => e.entry_type === selectedTypeFilter);
@@ -617,7 +632,7 @@ export function Vault() {
     });
 
     return result;
-  }, [entries, entryFields, searchQuery, sortBy, selectedTypeFilter, selectedTags, favoritesFirst, lastUsedAt]);
+  }, [entries, entryFields, searchQuery, sortBy, selectedTypeFilter, selectedTags, favoritesFirst, lastUsedAt, selectedCollectionId]);
 
   const handleContextMenu = (e: React.MouseEvent, entryId: string) => {
     e.preventDefault();
@@ -942,6 +957,9 @@ export function Vault() {
                     {f?._reprompt === '1' && <span className="text-surface-500 text-[11px]" title="Master password re-prompt enabled">🔒</span>}
                     {selectedCollectionId && <span className="text-surface-500 text-[11px]" title="Shared collection entry">🔗</span>}
                     {entry.is_favorite && <svg className="w-3.5 h-3.5 text-amber-400" viewBox="0 0 20 20" fill="currentColor"><path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.286 3.957a1 1 0 00.95.69h4.162c.969 0 1.371 1.24.588 1.81l-3.37 2.448a1 1 0 00-.364 1.118l1.287 3.957c.3.921-.755 1.688-1.54 1.118l-3.37-2.448a1 1 0 00-1.176 0l-3.37 2.448c-.784.57-1.838-.197-1.539-1.118l1.287-3.957a1 1 0 00-.364-1.118L2.065 9.384c-.783-.57-.38-1.81.588-1.81h4.162a1 1 0 00.95-.69l1.284-3.957z" /></svg>}
+                    {healthFlags[entry.id]?.breached && <span className="text-[10px]" title="Exposed in data breach">🔴</span>}
+                    {healthFlags[entry.id]?.weak && <span className="text-[10px]" title="Weak password">🟠</span>}
+                    {healthFlags[entry.id]?.reused && <span className="text-[10px]" title="Reused password">🟡</span>}
                     <span className="text-xs text-surface-600 group-hover:text-surface-400 transition-colors">
                       {formatDate(entry.updated_at)}
                     </span>

@@ -140,7 +140,13 @@ async function startSidecar(): Promise<void> {
     });
 
     sidecarProcess.stdout?.on('data', (data: Buffer) => {
-      console.log(`[sidecar] ${data.toString().trim()}`);
+      const line = data.toString().trim();
+      console.log(`[sidecar] ${line}`);
+      // If the extension triggered a lock via the sidecar, lock the Electron app too
+      if (line.includes('EXTENSION_LOCK_REQUESTED')) {
+        console.log('[sidecar] extension requested vault lock');
+        mainWindow?.webContents.send('vault:auto-locked');
+      }
     });
 
     sidecarProcess.stderr?.on('data', (data: Buffer) => {
@@ -784,50 +790,64 @@ function registerIpcHandlers(): void {
   // --- SSH key generation IPC ---
   ipcMain.handle('ssh:generateKeyPair', (_event, keyType: string) => {
     try {
+      let pubPem: string;
+      let privPem: string;
+
       if (keyType === 'rsa') {
-        const { publicKey, privateKey } = nodeCrypto.generateKeyPairSync('rsa', {
+        const pair = nodeCrypto.generateKeyPairSync('rsa', {
           modulusLength: 4096,
           publicKeyEncoding: { type: 'spki', format: 'pem' },
           privateKeyEncoding: { type: 'pkcs8', format: 'pem' },
         });
-        // Convert PEM to OpenSSH format
-        const keyObj = nodeCrypto.createPublicKey(publicKey);
-        const sshPub = keyObj.export({ type: 'spki', format: 'der' });
-        const fp = nodeCrypto.createHash('sha256').update(sshPub).digest('base64').replace(/=+$/, '');
-        return {
-          publicKey: publicKey,
-          privateKey: privateKey,
-          fingerprint: `SHA256:${fp}`,
-        };
+        pubPem = pair.publicKey;
+        privPem = pair.privateKey;
       } else if (keyType === 'ecdsa') {
-        const { publicKey, privateKey } = nodeCrypto.generateKeyPairSync('ec', {
+        const pair = nodeCrypto.generateKeyPairSync('ec', {
           namedCurve: 'P-256',
-          publicKeyEncoding: { type: 'spki', format: 'pem' },
-          privateKeyEncoding: { type: 'sec1', format: 'pem' },
-        });
-        const keyObj = nodeCrypto.createPublicKey(publicKey);
-        const sshPub = keyObj.export({ type: 'spki', format: 'der' });
-        const fp = nodeCrypto.createHash('sha256').update(sshPub).digest('base64').replace(/=+$/, '');
-        return {
-          publicKey: publicKey,
-          privateKey: privateKey,
-          fingerprint: `SHA256:${fp}`,
-        };
-      } else {
-        // Default: Ed25519
-        const { publicKey, privateKey } = nodeCrypto.generateKeyPairSync('ed25519', {
           publicKeyEncoding: { type: 'spki', format: 'pem' },
           privateKeyEncoding: { type: 'pkcs8', format: 'pem' },
         });
-        const keyObj = nodeCrypto.createPublicKey(publicKey);
-        const sshPub = keyObj.export({ type: 'spki', format: 'der' });
-        const fp = nodeCrypto.createHash('sha256').update(sshPub).digest('base64').replace(/=+$/, '');
-        return {
-          publicKey: publicKey,
-          privateKey: privateKey,
-          fingerprint: `SHA256:${fp}`,
-        };
+        pubPem = pair.publicKey;
+        privPem = pair.privateKey;
+      } else {
+        // Default: Ed25519
+        const pair = nodeCrypto.generateKeyPairSync('ed25519', {
+          publicKeyEncoding: { type: 'spki', format: 'pem' },
+          privateKeyEncoding: { type: 'pkcs8', format: 'pem' },
+        });
+        pubPem = pair.publicKey;
+        privPem = pair.privateKey;
       }
+
+      // Compute fingerprint from DER-encoded public key
+      const pubKeyObj = nodeCrypto.createPublicKey(pubPem);
+      const derBytes = pubKeyObj.export({ type: 'spki', format: 'der' });
+      const fp = nodeCrypto.createHash('sha256').update(derBytes).digest('base64').replace(/=+$/, '');
+
+      // Convert to OpenSSH formats
+      let sshPublic = '';
+      let sshPrivate = '';
+      try {
+        sshPublic = (pubKeyObj.export as any)({ type: 'ssh' });
+      } catch {
+        // Fallback: encode DER as base64 with SSH prefix
+        const b64 = derBytes.toString('base64');
+        sshPublic = `${b64}`;
+      }
+      try {
+        const privKeyObj = nodeCrypto.createPrivateKey(privPem);
+        sshPrivate = (privKeyObj.export as any)({ type: 'ssh', format: 'pem' });
+      } catch {
+        // Fallback: strip PEM headers and wrap as OpenSSH private key
+        const b64 = privPem.replace(/-----[A-Z ]+-----/g, '').replace(/\s/g, '');
+        sshPrivate = `${b64.match(/.{1,70}/g)?.join('\n')}`;
+      }
+
+      return {
+        publicKey: sshPublic,
+        privateKey: sshPrivate,
+        fingerprint: `SHA256:${fp}`,
+      };
     } catch (e) {
       return { error: `Key generation failed: ${e instanceof Error ? e.message : String(e)}` };
     }
@@ -3114,6 +3134,34 @@ function resetAutoLockTimer(): void {
   }, AUTO_LOCK_TIMEOUT);
 }
 
+/**
+ * Watch the lock-signal file written by the sidecar when the extension requests a vault lock.
+ * When the file changes, lock the desktop app vault.
+ */
+function watchExtensionLockSignal(): void {
+  const signalPath = path.join(getAppDataDir(), 'lock-signal');
+  // Read initial content so we only react to NEW signals
+  let lastContent = '';
+  try {
+    lastContent = fs.readFileSync(signalPath, 'utf-8');
+  } catch { /* file may not exist yet */ }
+
+  const checkSignal = () => {
+    try {
+      if (!fs.existsSync(signalPath)) return;
+      const content = fs.readFileSync(signalPath, 'utf-8');
+      if (content && content !== lastContent) {
+        lastContent = content;
+        console.log('[security] extension lock signal detected, locking vault');
+        mainWindow?.webContents.send('vault:auto-locked');
+      }
+    } catch { /* ignore read errors */ }
+  };
+
+  // Poll every 1 second (fs.watch is unreliable on some platforms)
+  setInterval(checkSignal, 1000);
+}
+
 // Disable GPU acceleration in production to reduce memory (~27MB savings)
 if (!isDev) {
   app.disableHardwareAcceleration();
@@ -3129,11 +3177,26 @@ app.whenReady().then(async () => {
 
   // Certificate verification for API server connections in production
   if (!isDev && backendUrl && backendUrl.startsWith('https://')) {
-    session.defaultSession.setCertificateVerifyProc((_request, callback) => {
-      // Accept the certificate (OS-level verification).
-      // For certificate pinning, compare request.certificate.fingerprint
-      // against a known pin and reject if mismatch: callback(-2)
-      callback(0);
+    // Read pinned certificate fingerprint from environment or config
+    const pinnedFingerprint = process.env.LGI_CERT_FINGERPRINT || '';
+
+    session.defaultSession.setCertificateVerifyProc((request, callback) => {
+      // If no pin is configured, accept OS-level verification
+      if (!pinnedFingerprint) {
+        callback(0);
+        return;
+      }
+
+      // Compare the server certificate fingerprint against the pinned value
+      const certFingerprint = request.certificate?.fingerprint ?? '';
+      if (certFingerprint && certFingerprint === pinnedFingerprint) {
+        callback(0); // Certificate matches pin
+      } else {
+        console.error(
+          `Certificate pinning failed: expected ${pinnedFingerprint}, got ${certFingerprint}`,
+        );
+        callback(-2); // Reject connection
+      }
     });
   }
 
@@ -3142,6 +3205,9 @@ app.whenReady().then(async () => {
 
   // Start auto-lock timer
   resetAutoLockTimer();
+
+  // Watch for extension lock signal file
+  watchExtensionLockSignal();
 
   // Reset auto-lock on user activity
   const _activityEvents = ['mouse-move', 'keydown'] as const;

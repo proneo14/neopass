@@ -109,6 +109,26 @@ type HardwareKeyRepository interface {
 	DeleteHardwareKey(ctx context.Context, userID, keyID string) error
 }
 
+// SessionRepository defines the interface for user session management.
+type SessionRepository interface {
+	CreateSession(ctx context.Context, session Session) (Session, error)
+	GetSession(ctx context.Context, sessionID string) (Session, error)
+	GetSessionsByUser(ctx context.Context, userID string) ([]Session, error)
+	DeleteSession(ctx context.Context, sessionID string) error
+	DeleteSessionsByUser(ctx context.Context, userID string) error
+	CleanExpiredSessions(ctx context.Context) (int, error)
+}
+
+// Session represents an active user session.
+type Session struct {
+	ID        string    `json:"id"`
+	UserID    string    `json:"user_id"`
+	IPAddress string    `json:"ip_address,omitempty"`
+	UserAgent string    `json:"user_agent,omitempty"`
+	CreatedAt time.Time `json:"created_at"`
+	ExpiresAt time.Time `json:"expires_at"`
+}
+
 // Send represents a Secure Send record.
 type Send struct {
 	ID             string     `json:"id"`

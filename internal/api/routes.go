@@ -96,8 +96,8 @@ func Router(authService *auth.Service, totpService *auth.TOTPService, smsService
 		}
 	}
 
-	// Rate limiter for public auth endpoints: 10 requests per minute per IP
-	authLimiter := NewRateLimiter(10, 1*time.Minute)
+	// Rate limiter for public auth endpoints: 5 requests per minute per IP
+	authLimiter := NewRateLimiter(5, 1*time.Minute)
 
 	// Public FIDO metadata endpoint (no auth required)
 	r.Get("/fido/metadata", passkeyHandler.FIDOMetadata)

@@ -442,6 +442,11 @@ func (c *SidecarClient) lock() *Response {
 	}
 	defer func() { _ = resp.Body.Close() }()
 
+	// Write lock-signal file so the Electron app detects the lock
+	signalPath := filepath.Join(getAppDataDir(), "lock-signal")
+	_ = os.MkdirAll(getAppDataDir(), 0700)
+	_ = os.WriteFile(signalPath, []byte(fmt.Sprintf("%d", time.Now().UnixNano())), 0600)
+
 	return &Response{Status: "locked"}
 }
 

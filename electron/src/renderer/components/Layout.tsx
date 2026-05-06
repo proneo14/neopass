@@ -97,6 +97,15 @@ export function Layout() {
     return () => { cleanup?.(); };
   }, [logout, navigate]);
 
+  // Lock vault when main process sends auto-lock signal (inactivity or extension-triggered)
+  useEffect(() => {
+    const cleanup = (window as any).api?.onAutoLocked?.(() => {
+      logout();
+      navigate('/login');
+    });
+    return () => { cleanup?.(); };
+  }, [logout, navigate]);
+
   // ── Keyboard shortcuts ──────────────────────────────────────────────
   const [showShortcutHelp, setShowShortcutHelp] = useState(false);
   const [showGenerator, setShowGenerator] = useState(false);

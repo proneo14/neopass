@@ -804,6 +804,13 @@ const api = {
     ipcRenderer.on('force-logout', handler);
     return () => { ipcRenderer.removeListener('force-logout', handler); };
   },
+
+  /** Register a callback for auto-lock events (inactivity timeout or extension-triggered lock). */
+  onAutoLocked: (callback: () => void): (() => void) => {
+    const handler = () => callback();
+    ipcRenderer.on('vault:auto-locked', handler);
+    return () => { ipcRenderer.removeListener('vault:auto-locked', handler); };
+  },
 } as const;
 
 contextBridge.exposeInMainWorld('api', api);

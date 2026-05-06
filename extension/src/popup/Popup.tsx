@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { browserAPI, extractDomain } from '../lib/browser-api';
+import { CredentialItem } from './components/CredentialItem';
 import type {
   Credential,
   StatusResponseMessage,
@@ -225,6 +226,14 @@ export function Popup() {
   }
 
   const [copiedField, setCopiedField] = useState<string | null>(null);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [showGenerator, setShowGenerator] = useState(false);
+  const [genLength, setGenLength] = useState(20);
+  const [genUppercase, setGenUppercase] = useState(true);
+  const [genLowercase, setGenLowercase] = useState(true);
+  const [genDigits, setGenDigits] = useState(true);
+  const [genSymbols, setGenSymbols] = useState(true);
+  const [generatedPassword, setGeneratedPassword] = useState('');
 
   async function handleCopy(text: string, field: string) {
     try {
@@ -234,6 +243,33 @@ export function Popup() {
     }
     setCopiedField(field);
     setTimeout(() => setCopiedField(null), 1500);
+  }
+
+  async function handleLock() {
+    try {
+      await browserAPI.runtime.sendMessage({ type: 'lock' });
+    } catch {
+      // best effort
+    }
+    setStatus('locked');
+    setCredentials([]);
+  }
+
+  function generatePassword() {
+    const upper = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+    const lower = 'abcdefghijklmnopqrstuvwxyz';
+    const digits = '0123456789';
+    const symbols = '!@#$%^&*()_+-=[]{}|;:,.<>?';
+    let charset = '';
+    if (genUppercase) charset += upper;
+    if (genLowercase) charset += lower;
+    if (genDigits) charset += digits;
+    if (genSymbols) charset += symbols;
+    if (!charset) charset = lower + digits;
+    const arr = new Uint32Array(genLength);
+    crypto.getRandomValues(arr);
+    const pw = Array.from(arr, (v) => charset[v % charset.length]).join('');
+    setGeneratedPassword(pw);
   }
 
   if (status === 'loading') {
@@ -439,8 +475,14 @@ export function Popup() {
     );
   }
 
-  const matchedCreds = credentials.filter((c) => c.matched);
-  const otherCreds = credentials.filter((c) => !c.matched);
+  const filtered = searchQuery.trim()
+    ? credentials.filter((c) => {
+        const q = searchQuery.toLowerCase();
+        return (c.name?.toLowerCase().includes(q) || c.username?.toLowerCase().includes(q) || c.domain?.toLowerCase().includes(q) || c.uri?.toLowerCase().includes(q));
+      })
+    : credentials;
+  const matchedCreds = filtered.filter((c) => c.matched);
+  const otherCreds = filtered.filter((c) => !c.matched);
 
   // Sort favorites first within each group
   const sortFavFirst = (a: Credential, b: Credential) =>
@@ -461,15 +503,75 @@ export function Popup() {
               {currentDomain || 'No domain'}
             </span>
           </div>
-          <button
-            onClick={handleOpenApp}
-            className="text-xs text-surface-400 hover:text-surface-200 transition-colors"
-            title="Open desktop app"
-          >
-            Open App
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => { setShowGenerator(!showGenerator); if (!generatedPassword) generatePassword(); }}
+              className="text-xs text-surface-400 hover:text-surface-200 transition-colors"
+              title="Password generator"
+            >
+              ⚡
+            </button>
+            <button
+              onClick={handleLock}
+              className="text-xs text-surface-400 hover:text-surface-200 transition-colors"
+              title="Lock vault"
+            >
+              🔒
+            </button>
+            <button
+              onClick={handleOpenApp}
+              className="text-xs text-surface-400 hover:text-surface-200 transition-colors"
+              title="Open desktop app"
+            >
+              Open App
+            </button>
+          </div>
+        </div>
+        {/* Search bar */}
+        <div className="mt-2">
+          <input
+            type="text"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder="Search vault…"
+            className="w-full px-3 py-1.5 bg-surface-800 border border-surface-700 rounded text-sm text-surface-100 placeholder-surface-500 focus:outline-none focus:border-accent-500"
+          />
         </div>
       </div>
+
+      {/* Password generator panel */}
+      {showGenerator && (
+        <div className="px-4 py-3 border-b border-surface-800 bg-surface-900 space-y-2 shrink-0">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-semibold text-surface-300">Password Generator</span>
+            <button onClick={() => setShowGenerator(false)} className="text-xs text-surface-500 hover:text-surface-200">✕</button>
+          </div>
+          <div className="font-mono text-sm text-surface-100 bg-surface-800 rounded px-2 py-1.5 break-all select-all">
+            {generatedPassword}
+          </div>
+          <div className="flex items-center gap-2">
+            <button onClick={generatePassword} className="px-2 py-1 text-xs bg-accent-500 hover:bg-accent-600 text-white rounded transition-colors">
+              Regenerate
+            </button>
+            <button onClick={() => handleCopy(generatedPassword, 'generated')} className={`px-2 py-1 text-xs rounded transition-colors ${copiedField === 'generated' ? 'text-green-400 bg-surface-800' : 'text-surface-300 bg-surface-800 hover:text-surface-100'}`}>
+              {copiedField === 'generated' ? 'Copied!' : 'Copy'}
+            </button>
+          </div>
+          <div className="flex items-center gap-3">
+            <label className="text-xs text-surface-400 flex items-center gap-1">
+              Length
+              <input type="range" min={8} max={64} value={genLength} onChange={(e) => { setGenLength(+e.target.value); }} onMouseUp={generatePassword} className="w-16 accent-accent-500" />
+              <span className="text-surface-300 w-5 text-right">{genLength}</span>
+            </label>
+          </div>
+          <div className="flex gap-3 text-xs text-surface-400">
+            <label className="flex items-center gap-1"><input type="checkbox" checked={genUppercase} onChange={(e) => { setGenUppercase(e.target.checked); }} className="accent-accent-500" />A-Z</label>
+            <label className="flex items-center gap-1"><input type="checkbox" checked={genLowercase} onChange={(e) => { setGenLowercase(e.target.checked); }} className="accent-accent-500" />a-z</label>
+            <label className="flex items-center gap-1"><input type="checkbox" checked={genDigits} onChange={(e) => { setGenDigits(e.target.checked); }} className="accent-accent-500" />0-9</label>
+            <label className="flex items-center gap-1"><input type="checkbox" checked={genSymbols} onChange={(e) => { setGenSymbols(e.target.checked); }} className="accent-accent-500" />!@#</label>
+          </div>
+        </div>
+      )}
 
       {/* Credentials list */}
       <div className="flex-1 overflow-y-auto">
@@ -489,26 +591,12 @@ export function Popup() {
                   For this site
                 </div>
                 {matchedCreds.map((cred) => (
-                  <div
+                  <CredentialItem
                     key={cred.id}
-                    onClick={() => handleSelectCred(cred)}
-                    className="flex items-center justify-between px-4 py-2.5 hover:bg-surface-900 transition-colors cursor-pointer group"
-                  >
-                    <div className="flex-1 min-w-0 mr-3">
-                      <p className="text-sm font-medium text-surface-100 truncate flex items-center gap-1">
-                        {cred.is_favorite && <svg className="w-3 h-3 text-amber-400 shrink-0" viewBox="0 0 20 20" fill="currentColor"><path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.286 3.957a1 1 0 00.95.69h4.162c.969 0 1.371 1.24.588 1.81l-3.37 2.448a1 1 0 00-.364 1.118l1.287 3.957c.3.921-.755 1.688-1.54 1.118l-3.37-2.448a1 1 0 00-1.176 0l-3.37 2.448c-.784.57-1.838-.197-1.539-1.118l1.287-3.957a1 1 0 00-.364-1.118L2.065 9.384c-.783-.57-.38-1.81.588-1.81h4.162a1 1 0 00.95-.69l1.284-3.957z" /></svg>}{!!cred.reprompt && <span className="text-[10px] text-surface-500" title="Re-prompt required">🔒</span>}{cred.name || cred.domain}
-                      </p>
-                      <p className="text-xs text-surface-400 truncate">
-                        {cred.username}
-                      </p>
-                    </div>
-                    <button
-                      onClick={(e) => { e.stopPropagation(); handleFill(cred); }}
-                      className="px-3 py-1 text-xs bg-accent-500 hover:bg-accent-600 text-white rounded transition-colors opacity-0 group-hover:opacity-100"
-                    >
-                      Fill
-                    </button>
-                  </div>
+                    credential={cred}
+                    onSelect={handleSelectCred}
+                    onFill={handleFill}
+                  />
                 ))}
               </div>
             )}
@@ -520,26 +608,14 @@ export function Popup() {
                   {matchedCreds.length > 0 ? 'Other logins' : 'All logins'}
                 </div>
                 {otherCreds.map((cred) => (
-                  <div
+                  <CredentialItem
                     key={cred.id}
-                    onClick={() => handleSelectCred(cred)}
-                    className="flex items-center justify-between px-4 py-2.5 hover:bg-surface-900 transition-colors cursor-pointer group"
-                  >
-                    <div className="flex-1 min-w-0 mr-3">
-                      <p className="text-sm font-medium text-surface-100 truncate flex items-center gap-1">
-                        {cred.is_favorite && <svg className="w-3 h-3 text-amber-400 shrink-0" viewBox="0 0 20 20" fill="currentColor"><path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.286 3.957a1 1 0 00.95.69h4.162c.969 0 1.371 1.24.588 1.81l-3.37 2.448a1 1 0 00-.364 1.118l1.287 3.957c.3.921-.755 1.688-1.54 1.118l-3.37-2.448a1 1 0 00-1.176 0l-3.37 2.448c-.784.57-1.838-.197-1.539-1.118l1.287-3.957a1 1 0 00-.364-1.118L2.065 9.384c-.783-.57-.38-1.81.588-1.81h4.162a1 1 0 00.95-.69l1.284-3.957z" /></svg>}{!!cred.reprompt && <span className="text-[10px] text-surface-500" title="Re-prompt required">🔒</span>}{cred.name || cred.domain}
-                      </p>
-                      <p className="text-xs text-surface-400 truncate">
-                        {cred.username}{cred.domain ? ` · ${cred.domain}` : ''}
-                      </p>
-                    </div>
-                    <button
-                      onClick={(e) => { e.stopPropagation(); handleFill(cred); }}
-                      className="px-3 py-1 text-xs bg-surface-700 hover:bg-surface-600 text-white rounded transition-colors opacity-0 group-hover:opacity-100"
-                    >
-                      Fill
-                    </button>
-                  </div>
+                    credential={cred}
+                    showDomain
+                    onSelect={handleSelectCred}
+                    onFill={handleFill}
+                    fillButtonClass="bg-surface-700 hover:bg-surface-600"
+                  />
                 ))}
               </div>
             )}

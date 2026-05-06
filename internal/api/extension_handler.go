@@ -6,10 +6,15 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"net/http"
+	"os"
+	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/rs/zerolog/log"
@@ -550,7 +555,37 @@ func (h *ExtensionHandler) Lock(w http.ResponseWriter, r *http.Request) {
 	}
 	h.mu.Unlock()
 
+	// Signal the Electron parent process to lock the desktop vault too
+	fmt.Fprintln(os.Stdout, "EXTENSION_LOCK_REQUESTED")
+	// Also write a signal file that Electron watches (more reliable than stdout)
+	writeLockSignalFile()
+
 	writeJSON(w, http.StatusOK, map[string]string{"status": "locked"})
+}
+
+// writeLockSignalFile writes a timestamp to a signal file that the Electron app watches.
+func writeLockSignalFile() {
+	dir := getExtAppDataDir()
+	signalPath := filepath.Join(dir, "lock-signal")
+	_ = os.MkdirAll(dir, 0700)
+	_ = os.WriteFile(signalPath, []byte(fmt.Sprintf("%d", time.Now().UnixNano())), 0600)
+}
+
+func getExtAppDataDir() string {
+	switch runtime.GOOS {
+	case "windows":
+		appData := os.Getenv("APPDATA")
+		if appData == "" {
+			appData = filepath.Join(os.Getenv("USERPROFILE"), "AppData", "Roaming")
+		}
+		return filepath.Join(appData, "QuantumPasswordManager")
+	case "darwin":
+		home, _ := os.UserHomeDir()
+		return filepath.Join(home, "Library", "Application Support", "QuantumPasswordManager")
+	default:
+		home, _ := os.UserHomeDir()
+		return filepath.Join(home, ".config", "QuantumPasswordManager")
+	}
 }
 
 // domainMatches checks if a URI contains the given domain.

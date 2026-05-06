@@ -8,6 +8,8 @@ export function Register() {
   const [confirm, setConfirm] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [termsAccepted, setTermsAccepted] = useState(false);
+  const [recoveryKey, setRecoveryKey] = useState<string | null>(null);
 
   const login = useAuthStore((s) => s.login);
   const navigate = useNavigate();
@@ -61,13 +63,69 @@ export function Register() {
         undefined,
         (result.master_key_hex ?? '') as string,
       );
-      navigate('/vault');
+
+      // Show recovery key before proceeding to vault
+      const masterKeyHex = (result.master_key_hex ?? '') as string;
+      if (masterKeyHex) {
+        setRecoveryKey(masterKeyHex);
+      } else {
+        navigate('/vault');
+      }
     } catch {
       setError('Failed to connect to server');
     } finally {
       setLoading(false);
     }
   };
+
+  if (recoveryKey) {
+    return (
+      <div className="flex items-center justify-center h-screen w-screen bg-surface-950 dark">
+        <div
+          className="fixed top-0 left-0 right-0 h-9 z-50"
+          style={{ WebkitAppRegion: 'drag' } as React.CSSProperties}
+        />
+        <div className="w-full max-w-sm px-6">
+          <div className="text-center mb-6">
+            <span className="text-4xl">🔑</span>
+            <h1 className="mt-3 text-xl font-semibold text-surface-100">Save Your Recovery Key</h1>
+            <p className="mt-2 text-sm text-surface-400">
+              Write this down and store it somewhere safe. This is the only way to recover your account if you forget your master password.
+            </p>
+          </div>
+
+          <div className="bg-surface-800 border border-surface-600 rounded-lg p-4 mb-4">
+            <p className="text-xs text-surface-500 mb-2 font-medium uppercase tracking-wide">Recovery Key</p>
+            <p className="font-mono text-sm text-surface-100 break-all select-all leading-relaxed">
+              {recoveryKey}
+            </p>
+          </div>
+
+          <div className="bg-red-500/10 border border-red-500/30 rounded-md p-3 mb-6">
+            <p className="text-xs text-red-400">
+              ⚠️ This key will not be shown again. Make sure you have saved it before continuing.
+            </p>
+          </div>
+
+          <button
+            onClick={() => {
+              navigator.clipboard.writeText(recoveryKey).catch(() => {});
+            }}
+            className="w-full py-2 rounded-md bg-surface-700 hover:bg-surface-600 text-surface-200 text-sm font-medium transition-colors mb-3"
+          >
+            Copy to Clipboard
+          </button>
+
+          <button
+            onClick={() => navigate('/vault')}
+            className="w-full py-2 rounded-md bg-accent-600 hover:bg-accent-500 text-white text-sm font-medium transition-colors"
+          >
+            I've Saved My Recovery Key — Continue
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="flex items-center justify-center h-screen w-screen bg-surface-950 dark">
@@ -147,9 +205,21 @@ export function Register() {
             <div className="text-sm text-red-400 bg-red-400/10 px-3 py-2 rounded-md">{error}</div>
           )}
 
+          <label className="flex items-start gap-2 text-xs text-surface-400 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={termsAccepted}
+              onChange={(e) => setTermsAccepted(e.target.checked)}
+              className="mt-0.5 accent-accent-500"
+            />
+            <span>
+              I understand that my master password cannot be recovered. If I lose it, my data is permanently inaccessible.
+            </span>
+          </label>
+
           <button
             type="submit"
-            disabled={loading}
+            disabled={loading || !termsAccepted}
             className="w-full py-2 rounded-md bg-accent-600 hover:bg-accent-500 text-white text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {loading ? 'Creating account…' : 'Create Account'}
