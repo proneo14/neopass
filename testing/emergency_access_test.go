@@ -133,8 +133,12 @@ func TestEmergencyAccess_ApproveRecovery(t *testing.T) {
 		AccessType:   "view",
 		WaitTimeDays: 3,
 	})
-	eaRepo.SetGranteeID(context.Background(), ea.ID, granteeID)
-	eaRepo.InitiateRecovery(context.Background(), ea.ID)
+	if err := eaRepo.SetGranteeID(context.Background(), ea.ID, granteeID); err != nil {
+		t.Fatalf("SetGranteeID failed: %v", err)
+	}
+	if err := eaRepo.InitiateRecovery(context.Background(), ea.ID); err != nil {
+		t.Fatalf("InitiateRecovery failed: %v", err)
+	}
 
 	// Grantor approves
 	err := eaRepo.UpdateStatus(context.Background(), ea.ID, "recovery_approved")
@@ -169,8 +173,12 @@ func TestEmergencyAccess_RejectRecovery(t *testing.T) {
 		AccessType:   "view",
 		WaitTimeDays: 3,
 	})
-	eaRepo.SetGranteeID(context.Background(), ea.ID, granteeID)
-	eaRepo.InitiateRecovery(context.Background(), ea.ID)
+	if err := eaRepo.SetGranteeID(context.Background(), ea.ID, granteeID); err != nil {
+		t.Fatalf("SetGranteeID failed: %v", err)
+	}
+	if err := eaRepo.InitiateRecovery(context.Background(), ea.ID); err != nil {
+		t.Fatalf("InitiateRecovery failed: %v", err)
+	}
 
 	// Grantor rejects
 	err := eaRepo.UpdateStatus(context.Background(), ea.ID, "accepted")
@@ -199,8 +207,12 @@ func TestEmergencyAccess_AutoApprove(t *testing.T) {
 		AccessType:   "view",
 		WaitTimeDays: 1, // 1 day wait
 	})
-	eaRepo.SetGranteeID(context.Background(), ea.ID, granteeID)
-	eaRepo.InitiateRecovery(context.Background(), ea.ID)
+	if err := eaRepo.SetGranteeID(context.Background(), ea.ID, granteeID); err != nil {
+		t.Fatalf("SetGranteeID failed: %v", err)
+	}
+	if err := eaRepo.InitiateRecovery(context.Background(), ea.ID); err != nil {
+		t.Fatalf("InitiateRecovery failed: %v", err)
+	}
 
 	// Simulate time passing: set recovery_initiated_at to 2 days ago
 	eaRepo.mu.Lock()
@@ -244,9 +256,15 @@ func TestEmergencyAccess_Takeover(t *testing.T) {
 		AccessType:   "takeover",
 		WaitTimeDays: 1,
 	})
-	eaRepo.SetGranteeID(context.Background(), ea.ID, granteeID)
-	eaRepo.InitiateRecovery(context.Background(), ea.ID)
-	eaRepo.UpdateStatus(context.Background(), ea.ID, "recovery_approved")
+	if err := eaRepo.SetGranteeID(context.Background(), ea.ID, granteeID); err != nil {
+		t.Fatalf("SetGranteeID failed: %v", err)
+	}
+	if err := eaRepo.InitiateRecovery(context.Background(), ea.ID); err != nil {
+		t.Fatalf("InitiateRecovery failed: %v", err)
+	}
+	if err := eaRepo.UpdateStatus(context.Background(), ea.ID, "recovery_approved"); err != nil {
+		t.Fatalf("UpdateStatus failed: %v", err)
+	}
 
 	updated, _ := eaRepo.GetEmergencyAccess(context.Background(), ea.ID)
 	if updated.AccessType != "takeover" {
@@ -282,20 +300,24 @@ func TestEmergencyAccess_Delete(t *testing.T) {
 func TestEmergencyAccess_ListGranted(t *testing.T) {
 	eaRepo, _, _, grantorID, _ := setupEmergencyAccessTest(t)
 
-	eaRepo.CreateEmergencyAccess(context.Background(), db.EmergencyAccess{
+	if _, err := eaRepo.CreateEmergencyAccess(context.Background(), db.EmergencyAccess{
 		GrantorID:    grantorID,
 		GranteeEmail: "grantee1@example.com",
 		Status:       "invited",
 		AccessType:   "view",
 		WaitTimeDays: 3,
-	})
-	eaRepo.CreateEmergencyAccess(context.Background(), db.EmergencyAccess{
+	}); err != nil {
+		t.Fatalf("CreateEmergencyAccess 1 failed: %v", err)
+	}
+	if _, err := eaRepo.CreateEmergencyAccess(context.Background(), db.EmergencyAccess{
 		GrantorID:    grantorID,
 		GranteeEmail: "grantee2@example.com",
 		Status:       "invited",
 		AccessType:   "view",
 		WaitTimeDays: 5,
-	})
+	}); err != nil {
+		t.Fatalf("CreateEmergencyAccess 2 failed: %v", err)
+	}
 
 	granted, err := eaRepo.ListGrantedAccess(context.Background(), grantorID)
 	if err != nil {
@@ -316,7 +338,9 @@ func TestEmergencyAccess_ListTrusted(t *testing.T) {
 		AccessType:   "view",
 		WaitTimeDays: 3,
 	})
-	eaRepo.SetGranteeID(context.Background(), ea.ID, granteeID)
+	if err := eaRepo.SetGranteeID(context.Background(), ea.ID, granteeID); err != nil {
+		t.Fatalf("SetGranteeID failed: %v", err)
+	}
 
 	trusted, err := eaRepo.ListTrustedBy(context.Background(), granteeID)
 	if err != nil {
@@ -382,7 +406,9 @@ func setupEmergencyRouter(t *testing.T) (chi.Router, string, string, string, str
 	regW := httptest.NewRecorder()
 	regRouter.ServeHTTP(regW, regReq)
 	var grantorResp auth.RegisterResponse
-	json.NewDecoder(regW.Body).Decode(&grantorResp)
+	if err := json.NewDecoder(regW.Body).Decode(&grantorResp); err != nil {
+		t.Fatalf("decode grantor register response: %v", err)
+	}
 
 	// Register grantee
 	regJSON, _ = json.Marshal(map[string]interface{}{
@@ -397,7 +423,9 @@ func setupEmergencyRouter(t *testing.T) (chi.Router, string, string, string, str
 	regW = httptest.NewRecorder()
 	regRouter.ServeHTTP(regW, regReq)
 	var granteeResp auth.RegisterResponse
-	json.NewDecoder(regW.Body).Decode(&granteeResp)
+	if err := json.NewDecoder(regW.Body).Decode(&granteeResp); err != nil {
+		t.Fatalf("decode grantee register response: %v", err)
+	}
 
 	return r, grantorResp.AccessToken, grantorResp.UserID, granteeResp.AccessToken, granteeResp.UserID, eaRepo
 }
