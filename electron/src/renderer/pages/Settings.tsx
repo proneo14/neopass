@@ -807,8 +807,35 @@ export function Settings() {
   const [showExport, setShowExport] = useState(false);
   const [showShortcuts, setShowShortcuts] = useState(false);
   const [appVersion, setAppVersion] = useState('1.0.0');
+  const [updateStatus, setUpdateStatus] = useState<'idle' | 'checking' | 'available' | 'not-available' | 'downloading' | 'ready' | 'error'>('idle');
+  const [updateVersion, setUpdateVersion] = useState('');
+  const [updateProgress, setUpdateProgress] = useState(0);
+  const [updateError, setUpdateError] = useState('');
   useEffect(() => {
     window.api?.app?.getVersion?.().then((v: string) => v && setAppVersion(v));
+
+    // Auto-update event listeners
+    const unsubs = [
+      window.api.onUpdateAvailable?.((info) => {
+        setUpdateStatus('available');
+        setUpdateVersion(info.version);
+      }),
+      window.api.onUpdateNotAvailable?.(() => {
+        setUpdateStatus('not-available');
+      }),
+      window.api.onUpdateDownloadProgress?.((progress) => {
+        setUpdateStatus('downloading');
+        setUpdateProgress(progress.percent);
+      }),
+      window.api.onUpdateDownloaded?.(() => {
+        setUpdateStatus('ready');
+      }),
+      window.api.onUpdateError?.((msg) => {
+        setUpdateStatus('error');
+        setUpdateError(msg);
+      }),
+    ];
+    return () => unsubs.forEach((u) => u?.());
   }, []);
   useEffect(() => {
     (async () => {
@@ -1532,6 +1559,72 @@ export function Settings() {
           </button>
           <p className="text-xs text-surface-600">LGI Pass v{appVersion}</p>
           <p className="text-xs text-surface-700 mt-0.5">Post-quantum encryption: X-Wing KEM + AES-256-GCM</p>
+
+          {/* Update section */}
+          <div className="mt-3">
+            {updateStatus === 'idle' && (
+              <button
+                onClick={() => {
+                  setUpdateStatus('checking');
+                  window.api.app.checkForUpdate();
+                }}
+                className="text-xs text-accent-400 hover:text-accent-300 transition-colors"
+              >
+                Check for updates
+              </button>
+            )}
+            {updateStatus === 'checking' && (
+              <p className="text-xs text-surface-500">Checking for updates…</p>
+            )}
+            {updateStatus === 'not-available' && (
+              <p className="text-xs text-green-400">You're on the latest version.</p>
+            )}
+            {updateStatus === 'available' && (
+              <div className="flex items-center gap-2">
+                <p className="text-xs text-amber-400">v{updateVersion} available</p>
+                <button
+                  onClick={() => {
+                    setUpdateStatus('downloading');
+                    setUpdateProgress(0);
+                    window.api.app.downloadUpdate();
+                  }}
+                  className="text-xs px-2 py-0.5 rounded bg-accent-600 text-white hover:bg-accent-500 transition-colors"
+                >
+                  Download
+                </button>
+              </div>
+            )}
+            {updateStatus === 'downloading' && (
+              <div>
+                <p className="text-xs text-surface-400 mb-1">Downloading update… {updateProgress}%</p>
+                <div className="w-full h-1.5 bg-surface-700 rounded-full overflow-hidden">
+                  <div className="h-full bg-accent-500 transition-all" style={{ width: `${updateProgress}%` }} />
+                </div>
+              </div>
+            )}
+            {updateStatus === 'ready' && (
+              <div className="flex items-center gap-2">
+                <p className="text-xs text-green-400">Update ready</p>
+                <button
+                  onClick={() => window.api.app.installUpdate()}
+                  className="text-xs px-2 py-0.5 rounded bg-green-600 text-white hover:bg-green-500 transition-colors"
+                >
+                  Restart & Install
+                </button>
+              </div>
+            )}
+            {updateStatus === 'error' && (
+              <div>
+                <p className="text-xs text-red-400">Update failed: {updateError || 'Unknown error'}</p>
+                <button
+                  onClick={() => setUpdateStatus('idle')}
+                  className="text-xs text-accent-400 hover:text-accent-300 mt-1"
+                >
+                  Try again
+                </button>
+              </div>
+            )}
+          </div>
         </div>
       </div>
 

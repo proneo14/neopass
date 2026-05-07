@@ -65,4 +65,8 @@ linux:
   category: Utility
   artifactName: "${productName}-${version}.${ext}"
 
+publish:
+  provider: generic
+  url: ""
+
 afterPack: ./build/afterPack.js

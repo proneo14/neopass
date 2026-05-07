@@ -1724,6 +1724,20 @@ public class SecureClip {
 
   ipcMain.handle('app:getVersion', () => app.getVersion());
 
+  // Auto-updater IPC
+  ipcMain.handle('updater:check', async () => {
+    const au = await getAutoUpdater();
+    return au.checkForUpdates().catch(() => null);
+  });
+  ipcMain.handle('updater:download', async () => {
+    const au = await getAutoUpdater();
+    return au.downloadUpdate().catch(() => null);
+  });
+  ipcMain.handle('updater:install', async () => {
+    const au = await getAutoUpdater();
+    au.quitAndInstall();
+  });
+
   ipcMain.handle('theme:update', (_event, resolvedTheme: string) => {
     if (!mainWindow) return;
     const colors: Record<string, { bg: string; sym: string }> = {
@@ -3247,6 +3261,54 @@ if (!isDev) {
   app.disableHardwareAcceleration();
 }
 
+// ---------- Auto-updater ----------
+let updaterModule: typeof import('electron-updater') | null = null;
+
+async function getAutoUpdater() {
+  if (!updaterModule) {
+    updaterModule = await import('electron-updater');
+  }
+  return updaterModule.autoUpdater;
+}
+
+function initAutoUpdater(): void {
+  getAutoUpdater().then((au) => {
+    au.autoDownload = false;
+    au.autoInstallOnAppQuit = true;
+
+    au.on('update-available', (info) => {
+      mainWindow?.webContents.send('updater:update-available', {
+        version: info.version,
+        releaseDate: info.releaseDate,
+      });
+    });
+
+    au.on('update-not-available', () => {
+      mainWindow?.webContents.send('updater:update-not-available');
+    });
+
+    au.on('download-progress', (progress) => {
+      mainWindow?.webContents.send('updater:download-progress', {
+        percent: Math.round(progress.percent),
+      });
+    });
+
+    au.on('update-downloaded', () => {
+      mainWindow?.webContents.send('updater:update-downloaded');
+    });
+
+    au.on('error', (err) => {
+      console.error('[updater] error:', err.message);
+      mainWindow?.webContents.send('updater:error', err.message);
+    });
+
+    // Check for updates on launch (silently)
+    au.checkForUpdates().catch(() => {});
+  }).catch((err) => {
+    console.error('[updater] failed to load electron-updater:', err.message);
+  });
+}
+
 // App lifecycle
 app.whenReady().then(async () => {
   await startSidecar();
@@ -3282,6 +3344,11 @@ app.whenReady().then(async () => {
 
   registerIpcHandlers();
   createWindow();
+
+  // Auto-updater setup (skip in dev — electron-updater requires a packaged app)
+  if (!isDev) {
+    initAutoUpdater();
+  }
 
   // Start auto-lock timer
   resetAutoLockTimer();
