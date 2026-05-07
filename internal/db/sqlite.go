@@ -166,20 +166,69 @@ func (s *SQLiteDB) RunMigrations(ctx context.Context, migrationsDir string) erro
 }
 
 // splitSQLStatements splits a SQL string into individual statements,
-// stripping comments and empty lines.
+// handling BEGIN...END blocks (e.g. triggers) that contain semicolons.
 func splitSQLStatements(sql string) []string {
 	var stmts []string
-	for _, part := range strings.Split(sql, ";") {
-		// Remove comment-only lines and whitespace
-		var lines []string
-		for _, line := range strings.Split(part, "\n") {
-			trimmed := strings.TrimSpace(line)
-			if trimmed == "" || strings.HasPrefix(trimmed, "--") {
-				continue
-			}
-			lines = append(lines, line)
+	var current strings.Builder
+	inBlock := false
+
+	for _, line := range strings.Split(sql, "\n") {
+		trimmed := strings.TrimSpace(line)
+		// Skip empty lines and comments
+		if trimmed == "" || strings.HasPrefix(trimmed, "--") {
+			continue
 		}
-		stmt := strings.TrimSpace(strings.Join(lines, "\n"))
+
+		upperTrimmed := strings.ToUpper(trimmed)
+
+		// Detect BEGIN (start of trigger/block body)
+		if upperTrimmed == "BEGIN" {
+			inBlock = true
+			current.WriteString(line)
+			current.WriteString("\n")
+			continue
+		}
+
+		// Detect END; (end of trigger/block body)
+		if inBlock && (upperTrimmed == "END;" || upperTrimmed == "END") {
+			current.WriteString(line)
+			stmt := strings.TrimSpace(current.String())
+			// Remove trailing semicolon so we can add it back uniformly
+			stmt = strings.TrimSuffix(stmt, ";")
+			if stmt != "" {
+				stmts = append(stmts, stmt)
+			}
+			current.Reset()
+			inBlock = false
+			continue
+		}
+
+		if inBlock {
+			// Inside a block — don't split on semicolons
+			current.WriteString(line)
+			current.WriteString("\n")
+		} else {
+			// Outside a block — split on semicolons within the line
+			parts := strings.Split(line, ";")
+			for i, part := range parts {
+				current.WriteString(part)
+				if i < len(parts)-1 {
+					// Semicolon found — flush statement
+					stmt := strings.TrimSpace(current.String())
+					if stmt != "" {
+						stmts = append(stmts, stmt)
+					}
+					current.Reset()
+				}
+			}
+			current.WriteString("\n")
+		}
+	}
+
+	// Flush any remaining content
+	stmt := strings.TrimSpace(current.String())
+	if stmt != "" {
+		stmt = strings.TrimSuffix(stmt, ";")
 		if stmt != "" {
 			stmts = append(stmts, stmt)
 		}
