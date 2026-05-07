@@ -128,7 +128,9 @@ func TestFavorite_SetAndUnset(t *testing.T) {
 		t.Fatalf("list favorites expected 200, got %d", lw.Code)
 	}
 	var entries []vault.EntrySummary
-	json.NewDecoder(lw.Body).Decode(&entries)
+	if err := json.NewDecoder(lw.Body).Decode(&entries); err != nil {
+		t.Fatalf("decode favorites response: %v", err)
+	}
 	if len(entries) != 1 {
 		t.Errorf("expected 1 favorite entry, got %d", len(entries))
 	}
@@ -148,7 +150,9 @@ func TestFavorite_SetAndUnset(t *testing.T) {
 	req.Header.Set("Authorization", "Bearer "+token)
 	lw = httptest.NewRecorder()
 	router.ServeHTTP(lw, req)
-	json.NewDecoder(lw.Body).Decode(&entries)
+	if err := json.NewDecoder(lw.Body).Decode(&entries); err != nil {
+		t.Fatalf("decode favorites response: %v", err)
+	}
 	if len(entries) != 0 {
 		t.Errorf("expected 0 favorite entries after unset, got %d", len(entries))
 	}
@@ -176,7 +180,7 @@ func TestArchive_SetAndUnset(t *testing.T) {
 	lw := httptest.NewRecorder()
 	router.ServeHTTP(lw, req)
 	var entries []vault.EntrySummary
-	json.NewDecoder(lw.Body).Decode(&entries)
+	_ = json.NewDecoder(lw.Body).Decode(&entries)
 	if len(entries) != 0 {
 		t.Errorf("expected 0 entries in default list (archived excluded), got %d", len(entries))
 	}
@@ -186,7 +190,7 @@ func TestArchive_SetAndUnset(t *testing.T) {
 	req.Header.Set("Authorization", "Bearer "+token)
 	lw = httptest.NewRecorder()
 	router.ServeHTTP(lw, req)
-	json.NewDecoder(lw.Body).Decode(&entries)
+	_ = json.NewDecoder(lw.Body).Decode(&entries)
 	if len(entries) != 1 {
 		t.Errorf("expected 1 archived entry, got %d", len(entries))
 	}
@@ -203,7 +207,7 @@ func TestArchive_SetAndUnset(t *testing.T) {
 	req.Header.Set("Authorization", "Bearer "+token)
 	lw = httptest.NewRecorder()
 	router.ServeHTTP(lw, req)
-	json.NewDecoder(lw.Body).Decode(&entries)
+	_ = json.NewDecoder(lw.Body).Decode(&entries)
 	if len(entries) != 1 {
 		t.Errorf("expected 1 entry after unarchive, got %d", len(entries))
 	}
@@ -230,7 +234,7 @@ func TestTrash_DeleteAndRestore(t *testing.T) {
 	lw := httptest.NewRecorder()
 	router.ServeHTTP(lw, req)
 	var entries []vault.EntrySummary
-	json.NewDecoder(lw.Body).Decode(&entries)
+	_ = json.NewDecoder(lw.Body).Decode(&entries)
 	if len(entries) != 0 {
 		t.Errorf("expected 0 entries in default list (trashed excluded), got %d", len(entries))
 	}
@@ -240,7 +244,7 @@ func TestTrash_DeleteAndRestore(t *testing.T) {
 	req.Header.Set("Authorization", "Bearer "+token)
 	lw = httptest.NewRecorder()
 	router.ServeHTTP(lw, req)
-	json.NewDecoder(lw.Body).Decode(&entries)
+	_ = json.NewDecoder(lw.Body).Decode(&entries)
 	if len(entries) != 1 {
 		t.Errorf("expected 1 trashed entry, got %d", len(entries))
 	}
@@ -256,7 +260,7 @@ func TestTrash_DeleteAndRestore(t *testing.T) {
 	req.Header.Set("Authorization", "Bearer "+token)
 	lw = httptest.NewRecorder()
 	router.ServeHTTP(lw, req)
-	json.NewDecoder(lw.Body).Decode(&entries)
+	_ = json.NewDecoder(lw.Body).Decode(&entries)
 	if len(entries) != 1 {
 		t.Errorf("expected 1 entry after restore, got %d", len(entries))
 	}
@@ -282,7 +286,7 @@ func TestTrash_PermanentDelete(t *testing.T) {
 	lw := httptest.NewRecorder()
 	router.ServeHTTP(lw, req)
 	var entries []vault.EntrySummary
-	json.NewDecoder(lw.Body).Decode(&entries)
+	_ = json.NewDecoder(lw.Body).Decode(&entries)
 	if len(entries) != 0 {
 		t.Errorf("expected 0 entries after permanent delete, got %d", len(entries))
 	}
@@ -311,7 +315,7 @@ func TestTrash_AutoPurge(t *testing.T) {
 	}
 
 	var resp map[string]interface{}
-	json.NewDecoder(w.Body).Decode(&resp)
+	_ = json.NewDecoder(w.Body).Decode(&resp)
 	if count, ok := resp["count"].(float64); !ok || count < 1 {
 		t.Errorf("expected purge count >= 1, got %v", resp["count"])
 	}
@@ -322,7 +326,7 @@ func TestTrash_AutoPurge(t *testing.T) {
 	lw := httptest.NewRecorder()
 	router.ServeHTTP(lw, req)
 	var entries []vault.EntrySummary
-	json.NewDecoder(lw.Body).Decode(&entries)
+	_ = json.NewDecoder(lw.Body).Decode(&entries)
 	if len(entries) != 0 {
 		t.Errorf("expected 0 entries after purge, got %d", len(entries))
 	}
@@ -389,7 +393,7 @@ func TestListEntries_Filters(t *testing.T) {
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
 	var entries []vault.EntrySummary
-	json.NewDecoder(w.Body).Decode(&entries)
+	_ = json.NewDecoder(w.Body).Decode(&entries)
 	if len(entries) != 1 {
 		t.Errorf("favorite filter: expected 1 entry, got %d", len(entries))
 	}
@@ -399,7 +403,7 @@ func TestListEntries_Filters(t *testing.T) {
 	req.Header.Set("Authorization", "Bearer "+token)
 	w = httptest.NewRecorder()
 	router.ServeHTTP(w, req)
-	json.NewDecoder(w.Body).Decode(&entries)
+	_ = json.NewDecoder(w.Body).Decode(&entries)
 	if len(entries) != 1 {
 		t.Errorf("entry_type filter: expected 1 entry, got %d", len(entries))
 	}
@@ -412,7 +416,7 @@ func TestListEntries_Filters(t *testing.T) {
 	req.Header.Set("Authorization", "Bearer "+token)
 	w = httptest.NewRecorder()
 	router.ServeHTTP(w, req)
-	json.NewDecoder(w.Body).Decode(&entries)
+	_ = json.NewDecoder(w.Body).Decode(&entries)
 	if len(entries) != 2 {
 		t.Errorf("all filter: expected 2 entries, got %d", len(entries))
 	}

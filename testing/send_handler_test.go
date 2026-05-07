@@ -333,7 +333,9 @@ func TestDeleteSend(t *testing.T) {
 	// Verify gone
 	lw := makeAuthRequest(router, http.MethodGet, "/sends", token, nil)
 	var sends []map[string]interface{}
-	json.NewDecoder(lw.Body).Decode(&sends)
+	if err := json.NewDecoder(lw.Body).Decode(&sends); err != nil {
+		t.Fatalf("decode list sends response: %v", err)
+	}
 	if len(sends) != 0 {
 		t.Errorf("expected 0 sends after delete, got %d", len(sends))
 	}
