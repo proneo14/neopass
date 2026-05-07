@@ -1739,6 +1739,27 @@ public class SecureClip {
       symbolColor: c.sym,
       height: 36,
     });
+
+    // Write theme to file so the native messaging host can read it
+    const baseTheme = resolvedTheme.startsWith('dark') ? 'dark' : 'light';
+    try {
+      const dir = getAppDataDir();
+      fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(path.join(dir, 'theme'), baseTheme, 'utf-8');
+    } catch { /* best effort */ }
+
+    // Also push to sidecar API for in-memory sync
+    const api = getApiBase();
+    if (api) {
+      fetch(`${api}/extension/theme`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(sidecarSecret ? { Authorization: `Bearer ${sidecarSecret}` } : {}),
+        },
+        body: JSON.stringify({ theme: baseTheme }),
+      }).catch(() => { /* best effort */ });
+    }
   });
 
   ipcMain.handle('biometric:available', async () => {

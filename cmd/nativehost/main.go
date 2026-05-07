@@ -61,6 +61,7 @@ type Response struct {
 	Credentials []Credential           `json:"credentials,omitempty"`
 	Locked      *bool                  `json:"locked,omitempty"`
 	VaultCount  *int                   `json:"vaultCount,omitempty"`
+	Theme       string                 `json:"theme,omitempty"`
 	Error       string                 `json:"error,omitempty"`
 	Verified    *bool                  `json:"verified,omitempty"`
 	// Passkey response fields
@@ -421,16 +422,29 @@ func (c *SidecarClient) getStatus() *Response {
 	}
 
 	var status struct {
-		Locked     bool `json:"locked"`
-		VaultCount int  `json:"vaultCount"`
+		Locked     bool   `json:"locked"`
+		VaultCount int    `json:"vaultCount"`
+		Theme      string `json:"theme"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&status); err != nil {
 		return &Response{Error: "failed to decode status"}
 	}
 
+	// Read theme from file (written by the Electron app) as primary source
+	theme := status.Theme
+	if themeBytes, err := os.ReadFile(filepath.Join(getAppDataDir(), "theme")); err == nil {
+		if t := strings.TrimSpace(string(themeBytes)); t == "dark" || t == "light" {
+			theme = t
+		}
+	}
+	if theme == "" {
+		theme = "dark"
+	}
+
 	return &Response{
 		Locked:     &status.Locked,
 		VaultCount: &status.VaultCount,
+		Theme:      theme,
 	}
 }
 

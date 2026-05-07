@@ -44,6 +44,7 @@ export interface StatusResponseMessage {
   type: 'statusResponse';
   status: 'locked' | 'unlocked' | 'no-desktop-app';
   vaultCount?: number;
+  theme?: 'dark' | 'light';
 }
 
 export interface LockMessage {
@@ -239,6 +240,7 @@ export interface NativeHostResponse {
   credentials?: Credential[];
   locked?: boolean;
   vaultCount?: number;
+  theme?: string;
   error?: string;
   verified?: boolean;
   passkeys?: PasskeyInfo[];

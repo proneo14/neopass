@@ -351,6 +351,7 @@ func ExtensionRouter(vaultRepo db.VaultRepository, userRepo db.UserRepository, s
 	h := NewExtensionHandler(vaultRepo, userRepo, secret, webauthnService)
 
 	r.Post("/session", h.PushSession)
+	r.Put("/theme", h.SetTheme)
 	r.Get("/status", h.GetStatus)
 	r.Get("/credentials", h.GetCredentials)
 	r.Post("/credentials", h.SaveCredential)

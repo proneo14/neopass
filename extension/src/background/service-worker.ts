@@ -337,6 +337,7 @@ browserAPI.runtime.onMessage.addListener(
             type: 'statusResponse',
             status: response.locked ? 'locked' : 'unlocked',
             vaultCount: response.vaultCount,
+            theme: response.theme || 'dark',
           };
         });
 

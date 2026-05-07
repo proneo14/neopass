@@ -41,6 +41,7 @@ type ExtensionHandler struct {
 
 	mu       sync.RWMutex
 	session  *extensionSession
+	theme    string // "dark" or "light", pushed by Electron app
 }
 
 type extensionSession struct {
@@ -124,6 +125,34 @@ func (h *ExtensionHandler) PushSession(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
+// SetTheme updates the current theme (pushed by the Electron app).
+// PUT /extension/theme
+func (h *ExtensionHandler) SetTheme(w http.ResponseWriter, r *http.Request) {
+	if !h.verifySecret(r) {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
+	var body struct {
+		Theme string `json:"theme"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	if body.Theme != "dark" && body.Theme != "light" {
+		writeError(w, http.StatusBadRequest, "theme must be 'dark' or 'light'")
+		return
+	}
+
+	h.mu.Lock()
+	h.theme = body.Theme
+	h.mu.Unlock()
+
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
 // GetStatus returns the current session status.
 // GET /extension/status
 func (h *ExtensionHandler) GetStatus(w http.ResponseWriter, r *http.Request) {
@@ -136,10 +165,16 @@ func (h *ExtensionHandler) GetStatus(w http.ResponseWriter, r *http.Request) {
 	sess := h.session
 	h.mu.RUnlock()
 
+	theme := h.theme
+	if theme == "" {
+		theme = "dark"
+	}
+
 	if sess == nil {
 		writeJSON(w, http.StatusOK, map[string]interface{}{
 			"locked":     true,
 			"vaultCount": 0,
+			"theme":      theme,
 		})
 		return
 	}
@@ -154,6 +189,7 @@ func (h *ExtensionHandler) GetStatus(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"locked":     false,
 		"vaultCount": count,
+		"theme":      theme,
 	})
 }
 
