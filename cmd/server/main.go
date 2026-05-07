@@ -85,8 +85,11 @@ func main() {
 	}
 
 	// General rate limiter: 100 requests per minute per IP
-	generalLimiter := api.NewRateLimiter(100, 1*time.Minute)
-	r.Use(generalLimiter.RateLimit)
+	// Skip in sidecar mode — local-only server has no external exposure
+	if !cfg.SidecarMode {
+		generalLimiter := api.NewRateLimiter(100, 1*time.Minute)
+		r.Use(generalLimiter.RateLimit)
+	}
 
 	// Health check
 	r.Get("/health", func(w http.ResponseWriter, r *http.Request) {
