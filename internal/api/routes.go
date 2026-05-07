@@ -113,6 +113,31 @@ func Router(authService *auth.Service, totpService *auth.TOTPService, smsService
 		r.With(authLimiter.RateLimit).Post("/2fa/validate", tfaHandler.Validate)
 		r.With(authLimiter.RateLimit).Post("/2fa/sms/send", tfaHandler.SendSMS)
 		r.With(authLimiter.RateLimit).Post("/2fa/sms/validate", tfaHandler.ValidateSMS)
+
+		// Protected auth sub-routes (password change, security settings, 2FA management, hardware keys)
+		r.Group(func(r chi.Router) {
+			r.Use(AuthMiddleware(authService, userRepo))
+
+			r.Post("/change-password", authHandler.ChangePassword)
+			r.Post("/require-hardware-key", authHandler.SetRequireHWKey)
+			r.Get("/security-settings", authHandler.GetSecuritySettings)
+
+			r.Post("/2fa/setup", tfaHandler.Setup)
+			r.Post("/2fa/verify-setup", tfaHandler.VerifySetup)
+			r.Post("/2fa/disable", tfaHandler.Disable)
+			r.Post("/2fa/share", tfaHandler.Share)
+			r.Post("/2fa/claim/{id}", tfaHandler.Claim)
+			r.Get("/2fa/pending", tfaHandler.ListPending)
+
+			r.Route("/hardware-keys", func(r chi.Router) {
+				r.Get("/", passkeyHandler.ListHardwareKeys)
+				r.Delete("/{id}", passkeyHandler.DeleteHardwareKey)
+				r.Post("/register/begin", passkeyHandler.BeginHardwareKeyRegistration)
+				r.Post("/register/finish", passkeyHandler.FinishHardwareKeyRegistration)
+				r.Post("/authenticate/begin", passkeyHandler.BeginHardwareKeyAuth)
+				r.Post("/authenticate/finish", passkeyHandler.FinishHardwareKeyAuth)
+			})
+		})
 	})
 
 	// Public SSO routes (rate-limited, no auth required — PostgreSQL only)
@@ -142,23 +167,6 @@ func Router(authService *auth.Service, totpService *auth.TOTPService, smsService
 	r.Group(func(r chi.Router) {
 		r.Use(AuthMiddleware(authService, userRepo))
 
-		// Password change (self-service)
-		r.Post("/auth/change-password", authHandler.ChangePassword)
-
-		// Security settings
-		r.Post("/auth/require-hardware-key", authHandler.SetRequireHWKey)
-		r.Get("/auth/security-settings", authHandler.GetSecuritySettings)
-
-		// 2FA management (requires full auth)
-		r.Route("/auth/2fa", func(r chi.Router) {
-			r.Post("/setup", tfaHandler.Setup)
-			r.Post("/verify-setup", tfaHandler.VerifySetup)
-			r.Post("/disable", tfaHandler.Disable)
-			r.Post("/share", tfaHandler.Share)
-			r.Post("/claim/{id}", tfaHandler.Claim)
-			r.Get("/pending", tfaHandler.ListPending)
-		})
-
 		// Vault routes
 		r.Route("/vault", func(r chi.Router) {
 			r.Post("/entries", vaultHandler.CreateEntry)
@@ -184,16 +192,6 @@ func Router(authService *auth.Service, totpService *auth.TOTPService, smsService
 			r.Post("/passkeys/register/finish", passkeyHandler.FinishRegistration)
 			r.Post("/passkeys/authenticate/begin", passkeyHandler.BeginAuthentication)
 			r.Post("/passkeys/authenticate/finish", passkeyHandler.FinishAuthentication)
-		})
-
-		// Hardware key routes
-		r.Route("/auth/hardware-keys", func(r chi.Router) {
-			r.Get("/", passkeyHandler.ListHardwareKeys)
-			r.Delete("/{id}", passkeyHandler.DeleteHardwareKey)
-			r.Post("/register/begin", passkeyHandler.BeginHardwareKeyRegistration)
-			r.Post("/register/finish", passkeyHandler.FinishHardwareKeyRegistration)
-			r.Post("/authenticate/begin", passkeyHandler.BeginHardwareKeyAuth)
-			r.Post("/authenticate/finish", passkeyHandler.FinishHardwareKeyAuth)
 		})
 
 		// Admin routes

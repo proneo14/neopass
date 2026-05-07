@@ -13,6 +13,8 @@ export function Login() {
   const [biometricAvailable, setBiometricAvailable] = useState(false);
   const [biometricLoading, setBiometricLoading] = useState(false);
   const [showManualLogin, setShowManualLogin] = useState(false);
+  const [tempToken, setTempToken] = useState('');
+  const [masterKeyHex2fa, setMasterKeyHex2fa] = useState('');
   const [showSSO, setShowSSO] = useState(false);
   const [ssoOrgId, setSsoOrgId] = useState('');
   const [ssoLoading, setSsoLoading] = useState(false);
@@ -117,6 +119,36 @@ export function Login() {
     setLoading(true);
 
     try {
+      // If 2FA is pending, validate the TOTP code
+      if (needs2fa && tempToken) {
+        if (!twoFactorCode || twoFactorCode.length !== 6) {
+          setError('Enter a 6-digit code from your authenticator app');
+          return;
+        }
+        const result = (await window.api.auth.validate2fa({
+          tempToken,
+          code: twoFactorCode,
+          email,
+          masterKeyHex: masterKeyHex2fa,
+        })) as Record<string, unknown>;
+
+        if (result.error) {
+          setError(result.error as string);
+          return;
+        }
+
+        login(
+          (result.access_token ?? result.token) as string,
+          result.user_id as string,
+          email,
+          result.role as string | undefined,
+          masterKeyHex2fa,
+        );
+        await loadOrgAfterLogin((result.access_token ?? result.token) as string);
+        navigate('/vault');
+        return;
+      }
+
       const result = (await window.api.auth.login({ email, authHash: password })) as Record<
         string,
         unknown
@@ -128,6 +160,8 @@ export function Login() {
       }
 
       if (result.requires_2fa) {
+        setTempToken((result.temp_token ?? '') as string);
+        setMasterKeyHex2fa((result.master_key_hex ?? '') as string);
         setNeeds2fa(true);
         return;
       }
@@ -141,8 +175,9 @@ export function Login() {
       );
       await loadOrgAfterLogin((result.access_token ?? result.token) as string);
       navigate('/vault');
-    } catch {
-      setError('Failed to connect to server');
+    } catch (err) {
+      setError(needs2fa ? 'Two-factor verification failed' : 'Failed to connect to server');
+      console.error('[login]', err);
     } finally {
       setLoading(false);
     }

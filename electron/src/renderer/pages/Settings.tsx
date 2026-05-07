@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useAuthStore } from '../store/authStore';
 import { useVaultStore } from '../store/vaultStore';
 import { useNotificationStore } from '../store/notificationStore';
@@ -10,6 +10,7 @@ import { EmergencyAccessSection } from '../components/EmergencyAccessSection';
 import { ImportWizard } from '../components/ImportWizard';
 import { SyncSettings } from '../components/SyncSettings';
 import { ServerConfig } from '../components/ServerConfig';
+import QRCode from 'qrcode';
 
 type AutoLockOption = '1' | '5' | '15' | '30' | '60' | 'never';
 type TimeoutActionOption = 'lock' | 'logout';
@@ -151,6 +152,18 @@ function TwoFactorModal({ onClose, onEnabled, onDisabled, isEnabled }: { onClose
   const [loading, setLoading] = useState(false);
   const [copiedKey, setCopiedKey] = useState(false);
   const [copiedCodes, setCopiedCodes] = useState(false);
+  const qrCanvasRef = useRef<HTMLCanvasElement>(null);
+
+  // Render QR code when qrUri is set and step is 'setup'
+  useEffect(() => {
+    if (step === 'setup' && qrUri && qrCanvasRef.current) {
+      QRCode.toCanvas(qrCanvasRef.current, qrUri, {
+        width: 200,
+        margin: 2,
+        color: { dark: '#000000', light: '#ffffff' },
+      }).catch(() => { /* QR render failed — user can still copy the key */ });
+    }
+  }, [step, qrUri]);
 
   const handleSetup = async () => {
     if (!token || !masterKeyHex) { setError('Not logged in'); return; }
@@ -267,25 +280,29 @@ function TwoFactorModal({ onClose, onEnabled, onDisabled, isEnabled }: { onClose
         {step === 'setup' && (
           <div className="space-y-4">
             <p className="text-xs text-surface-400">
-              Enter this key in your authenticator app (Google Authenticator, Authy, etc.):
+              Scan this QR code with your authenticator app (Google Authenticator, Authy, etc.):
             </p>
-            <div className="relative">
-              <code className="block text-xs text-surface-200 font-mono bg-surface-900 px-3 py-2.5 rounded break-all tracking-wider">
-                {secret}
-              </code>
-              <button
-                onClick={() => { navigator.clipboard.writeText(secret); setCopiedKey(true); setTimeout(() => setCopiedKey(false), 1500); }}
-                className="absolute top-1.5 right-1.5 text-xs text-surface-500 hover:text-accent-400 transition-colors px-1.5 py-0.5 rounded bg-surface-800"
-              >
-                {copiedKey ? '✓' : 'Copy'}
-              </button>
-            </div>
             {qrUri && (
-              <details className="text-xs text-surface-500">
-                <summary className="cursor-pointer hover:text-surface-300 transition-colors">Show otpauth URI</summary>
-                <code className="block mt-1 text-[10px] text-surface-400 font-mono bg-surface-900 px-2 py-1.5 rounded break-all">{qrUri}</code>
-              </details>
+              <div className="flex justify-center py-2">
+                <div className="bg-white p-2 rounded-lg">
+                  <canvas ref={qrCanvasRef} />
+                </div>
+              </div>
             )}
+            <details className="text-xs text-surface-500">
+              <summary className="cursor-pointer hover:text-surface-300 transition-colors">Can&apos;t scan? Enter key manually</summary>
+              <div className="relative mt-2">
+                <code className="block text-xs text-surface-200 font-mono bg-surface-900 px-3 py-2.5 rounded break-all tracking-wider">
+                  {secret}
+                </code>
+                <button
+                  onClick={() => { navigator.clipboard.writeText(secret); setCopiedKey(true); setTimeout(() => setCopiedKey(false), 1500); }}
+                  className="absolute top-1.5 right-1.5 text-xs text-surface-500 hover:text-accent-400 transition-colors px-1.5 py-0.5 rounded bg-surface-800"
+                >
+                  {copiedKey ? '✓' : 'Copy'}
+                </button>
+              </div>
+            </details>
             <div>
               <div className="flex items-center justify-between mb-2">
                 <p className="text-xs text-surface-500">Recovery codes (save these somewhere safe):</p>

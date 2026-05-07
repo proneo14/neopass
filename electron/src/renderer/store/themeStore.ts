@@ -10,7 +10,7 @@ function loadPersistedTheme(): ThemeMode {
     const raw = localStorage.getItem(THEME_STORAGE_KEY);
     if (raw === 'dark' || raw === 'light' || raw === 'system') return raw;
   } catch { /* ignore */ }
-  return 'dark';
+  return 'light';
 }
 
 function resolveTheme(mode: ThemeMode): ResolvedTheme {
@@ -38,6 +38,7 @@ export const useThemeStore = create<ThemeState>((set) => {
       const newResolved = resolveTheme('system');
       set({ resolvedTheme: newResolved });
       applyThemeClass(newResolved);
+      window.api?.theme?.update(newResolved);
     }
   });
 
@@ -49,6 +50,7 @@ export const useThemeStore = create<ThemeState>((set) => {
       const newResolved = resolveTheme(theme);
       set({ theme, resolvedTheme: newResolved });
       applyThemeClass(newResolved);
+      window.api?.theme?.update(newResolved);
     },
   };
 });
@@ -62,4 +64,6 @@ function applyThemeClass(resolved: ResolvedTheme) {
 }
 
 // Apply on initial load
-applyThemeClass(resolveTheme(loadPersistedTheme()));
+const initialResolved = resolveTheme(loadPersistedTheme());
+applyThemeClass(initialResolved);
+window.api?.theme?.update(initialResolved);

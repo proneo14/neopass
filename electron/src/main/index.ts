@@ -304,12 +304,12 @@ function createWindow(): void {
     minWidth: 800,
     minHeight: 600,
     title: 'LGI Pass',
-    backgroundColor: '#0f172a',
+    backgroundColor: '#ffffff',
     autoHideMenuBar: true,
     titleBarStyle: 'hidden',
     titleBarOverlay: {
-      color: '#0f172a',
-      symbolColor: '#94a3b8',
+      color: '#ffffff',
+      symbolColor: '#1e293b',
       height: 36,
     },
     show: false,
@@ -414,8 +414,9 @@ function registerIpcHandlers(): void {
       });
       const result = await res.json() as Record<string, unknown>;
       console.log('[ipc] auth:login result keys:', Object.keys(result));
+      // Always attach master_key_hex so the 2FA flow can use it
+      result.master_key_hex = masterKeyHex;
       if (result.access_token || result.token) {
-        result.master_key_hex = masterKeyHex;
         // Reset auto-lock timer on successful login
         resetAutoLockTimer();
         // Push session to sidecar for browser extension bridge
@@ -440,6 +441,35 @@ function registerIpcHandlers(): void {
       return result;
     } catch {
       return { error: 'Failed to connect to backend' };
+    }
+  });
+
+  ipcMain.handle('auth:validate2fa', async (_event, data: { tempToken: string; code: string; email: string; masterKeyHex: string }) => {
+    const api = await ensureApiBase();
+    if (!api) return { error: 'Backend not available' };
+    try {
+      const res = await fetch(`${api}/api/v1/auth/2fa/validate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          temp_token: data.tempToken,
+          code: data.code,
+          encryption_key: data.masterKeyHex,
+        }),
+      });
+      const result = await res.json() as Record<string, unknown>;
+      if (result.access_token || result.token) {
+        result.master_key_hex = data.masterKeyHex;
+        resetAutoLockTimer();
+        const jwt = (result.access_token || result.token) as string;
+        const userId = result.user_id as string;
+        if (jwt && userId) {
+          pushSessionToSidecar(jwt, data.masterKeyHex, userId, data.email);
+        }
+      }
+      return result;
+    } catch {
+      return { error: 'Failed to validate 2FA code' };
     }
   });
 
@@ -1690,6 +1720,23 @@ public class SecureClip {
       console.error('[vault:importExport] Failed:', e);
       return { error: 'Failed to import vault entries' };
     }
+  });
+
+  ipcMain.handle('theme:update', (_event, resolvedTheme: string) => {
+    if (!mainWindow) return;
+    const colors: Record<string, { bg: string; sym: string }> = {
+      'dark':         { bg: '#0f172a', sym: '#94a3b8' },
+      'light':        { bg: '#ffffff', sym: '#1e293b' },
+      'dark-dimmed':  { bg: '#0a0f1e', sym: '#64748b' },
+      'light-dimmed': { bg: '#d4d4d8', sym: '#52525b' },
+    };
+    const c = colors[resolvedTheme] ?? colors['light'];
+    mainWindow.setBackgroundColor(c.bg);
+    mainWindow.setTitleBarOverlay({
+      color: c.bg,
+      symbolColor: c.sym,
+      height: 36,
+    });
   });
 
   ipcMain.handle('biometric:available', async () => {

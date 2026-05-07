@@ -30,6 +30,14 @@ const api = {
       validateString(credentials.authHash, 'authHash');
       return ipcRenderer.invoke('auth:login', credentials);
     },
+    validate2fa: (data: { tempToken: string; code: string; email: string; masterKeyHex: string }): Promise<unknown> => {
+      validateObject(data, 'data');
+      validateString(data.tempToken, 'tempToken');
+      validateString(data.code, 'code');
+      validateString(data.email, 'email');
+      validateString(data.masterKeyHex, 'masterKeyHex');
+      return ipcRenderer.invoke('auth:validate2fa', data);
+    },
     logout: (): Promise<void> =>
       ipcRenderer.invoke('auth:logout'),
     register: (data: { email: string; password: string }): Promise<unknown> => {
@@ -165,6 +173,11 @@ const api = {
   clipboard: {
     copySecure: (text: string, clearAfterMs?: number): Promise<{ success?: boolean; error?: string }> =>
       ipcRenderer.invoke('clipboard:copySecure', text, clearAfterMs ?? 30_000),
+  },
+
+  theme: {
+    update: (resolvedTheme: string): Promise<void> =>
+      ipcRenderer.invoke('theme:update', resolvedTheme),
   },
 
   passkey: {
