@@ -10,6 +10,7 @@ import { EmergencyAccessSection } from '../components/EmergencyAccessSection';
 import { ImportWizard } from '../components/ImportWizard';
 import { SyncSettings } from '../components/SyncSettings';
 import { ServerConfig } from '../components/ServerConfig';
+import { PasswordStrengthBar } from '../components/PasswordStrengthBar';
 import QRCode from 'qrcode';
 
 type AutoLockOption = '1' | '5' | '15' | '30' | '60' | 'never';
@@ -106,6 +107,7 @@ function ChangePasswordModal({ onClose }: { onClose: () => void }) {
             required
             className="w-full px-3 py-2 rounded-md bg-surface-900 border border-surface-600 text-surface-100 text-sm placeholder-surface-500 focus:outline-none focus:ring-2 focus:ring-accent-500"
           />
+          <PasswordStrengthBar password={newPw} />
           <input
             type="password"
             placeholder="Confirm new password"

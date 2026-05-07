@@ -10,6 +10,7 @@ import {
   type HealthReport as HealthReportType,
 } from '../utils/passwordHealth';
 import { checkBreaches, type BreachResult } from '../utils/hibp';
+import { PasswordStrengthBar } from '../components/PasswordStrengthBar';
 
 function ScoreRing({ score }: { score: number }) {
   const r = 54;
@@ -128,6 +129,8 @@ export function HealthReport() {
   const [breachProgress, setBreachProgress] = useState({ checked: 0, total: 0 });
   const [breachError, setBreachError] = useState('');
   const [loadingVault, setLoadingVault] = useState(false);
+  const [masterPwCheck, setMasterPwCheck] = useState('');
+  const [showMasterPwCheck, setShowMasterPwCheck] = useState(false);
 
   // Load vault entries if not already loaded (user navigated here before visiting Vault page)
   useEffect(() => {
@@ -323,6 +326,45 @@ export function HealthReport() {
           </p>
         </div>
         <ScoreRing score={report.overallScore} />
+      </div>
+
+      {/* Master Password Strength */}
+      <div className="rounded-lg border border-surface-700 bg-surface-900/50 p-4 mb-6">
+        <div className="flex items-center justify-between">
+          <div>
+            <p className="text-sm text-surface-200 font-medium">Master Password Strength</p>
+            <p className="text-xs text-surface-500 mt-0.5">
+              Check how strong your master password is — it never leaves this device
+            </p>
+          </div>
+          {!showMasterPwCheck && (
+            <button
+              onClick={() => setShowMasterPwCheck(true)}
+              className="px-4 py-2 rounded-md bg-surface-700 hover:bg-surface-600 text-surface-200 text-sm font-medium transition-colors"
+            >
+              Check
+            </button>
+          )}
+        </div>
+        {showMasterPwCheck && (
+          <div className="mt-3 space-y-2">
+            <input
+              type="password"
+              placeholder="Type your master password to check"
+              value={masterPwCheck}
+              onChange={(e) => setMasterPwCheck(e.target.value)}
+              className="w-full px-3 py-2 rounded-md bg-surface-800 border border-surface-600 text-surface-100 text-sm placeholder-surface-500 focus:outline-none focus:ring-2 focus:ring-accent-500"
+              autoFocus
+            />
+            <PasswordStrengthBar password={masterPwCheck} />
+            <button
+              onClick={() => { setShowMasterPwCheck(false); setMasterPwCheck(''); }}
+              className="text-xs text-surface-500 hover:text-surface-300"
+            >
+              Done
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Summary Cards */}
