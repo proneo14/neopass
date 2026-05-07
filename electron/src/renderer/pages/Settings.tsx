@@ -49,6 +49,13 @@ function SettingsToggle({ label, description, checked, onChange }: {
   );
 }
 
+function EyeOn() {
+  return <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4"><path d="M10 12.5a2.5 2.5 0 100-5 2.5 2.5 0 000 5z" /><path fillRule="evenodd" d="M.664 10.59a1.651 1.651 0 010-1.186A10.004 10.004 0 0110 3c4.257 0 7.893 2.66 9.336 6.41.147.381.146.804 0 1.186A10.004 10.004 0 0110 17c-4.257 0-7.893-2.66-9.336-6.41zM14 10a4 4 0 11-8 0 4 4 0 018 0z" clipRule="evenodd" /></svg>;
+}
+function EyeOff() {
+  return <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4"><path fillRule="evenodd" d="M3.28 2.22a.75.75 0 00-1.06 1.06l14.5 14.5a.75.75 0 101.06-1.06l-1.745-1.745a10.029 10.029 0 003.3-4.38 1.651 1.651 0 000-1.185A10.004 10.004 0 009.999 3a9.956 9.956 0 00-4.744 1.194L3.28 2.22zM7.752 6.69l1.092 1.092a2.5 2.5 0 013.374 3.373l1.092 1.092a4 4 0 00-5.558-5.558z" clipRule="evenodd" /><path d="M10.748 13.93l2.523 2.523A9.987 9.987 0 0110 17c-4.257 0-7.893-2.66-9.336-6.41a1.651 1.651 0 010-1.186A10.007 10.007 0 014.09 5.12l2.109 2.109a4 4 0 005.55 5.55l-.001.001z" /></svg>;
+}
+
 function ChangePasswordModal({ onClose }: { onClose: () => void }) {
   const [currentPw, setCurrentPw] = useState('');
   const [newPw, setNewPw] = useState('');
@@ -56,6 +63,9 @@ function ChangePasswordModal({ onClose }: { onClose: () => void }) {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [showGenerator, setShowGenerator] = useState(false);
+  const [showCurrentPw, setShowCurrentPw] = useState(false);
+  const [showNewPw, setShowNewPw] = useState(false);
+  const [showConfirmPw, setShowConfirmPw] = useState(false);
   const { token, email, login, userId } = useAuthStore();
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -91,31 +101,46 @@ function ChangePasswordModal({ onClose }: { onClose: () => void }) {
       <div className="bg-surface-800 rounded-lg p-5 w-96 shadow-2xl" onClick={(e) => e.stopPropagation()}>
         <h3 className="text-sm font-semibold text-surface-100 mb-4">Change Master Password</h3>
         <form onSubmit={handleSubmit} className="space-y-3">
-          <input
-            type="password"
-            placeholder="Current master password"
-            value={currentPw}
-            onChange={(e) => setCurrentPw(e.target.value)}
-            required
-            className="w-full px-3 py-2 rounded-md bg-surface-900 border border-surface-600 text-surface-100 text-sm placeholder-surface-500 focus:outline-none focus:ring-2 focus:ring-accent-500"
-          />
-          <input
-            type="password"
-            placeholder="New master password"
-            value={newPw}
-            onChange={(e) => setNewPw(e.target.value)}
-            required
-            className="w-full px-3 py-2 rounded-md bg-surface-900 border border-surface-600 text-surface-100 text-sm placeholder-surface-500 focus:outline-none focus:ring-2 focus:ring-accent-500"
-          />
+          <div className="relative">
+            <input
+              type={showCurrentPw ? 'text' : 'password'}
+              placeholder="Current master password"
+              value={currentPw}
+              onChange={(e) => setCurrentPw(e.target.value)}
+              required
+              className="w-full px-3 py-2 pr-10 rounded-md bg-surface-900 border border-surface-600 text-surface-100 text-sm placeholder-surface-500 focus:outline-none focus:ring-2 focus:ring-accent-500"
+            />
+            <button type="button" onClick={() => setShowCurrentPw(!showCurrentPw)} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-surface-500 hover:text-surface-300 transition-colors" tabIndex={-1}>
+              {showCurrentPw ? <EyeOff /> : <EyeOn />}
+            </button>
+          </div>
+          <div className="relative">
+            <input
+              type={showNewPw ? 'text' : 'password'}
+              placeholder="New master password"
+              value={newPw}
+              onChange={(e) => setNewPw(e.target.value)}
+              required
+              className="w-full px-3 py-2 pr-10 rounded-md bg-surface-900 border border-surface-600 text-surface-100 text-sm placeholder-surface-500 focus:outline-none focus:ring-2 focus:ring-accent-500"
+            />
+            <button type="button" onClick={() => setShowNewPw(!showNewPw)} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-surface-500 hover:text-surface-300 transition-colors" tabIndex={-1}>
+              {showNewPw ? <EyeOff /> : <EyeOn />}
+            </button>
+          </div>
           <PasswordStrengthBar password={newPw} />
-          <input
-            type="password"
-            placeholder="Confirm new password"
-            value={confirmPw}
-            onChange={(e) => setConfirmPw(e.target.value)}
-            required
-            className="w-full px-3 py-2 rounded-md bg-surface-900 border border-surface-600 text-surface-100 text-sm placeholder-surface-500 focus:outline-none focus:ring-2 focus:ring-accent-500"
-          />
+          <div className="relative">
+            <input
+              type={showConfirmPw ? 'text' : 'password'}
+              placeholder="Confirm new password"
+              value={confirmPw}
+              onChange={(e) => setConfirmPw(e.target.value)}
+              required
+              className="w-full px-3 py-2 pr-10 rounded-md bg-surface-900 border border-surface-600 text-surface-100 text-sm placeholder-surface-500 focus:outline-none focus:ring-2 focus:ring-accent-500"
+            />
+            <button type="button" onClick={() => setShowConfirmPw(!showConfirmPw)} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-surface-500 hover:text-surface-300 transition-colors" tabIndex={-1}>
+              {showConfirmPw ? <EyeOff /> : <EyeOn />}
+            </button>
+          </div>
           <button
             type="button"
             onClick={() => setShowGenerator(!showGenerator)}
