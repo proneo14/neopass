@@ -49,12 +49,6 @@ jobs:
           go-version-file: go.mod
       - name: Run tests
         run: go test -race -coverprofile=coverage.out ./...
-      - name: Upload coverage
-        uses: actions/upload-artifact@v4
-        with:
-          name: go-coverage
-          path: coverage.out
-          retention-days: 7
 
   go-build:
     name: Go Build
@@ -92,12 +86,6 @@ jobs:
           CGO_ENABLED: "0"
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
-      - name: Upload Go binaries
-        uses: actions/upload-artifact@v4
-        with:
-          name: go-binaries-${{ matrix.suffix }}
-          path: bin/
-          retention-days: 7
 
   # ── Docker ──────────────────────────────────────────────────
   docker:
@@ -164,12 +152,6 @@ jobs:
           cache-dependency-path: electron/package-lock.json
       - run: npm ci
       - run: npm run build
-      - name: Upload Electron build
-        uses: actions/upload-artifact@v4
-        with:
-          name: electron-build
-          path: electron/dist/
-          retention-days: 3
 
   # ── Browser Extension ───────────────────────────────────────
   extension-lint:
@@ -228,9 +210,3 @@ jobs:
         run: npx cross-env TARGET_BROWSER=${{ matrix.browser }} npx webpack --mode production
       - name: Package extension
         run: cd dist/${{ matrix.browser }} && zip -r ../../lgi-pass-${{ matrix.browser }}.zip .
-      - name: Upload extension
-        uses: actions/upload-artifact@v4
-        with:
-          name: extension-${{ matrix.browser }}
-          path: extension/lgi-pass-${{ matrix.browser }}.zip
-          retention-days: 3

@@ -111,6 +111,7 @@ jobs:
         with:
           name: go-binaries-${{ matrix.suffix }}
           path: bin/
+          retention-days: 7
 
   # ── Browser extensions ──────────────────────────────────────
   extensions:
@@ -138,6 +139,7 @@ jobs:
         with:
           name: extension-${{ matrix.browser }}
           path: extension/lgi-pass-${{ matrix.browser }}.zip
+          retention-days: 7
 
   # ── Electron — Windows ─────────────────────────────────────
   electron-windows:
@@ -169,6 +171,7 @@ jobs:
         with:
           name: electron-windows
           path: electron/release/*.exe
+          retention-days: 7
 
   # ── Electron — macOS ────────────────────────────────────────
   electron-macos:
@@ -199,6 +202,7 @@ jobs:
         with:
           name: electron-macos
           path: electron/release/*.dmg
+          retention-days: 7
 
   # ── Electron — Linux ────────────────────────────────────────
   electron-linux:
@@ -231,6 +235,7 @@ jobs:
           path: |
             electron/release/*.AppImage
             electron/release/*.deb
+          retention-days: 7
 
   # ── Docker image ────────────────────────────────────────────
   docker:

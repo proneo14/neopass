@@ -100,7 +100,9 @@ func createTestSend(t *testing.T, router chi.Router, token string, opts map[stri
 	}
 
 	var resp map[string]interface{}
-	json.NewDecoder(w.Body).Decode(&resp)
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode create send response: %v", err)
+	}
 	return resp
 }
 
@@ -140,7 +142,9 @@ func TestAccessSend_Success(t *testing.T) {
 	}
 
 	var accessResp map[string]interface{}
-	json.NewDecoder(w.Body).Decode(&accessResp)
+	if err := json.NewDecoder(w.Body).Decode(&accessResp); err != nil {
+		t.Fatalf("decode access send response: %v", err)
+	}
 
 	if accessResp["type"] != "text" {
 		t.Errorf("expected type=text, got %v", accessResp["type"])
@@ -230,7 +234,9 @@ func TestAccessSend_Password(t *testing.T) {
 	}
 
 	var authResp map[string]interface{}
-	json.NewDecoder(w.Body).Decode(&authResp)
+	if err := json.NewDecoder(w.Body).Decode(&authResp); err != nil {
+		t.Fatalf("decode auth response: %v", err)
+	}
 	if authResp["requires_password"] != true {
 		t.Error("expected requires_password=true")
 	}
@@ -259,7 +265,9 @@ func TestAccessSend_WithPassword(t *testing.T) {
 	}
 
 	var accessResp map[string]interface{}
-	json.NewDecoder(w.Body).Decode(&accessResp)
+	if err := json.NewDecoder(w.Body).Decode(&accessResp); err != nil {
+		t.Fatalf("decode access response: %v", err)
+	}
 	if accessResp["encrypted_data"] == nil {
 		t.Error("expected encrypted_data in response")
 	}
@@ -303,7 +311,9 @@ func TestListSends(t *testing.T) {
 	}
 
 	var sends []map[string]interface{}
-	json.NewDecoder(w.Body).Decode(&sends)
+	if err := json.NewDecoder(w.Body).Decode(&sends); err != nil {
+		t.Fatalf("decode list sends response: %v", err)
+	}
 	if len(sends) != 2 {
 		t.Errorf("expected 2 sends, got %d", len(sends))
 	}

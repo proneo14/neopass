@@ -556,7 +556,7 @@ func (h *ExtensionHandler) Lock(w http.ResponseWriter, r *http.Request) {
 	h.mu.Unlock()
 
 	// Signal the Electron parent process to lock the desktop vault too
-	fmt.Fprintln(os.Stdout, "EXTENSION_LOCK_REQUESTED")
+	_, _ = fmt.Fprintln(os.Stdout, "EXTENSION_LOCK_REQUESTED")
 	// Also write a signal file that Electron watches (more reliable than stdout)
 	writeLockSignalFile()
 
