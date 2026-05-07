@@ -36,7 +36,7 @@ jobs:
             # Push to main — auto-increment patch
             LATEST=$(git tag -l 'v*' --sort=-v:refname | head -1)
             if [ -z "$LATEST" ]; then
-              NEXT="v0.1.0"
+              NEXT="v1.0.0"
             else
               # Parse semver and increment patch
               VERSION="${LATEST#v}"
@@ -156,6 +156,8 @@ jobs:
           cache: npm
           cache-dependency-path: electron/package-lock.json
       - run: npm ci
+      - name: Stamp version into package.json
+        run: npm pkg set version=${{ needs.version.outputs.version }}
       - name: Enable Developer Mode (symlink support)
         run: reg add "HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows\CurrentVersion\AppModelUnlock" /t REG_DWORD /f /v AllowDevelopmentWithoutDevLicense /d 1
       - uses: actions/download-artifact@v4
@@ -185,6 +187,8 @@ jobs:
           cache: npm
           cache-dependency-path: electron/package-lock.json
       - run: npm ci
+      - name: Stamp version into package.json
+        run: npm pkg set version=${{ needs.version.outputs.version }}
       - uses: actions/download-artifact@v4
         with:
           name: go-binaries-darwin
@@ -213,6 +217,8 @@ jobs:
           cache: npm
           cache-dependency-path: electron/package-lock.json
       - run: npm ci
+      - name: Stamp version into package.json
+        run: npm pkg set version=${{ needs.version.outputs.version }}
       - uses: actions/download-artifact@v4
         with:
           name: go-binaries-linux

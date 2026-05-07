@@ -806,6 +806,10 @@ export function Settings() {
   const [showServerConfig, setShowServerConfig] = useState(false);
   const [showExport, setShowExport] = useState(false);
   const [showShortcuts, setShowShortcuts] = useState(false);
+  const [appVersion, setAppVersion] = useState('1.0.0');
+  useEffect(() => {
+    window.api?.app?.getVersion?.().then((v: string) => v && setAppVersion(v));
+  }, []);
   useEffect(() => {
     (async () => {
       const available = await window.api.biometric.isAvailable();
@@ -1526,7 +1530,7 @@ export function Settings() {
           >
             Keyboard Shortcuts →
           </button>
-          <p className="text-xs text-surface-600">LGI Pass v1.0.0</p>
+          <p className="text-xs text-surface-600">LGI Pass v{appVersion}</p>
           <p className="text-xs text-surface-700 mt-0.5">Post-quantum encryption: X-Wing KEM + AES-256-GCM</p>
         </div>
       </div>

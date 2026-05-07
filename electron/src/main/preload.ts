@@ -175,6 +175,10 @@ const api = {
       ipcRenderer.invoke('clipboard:copySecure', text, clearAfterMs ?? 30_000),
   },
 
+  app: {
+    getVersion: (): Promise<string> => ipcRenderer.invoke('app:getVersion'),
+  },
+
   theme: {
     update: (resolvedTheme: string): Promise<void> =>
       ipcRenderer.invoke('theme:update', resolvedTheme),

@@ -1722,13 +1722,15 @@ public class SecureClip {
     }
   });
 
+  ipcMain.handle('app:getVersion', () => app.getVersion());
+
   ipcMain.handle('theme:update', (_event, resolvedTheme: string) => {
     if (!mainWindow) return;
     const colors: Record<string, { bg: string; sym: string }> = {
       'dark':         { bg: '#0f172a', sym: '#94a3b8' },
       'light':        { bg: '#ffffff', sym: '#1e293b' },
-      'dark-dimmed':  { bg: '#0a0f1e', sym: '#64748b' },
-      'light-dimmed': { bg: '#d4d4d8', sym: '#52525b' },
+      'dark-dimmed':  { bg: '#080c15', sym: '#475569' },
+      'light-dimmed': { bg: '#808080', sym: '#e2e8f0' },
     };
     const c = colors[resolvedTheme] ?? colors['light'];
     mainWindow.setBackgroundColor(c.bg);

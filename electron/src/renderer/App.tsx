@@ -33,14 +33,24 @@ export function App() {
 
   // Watch for modal backdrops and dim the native titlebar overlay accordingly
   useEffect(() => {
-    const hasModal = () => document.querySelector('.fixed.inset-0.bg-black\\/50, .fixed.inset-0.bg-black\\/60') !== null;
+    let dimmed = false;
+
+    const hasModal = () => {
+      const all = document.getElementsByClassName('fixed');
+      for (let i = 0; i < all.length; i++) {
+        const cl = all[i].className;
+        if (cl.includes('inset-0') && cl.includes('bg-black')) return true;
+      }
+      return false;
+    };
 
     const update = () => {
       const modalOpen = hasModal();
-      const isDark = resolvedTheme === 'dark';
-      if (modalOpen) {
-        window.api?.theme?.update(isDark ? 'dark-dimmed' : 'light-dimmed');
-      } else {
+      if (modalOpen && !dimmed) {
+        dimmed = true;
+        window.api?.theme?.update(resolvedTheme === 'dark' ? 'dark-dimmed' : 'light-dimmed');
+      } else if (!modalOpen && dimmed) {
+        dimmed = false;
         window.api?.theme?.update(resolvedTheme);
       }
     };
