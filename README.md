@@ -87,6 +87,8 @@ Rate limited: **5 requests/minute per IP**
 | `POST` | `/auth/refresh` | No | Refresh access token |
 | `POST` | `/auth/logout` | No | Logout / invalidate session |
 | `POST` | `/auth/change-password` | Yes | Change password (self-service) |
+| `POST` | `/auth/require-hardware-key` | Yes | Set hardware key enforcement |
+| `GET` | `/auth/security-settings` | Yes | Get security settings |
 
 ### Two-Factor Authentication (`/auth/2fa`)
 
@@ -109,10 +111,37 @@ Rate limited: **5 requests/minute per IP**
 | `GET` | `/vault/entries` | Yes | List all vault entries |
 | `GET` | `/vault/entries/{id}` | Yes | Get single vault entry |
 | `PUT` | `/vault/entries/{id}` | Yes | Update vault entry |
-| `DELETE` | `/vault/entries/{id}` | Yes | Delete vault entry |
+| `DELETE` | `/vault/entries/{id}` | Yes | Delete vault entry (soft-delete to trash) |
+| `PUT` | `/vault/entries/{id}/favorite` | Yes | Toggle favorite |
+| `PUT` | `/vault/entries/{id}/archive` | Yes | Toggle archive |
+| `POST` | `/vault/entries/{id}/restore` | Yes | Restore from trash |
+| `DELETE` | `/vault/entries/{id}/permanent` | Yes | Permanently delete (purge) |
+| `POST` | `/vault/entries/{id}/clone` | Yes | Clone vault entry |
+| `GET` | `/vault/entries/{id}/collections` | Yes | Get entry's collections |
+| `POST` | `/vault/trash/purge` | Yes | Purge all trash |
 | `POST` | `/vault/folders` | Yes | Create folder |
 | `GET` | `/vault/folders` | Yes | List folders |
 | `DELETE` | `/vault/folders/{id}` | Yes | Delete folder |
+
+Supported entry types: `login`, `secure_note`, `credit_card`, `identity`, `ssh_key`
+
+### Passkeys & Hardware Keys (`/vault/passkeys`, `/auth/hardware-keys`)
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| `GET` | `/vault/passkeys` | Yes | List website passkeys for RP |
+| `DELETE` | `/vault/passkeys/{id}` | Yes | Delete passkey |
+| `POST` | `/vault/passkeys/register/begin` | Yes | Begin WebAuthn passkey registration |
+| `POST` | `/vault/passkeys/register/finish` | Yes | Finish passkey registration |
+| `POST` | `/vault/passkeys/authenticate/begin` | Yes | Begin passkey authentication |
+| `POST` | `/vault/passkeys/authenticate/finish` | Yes | Finish passkey authentication |
+| `GET` | `/auth/hardware-keys` | Yes | List hardware auth keys |
+| `DELETE` | `/auth/hardware-keys/{id}` | Yes | Delete hardware key |
+| `POST` | `/auth/hardware-keys/register/begin` | Yes | Begin hardware key registration |
+| `POST` | `/auth/hardware-keys/register/finish` | Yes | Finish hardware key registration |
+| `POST` | `/auth/hardware-keys/authenticate/begin` | Yes | Begin hardware key authentication |
+| `POST` | `/auth/hardware-keys/authenticate/finish` | Yes | Finish hardware key authentication |
+| `GET` | `/fido/metadata` | No | Public FIDO metadata |
 
 ### Admin / Organizations (`/admin`)
 
@@ -128,12 +157,34 @@ Rate limited: **5 requests/minute per IP**
 | `POST` | `/admin/orgs/{id}/accept` | Yes | Accept org invitation |
 | `GET` | `/admin/orgs/{id}/members` | Yes | List org members (admin only) |
 | `DELETE` | `/admin/orgs/{id}/members/{uid}` | Yes | Remove member (admin only) |
+| `PUT` | `/admin/orgs/{id}/members/{uid}/role` | Yes | Set member's role (admin only) |
 | `GET` | `/admin/orgs/{id}/vault/{uid}` | Yes | Access user vault via escrow (admin only) |
 | `POST` | `/admin/orgs/{id}/vault/{uid}/reset-password` | Yes | Reset user password via escrow (admin only) |
 | `GET` | `/admin/orgs/{id}/policy` | Yes | Get org security policy |
 | `PUT` | `/admin/orgs/{id}/policy` | Yes | Update org security policy |
 | `GET` | `/admin/orgs/{id}/invitations` | Yes | List org invitations |
 | `GET` | `/admin/orgs/{id}/audit` | Yes | Get audit log |
+
+### Roles (`/admin/orgs/{id}/roles`)
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| `GET` | `/admin/orgs/{id}/roles` | Yes | List roles |
+| `POST` | `/admin/orgs/{id}/roles` | Yes | Create custom role |
+| `PUT` | `/admin/orgs/{id}/roles/{roleId}` | Yes | Update role |
+| `DELETE` | `/admin/orgs/{id}/roles/{roleId}` | Yes | Delete role |
+
+### Groups (`/admin/orgs/{id}/groups`)
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| `GET` | `/admin/orgs/{id}/groups` | Yes | List groups |
+| `POST` | `/admin/orgs/{id}/groups` | Yes | Create group |
+| `PUT` | `/admin/orgs/{id}/groups/{gid}` | Yes | Update group |
+| `DELETE` | `/admin/orgs/{id}/groups/{gid}` | Yes | Delete group |
+| `GET` | `/admin/orgs/{id}/groups/{gid}/members` | Yes | List group members |
+| `POST` | `/admin/orgs/{id}/groups/{gid}/members` | Yes | Add member to group |
+| `DELETE` | `/admin/orgs/{id}/groups/{gid}/members/{uid}` | Yes | Remove member from group |
 
 ### Sync (`/sync`)
 
@@ -142,6 +193,103 @@ Rate limited: **5 requests/minute per IP**
 | `POST` | `/sync/pull` | Yes | Pull changes since last sync |
 | `POST` | `/sync/push` | Yes | Push local changes (returns conflicts) |
 | `POST` | `/sync/resolve` | Yes | Resolve sync conflict (`keep_server`, `keep_client`, `merge`) |
+
+### Secure Send (`/sends`)
+
+Time-limited encrypted sharing via unique links. Supports text and file (up to 100 MB) with optional password protection and max access count.
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| `POST` | `/sends` | Yes | Create secure send |
+| `GET` | `/sends` | Yes | List user's sends |
+| `DELETE` | `/sends/{id}` | Yes | Delete send |
+| `PUT` | `/sends/{id}/disable` | Yes | Disable send (revoke access) |
+| `GET` | `/send/{slug}` | No | Access send (public page) |
+| `POST` | `/send/{slug}/access` | No | Access send with password |
+
+### Collections (`/collections`)
+
+Shared vaults within an organization with per-member permissions (`read`, `write`, `manage`).
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| `GET` | `/collections` | Yes | List user's collections |
+| `POST` | `/collections` | Yes | Create collection |
+| `GET` | `/collections/{id}` | Yes | Get collection |
+| `PUT` | `/collections/{id}` | Yes | Update collection |
+| `DELETE` | `/collections/{id}` | Yes | Delete collection |
+| `POST` | `/collections/{id}/members` | Yes | Add member to collection |
+| `GET` | `/collections/{id}/members` | Yes | List collection members |
+| `DELETE` | `/collections/{id}/members/{uid}` | Yes | Remove member |
+| `PUT` | `/collections/{id}/members/{uid}/permission` | Yes | Update member permission |
+| `POST` | `/collections/{id}/entries` | Yes | Add entry to collection |
+| `GET` | `/collections/{id}/entries` | Yes | List collection entries |
+| `DELETE` | `/collections/{id}/entries/{entryId}` | Yes | Remove entry from collection |
+| `POST` | `/orgs/{orgId}/collections` | Yes | Create org collection |
+| `GET` | `/orgs/{orgId}/collections` | Yes | List org collections |
+| `GET` | `/orgs/{orgId}/collections/{collId}/groups` | Yes | List collection groups |
+| `POST` | `/orgs/{orgId}/collections/{collId}/groups` | Yes | Add group to collection |
+| `DELETE` | `/orgs/{orgId}/collections/{collId}/groups/{gid}` | Yes | Remove group from collection |
+
+### Emergency Access (`/emergency-access`)
+
+Trusted contacts can request vault access after a configurable waiting period.
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| `POST` | `/emergency-access/invite` | Yes | Invite trusted contact |
+| `GET` | `/emergency-access/granted` | Yes | List access I granted to others |
+| `GET` | `/emergency-access/trusted` | Yes | List contacts who trust me |
+| `POST` | `/emergency-access/{id}/accept` | Yes | Accept invitation |
+| `GET` | `/emergency-access/{id}/public-key` | Yes | Get grantee's public key |
+| `POST` | `/emergency-access/{id}/confirm` | Yes | Confirm emergency contact (encrypt key) |
+| `POST` | `/emergency-access/{id}/initiate` | Yes | Initiate recovery (start wait period) |
+| `POST` | `/emergency-access/{id}/approve` | Yes | Approve recovery request |
+| `POST` | `/emergency-access/{id}/reject` | Yes | Reject recovery request |
+| `GET` | `/emergency-access/{id}/vault` | Yes | Get vault after recovery approved |
+| `POST` | `/emergency-access/{id}/takeover` | Yes | Takeover account (full access) |
+| `DELETE` | `/emergency-access/{id}` | Yes | Delete emergency access |
+
+### SSO (`/sso`) — PostgreSQL only
+
+Single Sign-On via SAML or OIDC identity providers.
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| `GET` | `/sso/{orgId}/login` | No | Initiate SSO login (redirects to IdP) |
+| `POST` | `/sso/{orgId}/callback` | No | Handle IdP callback (SAML/OIDC) |
+| `POST` | `/sso/{orgId}/unlock` | No | Account unlock via SSO |
+| `GET` | `/admin/orgs/{id}/sso` | Yes | Get SSO config (admin only) |
+| `PUT` | `/admin/orgs/{id}/sso` | Yes | Set SSO config (admin only) |
+
+### SCIM 2.0 (`/scim`) — PostgreSQL only
+
+Automated user provisioning via SCIM 2.0 protocol, authenticated with bearer token.
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| `GET` | `/scim/v2/{orgId}/Users` | Bearer | List users |
+| `POST` | `/scim/v2/{orgId}/Users` | Bearer | Create user |
+| `GET` | `/scim/v2/{orgId}/Users/{id}` | Bearer | Get user |
+| `PUT` | `/scim/v2/{orgId}/Users/{id}` | Bearer | Update user |
+| `PATCH` | `/scim/v2/{orgId}/Users/{id}` | Bearer | Patch user |
+| `DELETE` | `/scim/v2/{orgId}/Users/{id}` | Bearer | Delete user |
+| `POST` | `/admin/orgs/{id}/scim/generate-token` | Yes | Generate SCIM API token |
+| `GET` | `/admin/orgs/{id}/scim` | Yes | Get SCIM config |
+| `PUT` | `/admin/orgs/{id}/scim` | Yes | Set SCIM config |
+
+### SIEM & Webhooks (`/admin/orgs/{id}`) — PostgreSQL only
+
+Event export and real-time webhook delivery for security monitoring.
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| `GET` | `/admin/orgs/{id}/events/export` | Yes | Export audit events (JSON/CEF/Syslog) |
+| `GET` | `/admin/orgs/{id}/webhooks` | Yes | List webhooks |
+| `POST` | `/admin/orgs/{id}/webhooks` | Yes | Create webhook |
+| `DELETE` | `/admin/orgs/{id}/webhooks/{webhookId}` | Yes | Delete webhook |
+| `PUT` | `/admin/orgs/{id}/webhooks/{webhookId}/toggle` | Yes | Enable/disable webhook |
+| `POST` | `/admin/orgs/{id}/webhooks/{webhookId}/test` | Yes | Test webhook delivery |
 
 ### Extension Bridge (`/extension`)
 
@@ -177,18 +325,31 @@ Localhost-only, protected by shared secret (not under `/api/v1`):
 
 | Table | Description |
 |-------|-------------|
-| `users` | User accounts with email, bcrypt auth hash, salt, KDF params, X-Wing keypair |
-| `organizations` | Org name, X-Wing keypair (private key encrypted with admin master key), policy |
-| `org_members` | Org membership with role (`admin`/`member`) and escrow blob |
+| `users` | User accounts with email, bcrypt auth hash, salt, KDF params, X-Wing keypair, hardware key enforcement, SSO external ID, token revocation timestamp |
+| `organizations` | Org name, X-Wing keypair, policy, SSO config (SAML/OIDC), SCIM config |
+| `org_members` | Org membership with role (`admin`/`member`), escrow blob, per-admin encrypted org key, role assignment |
 | `folders` | Encrypted folder names, hierarchical via `parent_id` |
-| `vault_entries` | Encrypted vault entries (AES-256-GCM), typed (`login`, `secure_note`, `credit_card`, `identity`), versioned, soft-delete |
+| `vault_entries` | Encrypted vault entries (AES-256-GCM), typed (`login`, `secure_note`, `credit_card`, `identity`, `ssh_key`), versioned, favorites, archive, soft-delete with trash expiry |
 | `totp_secrets` | Encrypted TOTP secrets per user |
-| `shared_2fa` | Time-limited TOTP sharing between users (KEM-encrypted) |
+| `shared_2fa` | Time-limited TOTP sharing between users (KEM-encrypted) with service label |
 | `recovery_codes` | bcrypt-hashed recovery codes (8 codes per user) |
 | `sessions` | Session tracking with hashed tokens and device info |
 | `audit_log` | Actor/target/action audit trail with JSONB details |
 | `sync_cursors` | Per-user per-device sync timestamps |
 | `invitations` | Org invitations with role and acceptance status |
+| `passkey_credentials` | WebAuthn passkeys stored in vault for website authentication |
+| `hardware_auth_keys` | Hardware security keys for vault login 2FA |
+| `sends` | Secure Send shares — time-limited encrypted data via unique slugs, optional password, max access count |
+| `collections` | Shared vaults within an organization with encrypted names |
+| `collection_members` | Per-member collection access with encrypted key and permission (`read`/`write`/`manage`) |
+| `collection_entries` | Junction table linking entries to collections with per-collection encrypted data |
+| `emergency_access` | Trusted contact emergency access with configurable wait period and access type (`view`/`takeover`) |
+| `roles` | Custom organization roles with granular JSONB permissions |
+| `groups` | User groups for bulk collection assignment |
+| `group_members` | Group membership |
+| `collection_groups` | Groups assigned to collections with permission level |
+| `webhooks` | SIEM integration webhooks with event filtering |
+| `webhook_deliveries` | Webhook delivery tracking with retry status |
 
 ### Migrations
 
@@ -196,6 +357,19 @@ Localhost-only, protected by shared secret (not under `/api/v1`):
 - `001_initial.sql` — Core schema: users, orgs, vault entries, folders, TOTP, sessions, audit log, sync cursors
 - `002_admin.sql` — Policy column on organizations, invitations table
 - `003_sync.sql` — Soft-delete flag (`is_deleted`) on vault entries
+- `004_passkeys.sql` — WebAuthn passkey credentials and hardware auth keys tables
+- `005_hw_key_enforcement.sql` — `require_hw_key` flag on users
+- `006_admin_org_key.sql` — Per-admin `encrypted_org_key` on org members
+- `007_shared_2fa_label.sql` — Service label on shared 2FA entries
+- `008_vault_ux.sql` — Favorites, archive, and trash (with `deleted_at` timestamp) on vault entries
+- `009_secure_send.sql` — Sends table for time-limited encrypted sharing
+- `010_collections.sql` — Collections, collection members, and collection entries tables
+- `011_collection_entry_data.sql` — Per-collection encrypted data on collection entries
+- `012_emergency_access.sql` — Emergency access table with wait period and access types
+- `013_token_revocation.sql` — `tokens_revoked_at` column on users for JWT invalidation
+- `014_ssh_keys.sql` — `ssh_key` entry type added to vault entries
+- `015_sso.sql` — SSO config (SAML/OIDC) and SCIM support on organizations, SSO external ID on users
+- `016_roles_groups_siem.sql` — Custom roles, groups, group members, collection groups, webhooks, and webhook deliveries
 
 **SQLite** (`migrations/sqlite/`):
 - `001_initial.sql` — Combined schema (all tables in one migration, SQLite-compatible syntax)
@@ -273,11 +447,55 @@ Wire format uses hex-encoded encrypted data and nonces. Soft-deleted entries are
 
 - **Create Organization**: Generates an X-Wing keypair for the org; admin's master key encrypts the org private key
 - **Escrow System**: Each member's master key is encrypted with the org public key (KEM) and stored as an escrow blob
+- **Multi-Admin Support**: Per-admin encrypted org key so any admin can decrypt the org private key for vault access
 - **Admin Vault Access**: Admin decrypts org private key → decrypts member's escrow → gets member's master key → decrypts vault entries. **Always audit-logged**.
 - **Password Reset**: Admin can re-encrypt all of a user's vault entries with a new master key via escrow
 - **Org Policy**: JSON policy with `require_2fa`, `min_password_length`, `rotation_days`
 - **Invitation System**: Email-based invitations with role assignment
+- **Custom Roles**: Granular JSONB permissions for fine-grained access control beyond admin/member
+- **Groups**: User groups for bulk collection assignment and management
 - **Audit Log**: All admin actions logged with actor, target, action, and details
+- **Token Revocation**: `tokens_revoked_at` timestamp invalidates all JWTs issued before that time
+
+## Collections (Shared Vaults)
+
+- **Per-Org Collections**: Encrypted shared vaults within an organization
+- **Permissions**: Per-member access levels — `read`, `write`, or `manage`
+- **Group Assignment**: Assign entire groups to collections with permission levels
+- **Per-Collection Encryption**: Entries re-encrypted with collection-specific keys for secure sharing
+- **Multi-Collection Entries**: A single vault entry can belong to multiple collections
+
+## Secure Send
+
+- **Time-Limited Sharing**: Share encrypted text or files via unique links with configurable expiry (max 720 hours)
+- **Password Protection**: Optional bcrypt-hashed password for additional access control
+- **Max Access Count**: Configurable maximum number of accesses before the link is disabled
+- **File Support**: Up to 100 MB file attachments
+- **Hide Email**: Option to hide sender's email from recipients
+- **Disable/Revoke**: Senders can disable active sends at any time
+
+## Emergency Access
+
+- **Trusted Contacts**: Designate trusted contacts who can request vault access in emergencies
+- **Configurable Wait Period**: Set a waiting period (in days) before recovery is granted
+- **Access Types**: `view` (read-only vault access) or `takeover` (full account takeover)
+- **Approval Flow**: Grantor can approve or reject recovery requests during the wait period
+- **Auto-Approve**: If the grantor does not respond within the wait period, access is automatically granted
+- **KEM-Encrypted Keys**: Emergency keys encrypted with the grantee's X-Wing public key
+
+## SSO & SCIM (Enterprise)
+
+- **SSO Providers**: SAML and OIDC identity provider integration per organization
+- **Auto-Enrollment**: Optionally auto-enroll new SSO users into the organization
+- **SCIM 2.0**: Automated user provisioning and deprovisioning via SCIM protocol
+- **SCIM Authentication**: Bearer token authentication (bcrypt-hashed token stored server-side)
+
+## SIEM & Webhooks
+
+- **Event Export**: Export audit events in JSON, CEF, or Syslog format
+- **Webhooks**: Real-time event delivery to external security monitoring systems
+- **Event Filtering**: Configure which events trigger each webhook (default: all)
+- **Delivery Tracking**: Track webhook delivery status, response codes, and retry attempts
 
 ## Environment Variables
 
@@ -417,7 +635,7 @@ All tests are centralized in the `testing/` directory. The suite covers Go backe
 ### Run All Tests
 
 ```bash
-# Go backend tests (crypto, auth, vault, admin — 39 tests)
+# Go backend tests (crypto, auth, vault, admin, collections, emergency access, sends, vault UX — 83 tests)
 go test -v ./testing/...
 
 # Electron tests (IPC crypto, login flow, biometric — 18 tests)
@@ -436,10 +654,14 @@ go test -race -coverprofile=coverage.out ./testing/...
 
 | File | Tests | Description |
 |------|-------|-------------|
-| `crypto_test.go` | 15 + 2 benchmarks | KDF determinism, AES-256-GCM round-trip/tamper, X-Wing KEM exchange, ML-DSA-65 sign/verify, escrow, ZeroBytes |
+| `crypto_test.go` | 20 + 2 benchmarks | KDF determinism, AES-256-GCM round-trip/tamper, X-Wing KEM exchange, ML-DSA-65 sign/verify, escrow, re-encrypt org key, ZeroBytes |
 | `auth_handler_test.go` | 8 | Register success/duplicate, login success/wrong password/2FA, rate limiting (429 on 6th attempt), refresh valid/expired |
 | `vault_handler_test.go` | 9 | Create/get/update/delete entries, list with filters, unauthorized access, invalid type, folder CRUD |
 | `admin_service_test.go` | 7 | Create org, access vault as admin/non-admin, change password, audit log, invite+accept, leave org |
+| `vault_ux_test.go` | 7 | Favorite set/unset, archive set/unset, trash delete/restore, permanent delete, auto-purge, clone entry, list filters |
+| `collection_handler_test.go` | 8 | Create collection, add member, read/write/manage permissions, delete collection, list empty/with membership |
+| `emergency_access_test.go` | 12 | Invite/accept flow, initiate/approve/reject recovery, auto-approve, takeover, delete, list granted/trusted, handler tests |
+| `send_handler_test.go` | 11 | Create text send, access success/expired/max-count, password protection (with/without/wrong), list, delete, disable, purge |
 
 Tests use in-memory mock repositories (`mocks.go`) — no database required. Benchmarks:
 ```bash
@@ -610,6 +832,10 @@ npm run package:edge    # Edge only
 - **Extension Bridge**: Pushes auth session to sidecar so browser extension can fetch credentials
 - **Lockfile**: Writes `sidecar.lock` to app data dir for extension discovery
 - **Security**: Context isolation, sandbox enabled, CSP headers, no `nodeIntegration`
+- **Vault UX**: Favorites, archive, trash with auto-purge, entry cloning
+- **Passkey Management**: Store and manage WebAuthn passkeys for websites
+- **SSH Key Storage**: Store SSH keys as vault entries
+- **Secure Send**: Create and manage time-limited encrypted shares
 
 ### App Routes
 
@@ -650,7 +876,7 @@ npm run package:edge    # Edge only
 │   └── nativehost/main.go       # Browser extension native messaging host
 ├── internal/
 │   ├── admin/                   # Organization & admin service
-│   ├── api/                     # HTTP handlers, routes, middleware
+│   ├── api/                     # HTTP handlers, routes, middleware (auth, vault, admin, passkeys, sends, collections, emergency, SSO, SCIM, SIEM)
 │   ├── auth/                    # JWT (ML-DSA-65), TOTP, SMS 2FA
 │   ├── config/                  # Environment-based configuration
 │   ├── crypto/                  # X-Wing KEM, ML-DSA-65, AES-256-GCM, Argon2id
@@ -658,7 +884,7 @@ npm run package:edge    # Edge only
 │   ├── sync/                    # Multi-device sync with conflict resolution
 │   └── vault/                   # Vault CRUD service
 ├── testing/                     # Centralized test suite (Go, Electron, Extension)
-├── migrations/                  # SQL migration files (PostgreSQL + SQLite)
+├── migrations/                  # SQL migration files (001-016, PostgreSQL + SQLite)
 ├── electron/                    # Desktop app (Electron + React + Vite)
 │   └── src/
 │       ├── main/                # Electron main process, biometric, preload
@@ -671,10 +897,14 @@ npm run package:edge    # Edge only
 │       └── lib/                 # Shared browser API + messaging
 ├── testing/                     # Centralized test suite
 │   ├── crypto_test.go           # Crypto tests (KDF, AES-GCM, X-Wing, ML-DSA-65)
-│   ├── mocks.go                 # Mock repositories (User, Vault, Org, Audit)
+│   ├── mocks.go                 # Mock repositories (User, Vault, Org, Audit, Send, Collection, Emergency)
 │   ├── auth_handler_test.go     # Auth handler tests (register, login, 2FA, rate limit)
 │   ├── vault_handler_test.go    # Vault handler tests (CRUD, auth, filters)
 │   ├── admin_service_test.go    # Admin service tests (orgs, escrow, audit)
+│   ├── vault_ux_test.go         # Vault UX tests (favorites, archive, trash, clone)
+│   ├── collection_handler_test.go # Collection tests (CRUD, permissions, members)
+│   ├── emergency_access_test.go # Emergency access tests (invite, recovery, takeover)
+│   ├── send_handler_test.go     # Secure Send tests (create, access, password, expiry)
 │   ├── electron/                # Electron IPC + flow tests (vitest)
 │   │   ├── crypto.test.ts
 │   │   └── login.spec.ts
