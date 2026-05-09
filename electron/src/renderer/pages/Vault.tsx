@@ -10,6 +10,7 @@ import { ImportWizard } from '../components/ImportWizard';
 import type { VaultEntry } from '../types/vault';
 
 const ENTRY_TYPES = ['login', 'secure_note', 'credit_card', 'identity'] as const;
+const ENTRY_TYPES_WITH_SSH = ['login', 'secure_note', 'credit_card', 'identity', 'ssh_key'] as const;
 
 function ContextMenu({
   x,
@@ -788,7 +789,7 @@ export function Vault() {
           >
             All
           </button>
-          {ENTRY_TYPES.map((type) => (
+          {(selectedCollectionId ? ENTRY_TYPES_WITH_SSH : ENTRY_TYPES).map((type) => (
             <button
               key={type}
               onClick={() => setSelectedTypeFilter(selectedTypeFilter === type ? null : type)}

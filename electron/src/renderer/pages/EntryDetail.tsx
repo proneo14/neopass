@@ -600,6 +600,14 @@ export function EntryDetail() {
             {vaultEntry.is_archived && ' · Archived'}
             {isTrash && ' · In Trash'}
           </span>
+          {isTrash && vaultEntry.deleted_at && (() => {
+            const daysLeft = Math.max(0, 30 - Math.floor((Date.now() - new Date(vaultEntry.deleted_at!).getTime()) / (24 * 60 * 60 * 1000)));
+            return (
+              <span className={`text-xs ${daysLeft <= 7 ? 'text-red-400' : 'text-surface-500'}`}>
+                {daysLeft === 0 ? 'Permanently deleting soon' : `${daysLeft} day${daysLeft !== 1 ? 's' : ''} until permanent deletion`}
+              </span>
+            );
+          })()}
         </div>
         <div className="flex-1" />
         {!isTrash && (
