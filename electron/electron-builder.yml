@@ -65,6 +65,7 @@ linux:
   category: Utility
   artifactName: "${productName}-${version}.${ext}"
 
+# Publishing configuration (for GitHub Releases or hosting site)
 publish:
   provider: generic
   url: ""
