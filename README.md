@@ -1,4 +1,4 @@
-# LGI Pass — Quantum-Safe Password Manager
+# NeoPass — Quantum-Safe Password Manager
 
 A post-quantum password manager featuring end-to-end encryption with hybrid classical/post-quantum cryptography, multi-device sync, browser extension autofill, and organization-level administration with escrow recovery.
 
@@ -811,9 +811,9 @@ The installer bundles:
 
 | Target | Store | Package |
 |--------|-------|---------|
-| Chrome | Chrome Web Store | `lgi-pass-chrome.zip` |
-| Firefox | AMO (addons.mozilla.org) | `lgi-pass-firefox.zip` |
-| Edge | Edge Add-ons | `lgi-pass-edge.zip` |
+| Chrome | Chrome Web Store | `neopass-chrome.zip` |
+| Firefox | AMO (addons.mozilla.org) | `neopass-firefox.zip` |
+| Edge | Edge Add-ons | `neopass-edge.zip` |
 
 Build and package:
 ```bash

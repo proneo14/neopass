@@ -120,7 +120,7 @@ export function ServerConfig({ onClose }: { onClose: () => void }) {
                   </h3>
                   <div className="bg-surface-900 rounded-lg p-4 space-y-4">
                     <p className="text-xs text-surface-400">
-                      To sync your vault across multiple devices, connect to a remote LGI Pass server.
+                      To sync your vault across multiple devices, connect to a remote NeoPass server.
                       All devices using the same server and account will stay in sync automatically.
                     </p>
 

@@ -307,7 +307,7 @@ export function Popup() {
         <div className="text-4xl mb-4">🔌</div>
         <h2 className="text-lg font-semibold mb-2">Desktop App Not Running</h2>
         <p className="text-sm text-surface-500 dark:text-surface-400 text-center mb-4">
-          The LGI Pass desktop app must be running to use this
+          The NeoPass desktop app must be running to use this
           extension.
         </p>
         <p className="text-xs text-surface-600 dark:text-surface-500 text-center">
@@ -518,7 +518,7 @@ export function Popup() {
       <div className="px-4 py-3 border-b border-surface-200 dark:border-surface-800 shrink-0">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <span className="text-accent-400 text-sm font-bold">LGI Pass</span>
+            <span className="text-accent-400 text-sm font-bold">NeoPass</span>
             <span className="text-xs text-surface-400 dark:text-surface-500">•</span>
             <span className="text-sm text-surface-600 dark:text-surface-300 truncate max-w-[200px]">
               {currentDomain || 'No domain'}

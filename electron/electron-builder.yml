@@ -1,6 +1,6 @@
 appId: com.quantum.passwordmanager
-productName: LGI Pass
-copyright: Copyright © 2026
+productName: NeoPass
+copyright: Copyright Â© 2026
 
 directories:
   output: release

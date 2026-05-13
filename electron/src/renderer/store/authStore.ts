@@ -2,7 +2,7 @@ import { create } from 'zustand';
 import { useVaultStore } from './vaultStore';
 
 // Persist org info to localStorage, scoped per userId
-const ORG_STORAGE_PREFIX = 'lgi-pass-org-';
+const ORG_STORAGE_PREFIX = 'neopass-org-';
 
 function orgKey(userId: string): string {
   return `${ORG_STORAGE_PREFIX}${userId}`;

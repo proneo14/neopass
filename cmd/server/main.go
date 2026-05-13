@@ -160,7 +160,7 @@ func main() {
 		adminService.SetPasskeyRepo(passkeyRepo)
 		hwKeyRepo := db.NewSQLiteHardwareKeyRepo(sqliteDB.DB)
 		webauthnService = auth.NewWebAuthnService(auth.WebAuthnConfig{
-			RPDisplayName: "LGI Pass",
+			RPDisplayName: "NeoPass",
 			RPID:          "localhost",
 			RPOrigins:     []string{"http://localhost"},
 		}, passkeyRepo, hwKeyRepo)
@@ -190,7 +190,7 @@ func main() {
 		adminService.SetPasskeyRepo(passkeyRepo)
 		hwKeyRepo := db.NewPgHardwareKeyRepo(database.Pool)
 		webauthnService = auth.NewWebAuthnService(auth.WebAuthnConfig{
-			RPDisplayName: "LGI Pass",
+			RPDisplayName: "NeoPass",
 			RPID:          "localhost",
 			RPOrigins:     []string{"http://localhost"},
 		}, passkeyRepo, hwKeyRepo)

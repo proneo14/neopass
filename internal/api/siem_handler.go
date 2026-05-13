@@ -132,7 +132,7 @@ func (h *SIEMHandler) exportCEF(w http.ResponseWriter, entries []db.AuditEntry) 
 		if e.TargetID != nil {
 			targetID = *e.TargetID
 		}
-		line := fmt.Sprintf("CEF:0|LGI|Pass|1.0|%s|%s|%d|src=%s dst=%s rt=%s\n",
+		line := fmt.Sprintf("CEF:0|NeoPass||1.0|%s|%s|%d|src=%s dst=%s rt=%s\n",
 			e.Action, e.Action, severity, actorID, targetID,
 			e.CreatedAt.Format(time.RFC3339))
 		_, _ = w.Write([]byte(line))
@@ -155,7 +155,7 @@ func (h *SIEMHandler) exportSyslog(w http.ResponseWriter, entries []db.AuditEntr
 		if e.Details != nil {
 			details = string(e.Details)
 		}
-		line := fmt.Sprintf("<%d>1 %s lgipass - %s - [action=\"%s\" actor=\"%s\"] %s\n",
+		line := fmt.Sprintf("<%d>1 %s neopass - %s - [action=\"%s\" actor=\"%s\"] %s\n",
 			pri, e.CreatedAt.Format(time.RFC3339Nano), e.ID, e.Action, actorID, details)
 		_, _ = w.Write([]byte(line))
 	}
@@ -370,7 +370,7 @@ func (h *SIEMHandler) TestWebhook(w http.ResponseWriter, r *http.Request) {
 		"timestamp": time.Now().UTC().Format(time.RFC3339),
 		"actor":     claims.UserID,
 		"org_id":    orgID,
-		"details":   map[string]string{"message": "This is a test event from LGI Pass"},
+		"details":   map[string]string{"message": "This is a test event from NeoPass"},
 	}
 
 	payloadBytes, _ := json.Marshal(testPayload)
@@ -469,8 +469,8 @@ func deliverWebhook(url string, secretHash, payload []byte) (int, error) {
 		return 0, fmt.Errorf("create request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-LGIPass-Signature", signature)
-	req.Header.Set("User-Agent", "LGIPass-Webhook/1.0")
+	req.Header.Set("X-NeoPass-Signature", signature)
+	req.Header.Set("User-Agent", "NeoPass-Webhook/1.0")
 
 	client := &http.Client{Timeout: 10 * time.Second}
 	resp, err := client.Do(req)

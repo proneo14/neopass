@@ -1,4 +1,4 @@
-# Build stage
+﻿# Build stage
 FROM golang:1.24-alpine AS builder
 
 RUN apk add --no-cache git
@@ -13,7 +13,7 @@ RUN go mod download
 COPY . .
 
 RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /server ./cmd/server/ && \
-    CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /qpm-native-host ./cmd/nativehost/
+    CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /neopass-native-host ./cmd/nativehost/
 
 # Runtime stage
 FROM alpine:3.20
@@ -24,7 +24,7 @@ RUN apk add --no-cache ca-certificates tzdata && \
 WORKDIR /app
 
 COPY --from=builder /server .
-COPY --from=builder /qpm-native-host .
+COPY --from=builder /neopass-native-host .
 COPY migrations/ ./migrations/
 
 USER appuser

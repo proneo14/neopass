@@ -2,7 +2,7 @@
 
 ## Threat Model
 
-Quantum Password Manager (LGI Pass) is designed to protect user credentials against both current and future threats, including quantum computing attacks.
+NeoPass is designed to protect user credentials against both current and future threats, including quantum computing attacks.
 
 ### Trust Boundaries
 
@@ -109,7 +109,7 @@ Master Password + Salt → Argon2id(64 MB, 3 iter, 4 parallel) → 64 bytes
 
 If you discover a security vulnerability, please report it responsibly:
 
-1. **Email**: security@lgipass.example.com
+1. **Email**: security@neopass.example.com
 2. **Do NOT** open a public GitHub issue for security vulnerabilities
 3. Include a detailed description and reproduction steps
 4. We will acknowledge receipt within 48 hours
@@ -117,5 +117,5 @@ If you discover a security vulnerability, please report it responsibly:
 
 ## Security Contact
 
-- **Email**: security@lgipass.example.com
+- **Email**: security@neopass.example.com
 - **PGP Key**: Available upon request

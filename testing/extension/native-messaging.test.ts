@@ -237,7 +237,7 @@ describe('Native Messaging — Timeout Handling', () => {
   test('should handle disconnect gracefully', () => {
     // Simulate port disconnect
     const port = {
-      name: 'qpm-native-host',
+      name: 'neopass-native-host',
       onMessage: { addListener: jest.fn() },
       onDisconnect: { addListener: jest.fn() },
       postMessage: jest.fn(),

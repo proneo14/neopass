@@ -21,8 +21,8 @@ import { detectAndPromptTOTP, isLikely2FASetupPage } from './totp-detector';
 // so it posts messages to this ISOLATED-world script, which relays them
 // to the service worker and returns the response.
 
-const PASSKEY_REQ = 'lgipass-passkey-request';
-const PASSKEY_RES = 'lgipass-passkey-response';
+const PASSKEY_REQ = 'neopass-passkey-request';
+const PASSKEY_RES = 'neopass-passkey-response';
 
 window.addEventListener('message', (event: MessageEvent) => {
   if (event.source !== window || event.data?.type !== PASSKEY_REQ) return;
@@ -47,7 +47,7 @@ browserAPI.runtime.onMessage.addListener((msg: { type?: string; message?: string
 
 function showInPageToast(message: string, iconUrl?: string, toastTitle?: string) {
   const container = document.createElement('div');
-  container.id = 'lgipass-toast';
+  container.id = 'neopass-toast';
   container.style.cssText = `
     position: fixed; top: 16px; right: 16px; z-index: 2147483647;
     display: flex; align-items: center; gap: 10px;
@@ -102,7 +102,7 @@ function showInPageToast(message: string, iconUrl?: string, toastTitle?: string)
   container.appendChild(close);
 
   // Remove any existing toast
-  document.getElementById('lgipass-toast')?.remove();
+  document.getElementById('neopass-toast')?.remove();
   document.body.appendChild(container);
 
   // Animate in
@@ -165,7 +165,7 @@ async function fetchCredentials(domain: string): Promise<Credential[]> {
  */
 async function scanAndAttach() {
   const forms = detectLoginForms();
-  console.debug('[QPM] scanAndAttach: detected', forms.length, 'forms');
+  console.debug('[NeoPass] scanAndAttach: detected', forms.length, 'forms');
   if (forms.length === 0) return;
 
   // Merge with existing forms (avoid duplicates)
@@ -189,7 +189,7 @@ async function scanAndAttach() {
   // Fetch matching credentials
   const credentials = await fetchCredentials(domain);
   currentCredentials = credentials;
-  console.debug('[QPM] fetched', credentials.length, 'credentials for', domain);
+  console.debug('[NeoPass] fetched', credentials.length, 'credentials for', domain);
 
   // Attach focus listeners for overlay — pass getters so listeners
   // always read the latest credentials, not stale snapshots.
@@ -213,7 +213,7 @@ browserAPI.runtime.onMessage.addListener(
       // Vault was locked — clear all UI and cached credentials
       currentCredentials = [];
       clearAllUI();
-      console.debug('[QPM] vault locked — cleared UI and credentials');
+      console.debug('[NeoPass] vault locked — cleared UI and credentials');
       return;
     }
 
@@ -263,17 +263,17 @@ browserAPI.runtime.onMessage.addListener(
  * Guard against double-init from scripting.executeScript re-injection.
  */
 function init() {
-  if ((window as any).__qpmContentInit) return;
-  (window as any).__qpmContentInit = true;
-  console.debug('[QPM] content script initializing');
+  if ((window as any).__neopassContentInit) return;
+  (window as any).__neopassContentInit = true;
+  console.debug('[NeoPass] content script initializing');
 
   // Pre-fetch credentials so they're ready when forms are detected.
   // Don't show the pill yet — wait for scanAndAttach to find login forms.
   const domain = extractDomain(window.location.href) ?? '';
-  console.debug('[QPM] domain:', domain);
+  console.debug('[NeoPass] domain:', domain);
   if (domain) {
     fetchCredentials(domain).then((creds) => {
-      console.debug('[QPM] pre-fetch got', creds.length, 'credentials');
+      console.debug('[NeoPass] pre-fetch got', creds.length, 'credentials');
       if (creds.length > 0) {
         currentCredentials = creds;
       }
@@ -290,10 +290,10 @@ function init() {
       // Fetch credentials on-demand when user focuses a login field
       // before scanAndAttach has completed
       const domain = extractDomain(window.location.href) ?? '';
-      console.debug('[QPM] fetchAndShow: domain =', domain, 'field =', field.id || field.name);
+      console.debug('[NeoPass] fetchAndShow: domain =', domain, 'field =', field.id || field.name);
       if (!domain) return;
       const creds = await fetchCredentials(domain);
-      console.debug('[QPM] fetchAndShow: got', creds.length, 'credentials');
+      console.debug('[NeoPass] fetchAndShow: got', creds.length, 'credentials');
       if (creds.length === 0) return;
       currentCredentials = creds;
 

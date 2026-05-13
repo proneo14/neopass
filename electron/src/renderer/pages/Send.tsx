@@ -90,7 +90,7 @@ async function generateSendHTML(opts: {
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>LGI Pass \u2014 Secure Send</title>
+<title>NeoPass \u2014 Secure Send</title>
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#0f172a;color:#e2e8f0;min-height:100vh;display:flex;align-items:center;justify-content:center}
@@ -114,7 +114,7 @@ input[type="password"]:focus{border-color:#3b82f6}
 <body>
 <div class="card">
 <h1>\ud83d\udd12 Secure Send</h1>
-<div class="brand">Sent via LGI Pass</div>
+<div class="brand">Sent via NeoPass</div>
 <div id="loading" class="loading">Decrypting\u2026</div>
 <div id="error" class="error"></div>
 <div id="pw-form" style="display:none">
@@ -338,7 +338,7 @@ export function Send() {
 
         const defaultName = sendName
           ? `${sendName.replace(/[^a-zA-Z0-9_-]/g, '_')}.html`
-          : `lgipass-send-${new Date().toISOString().slice(0, 10)}.html`;
+          : `neopass-send-${new Date().toISOString().slice(0, 10)}.html`;
 
         const saveResult = await window.api.send.saveFile(html, defaultName);
         if (saveResult.cancelled) {

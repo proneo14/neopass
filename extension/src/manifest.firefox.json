@@ -1,8 +1,8 @@
 {
   "manifest_version": 2,
-  "name": "LGI Pass",
+  "name": "NeoPass",
   "version": "1.0.0",
-  "description": "LGI Pass - secure password autofill",
+  "description": "NeoPass - secure password autofill",
   "permissions": [
     "storage",
     "nativeMessaging",
@@ -40,7 +40,7 @@
   },
   "browser_specific_settings": {
     "gecko": {
-      "id": "lgipass@lancastergroup.com",
+      "id": "neopass@neopass.com",
       "strict_min_version": "55.0"
     }
   }

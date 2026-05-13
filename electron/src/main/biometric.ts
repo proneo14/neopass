@@ -89,7 +89,7 @@ let pendingCommand: {
 let stdoutBuffer = '';
 
 function getHelloScriptPath(): string {
-  return path.join(process.env.TEMP || process.env.TMP || '.', 'qpm_hello_daemon.ps1');
+  return path.join(process.env.TEMP || process.env.TMP || '.', 'neopass_hello_daemon.ps1');
 }
 
 /**

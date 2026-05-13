@@ -87,7 +87,7 @@ export const useVaultStore = create<VaultState>((set, get) => ({
   searchQuery: '',
   sortBy: 'updated_at',
   favoritesFirst: false,
-  lastUsedAt: (() => { try { const raw = localStorage.getItem('lgi-pass-last-used'); return raw ? JSON.parse(raw) : {}; } catch { return {}; } })(),
+  lastUsedAt: (() => { try { const raw = localStorage.getItem('neopass-last-used'); return raw ? JSON.parse(raw) : {}; } catch { return {}; } })(),
   selectedFolderId: null,
   selectedTypeFilter: null,
   activeFilter: 'all',
@@ -121,7 +121,7 @@ export const useVaultStore = create<VaultState>((set, get) => ({
   setFavoritesFirst: (favoritesFirst) => set({ favoritesFirst }),
   trackLastUsed: (entryId) => set((s) => {
     const lastUsedAt = { ...s.lastUsedAt, [entryId]: Date.now() };
-    try { localStorage.setItem('lgi-pass-last-used', JSON.stringify(lastUsedAt)); } catch { /* ignore */ }
+    try { localStorage.setItem('neopass-last-used', JSON.stringify(lastUsedAt)); } catch { /* ignore */ }
     return { lastUsedAt };
   }),
   setSelectedFolderId: (selectedFolderId) => set({ selectedFolderId }),

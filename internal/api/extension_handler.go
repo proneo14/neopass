@@ -537,7 +537,7 @@ func (h *ExtensionHandler) VerifyPassword(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	// Resolve email: request → session → database lookup
+	// Resolve email: request â†’ session â†’ database lookup
 	email := body.Email
 	if email == "" {
 		email = sess.Email
@@ -699,7 +699,7 @@ func extractDomainFromURI(uri string) string {
 	return u
 }
 
-// ── Extension Passkey endpoints ──────────────────────────────────────────────
+// â”€â”€ Extension Passkey endpoints â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 // ExtListPasskeys handles GET /extension/passkeys?rp_id=...
 func (h *ExtensionHandler) ExtListPasskeys(w http.ResponseWriter, r *http.Request) {
@@ -896,7 +896,7 @@ func (h *ExtensionHandler) ExtCreatePasskey(w http.ResponseWriter, r *http.Reque
 	// Build a WebAuthn attestation response that the website can verify
 	rpIDHash := crypto.RPIDHash(req.RPID)
 	flags := crypto.FlagUserPresent | crypto.FlagUserVerified | crypto.FlagAttestedCred | crypto.FlagBackupElig | crypto.FlagBackupState
-	attestedCred := crypto.BuildAttestedCredentialData(crypto.LGIPassAAGUID, passkey.CredentialID, passkey.PublicKeyCBOR)
+	attestedCred := crypto.BuildAttestedCredentialData(crypto.NeoPassAAGUID, passkey.CredentialID, passkey.PublicKeyCBOR)
 	authData := crypto.MarshalAuthenticatorData(rpIDHash, flags, 0, attestedCred)
 
 	// Use the website's challenge and origin for clientDataJSON so the

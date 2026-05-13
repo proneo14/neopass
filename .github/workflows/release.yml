@@ -83,7 +83,7 @@ jobs:
       - name: Build Go binaries
         run: |
           go build -trimpath -ldflags="-s -w" -o bin/server.exe ./cmd/server/
-          go build -trimpath -ldflags="-s -w" -o bin/qpm-native-host.exe ./cmd/nativehost/
+          go build -trimpath -ldflags="-s -w" -o bin/neopass-native-host.exe ./cmd/nativehost/
         env:
           CGO_ENABLED: "0"
       - name: Install Electron deps
@@ -122,7 +122,7 @@ jobs:
       - name: Build Go binaries
         run: |
           GOOS=darwin GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o bin/server ./cmd/server/
-          GOOS=darwin GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o bin/qpm-native-host ./cmd/nativehost/
+          GOOS=darwin GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o bin/neopass-native-host ./cmd/nativehost/
         env:
           CGO_ENABLED: "0"
       - name: Install Electron deps
@@ -159,7 +159,7 @@ jobs:
       - name: Build Go binaries
         run: |
           go build -trimpath -ldflags="-s -w" -o bin/server ./cmd/server/
-          go build -trimpath -ldflags="-s -w" -o bin/qpm-native-host ./cmd/nativehost/
+          go build -trimpath -ldflags="-s -w" -o bin/neopass-native-host ./cmd/nativehost/
         env:
           CGO_ENABLED: "0"
       - name: Install Electron deps
@@ -200,16 +200,16 @@ jobs:
         run: |
           for browser in chrome firefox edge; do
             npx cross-env TARGET_BROWSER=$browser npx webpack --mode production
-            cd dist/$browser && zip -r ../../lgi-pass-$browser.zip . && cd ../..
+            cd dist/$browser && zip -r ../../neopass-$browser.zip . && cd ../..
           done
       - name: Upload to Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ needs.version.outputs.tag }}
           files: |
-            extension/lgi-pass-chrome.zip
-            extension/lgi-pass-firefox.zip
-            extension/lgi-pass-edge.zip
+            extension/neopass-chrome.zip
+            extension/neopass-firefox.zip
+            extension/neopass-edge.zip
 
   # ── Docker image ────────────────────────────────────────────
   docker:

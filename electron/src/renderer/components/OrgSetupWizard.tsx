@@ -21,7 +21,7 @@ export function OrgSetupWizard({ onClose, onComplete }: { onClose: () => void; o
   const buildConnectionString = () =>
     `postgres://${encodeURIComponent(username)}:${encodeURIComponent(password)}@${host}:${port}/${database}?sslmode=disable`;
 
-  const dockerCommand = `docker run -d --name lgipass-db \\
+  const dockerCommand = `docker run -d --name neopass-db \\
   -e POSTGRES_DB=${database} \\
   -e POSTGRES_USER=${username} \\
   -e POSTGRES_PASSWORD=${generatedPassword} \\

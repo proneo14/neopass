@@ -196,7 +196,7 @@ func (s *WebAuthnService) FinishPasskeyRegistration(ctx context.Context, userID 
 		EncryptedPrivKey: encryptedPrivKey,
 		PrivateKeyNonce:  nonce,
 		SignCount:        0,
-		AAGUID:           crypto.LGIPassAAGUID[:],
+		AAGUID:           crypto.NeoPassAAGUID[:],
 		Transports:       []string{"internal"},
 		Discoverable:     true,
 		BackedUp:         true,

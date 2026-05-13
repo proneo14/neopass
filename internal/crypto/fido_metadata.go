@@ -1,7 +1,7 @@
 package crypto
 
 // FIDOMetadataStatement returns a FIDO Metadata Service v3 metadata statement
-// for the LGI Pass software authenticator. This is served at a well-known
+// for the NeoPass software authenticator. This is served at a well-known
 // endpoint and can be submitted to the FIDO Alliance Metadata Service.
 //
 // See: https://fidoalliance.org/specs/mds/fido-metadata-statement-v3.0-ps-20210518.html
@@ -9,7 +9,7 @@ func FIDOMetadataStatement() map[string]interface{} {
 	return map[string]interface{}{
 		"legalHeader":    "https://fidoalliance.org/metadata/metadata-statement-legal-header/",
 		"aaguid":         "5a2f7e8b-3c41-5d09-a1b6-4e8f2d7c9a03",
-		"description":    "LGI Pass Software Authenticator",
+		"description":    "NeoPass Software Authenticator",
 		"authenticatorVersion": 1,
 		"protocolFamily": "fido2",
 		"schema":         3,

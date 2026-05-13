@@ -705,7 +705,7 @@ extension/webpack.config.js:
 extension/src/manifest.chrome.json (Manifest V3 — also used for Edge):
 {
   "manifest_version": 3,
-  "name": "Quantum Password Manager",
+  "name": "NeoPass",
   "version": "1.0.0",
   "description": "Quantum-safe password autofill",
   "permissions": ["storage", "nativeMessaging", "activeTab", "scripting"],
@@ -723,7 +723,7 @@ extension/src/manifest.chrome.json (Manifest V3 — also used for Edge):
 extension/src/manifest.firefox.json (Manifest V2):
 {
   "manifest_version": 2,
-  "name": "Quantum Password Manager",
+  "name": "NeoPass",
   "version": "1.0.0",
   "permissions": ["storage", "nativeMessaging", "activeTab", "tabs", "https://*/*", "http://*/*"],
   "background": { "scripts": ["background.js"] },
@@ -734,7 +734,7 @@ extension/src/manifest.firefox.json (Manifest V2):
     "run_at": "document_idle"
   }],
   "browser_specific_settings": {
-    "gecko": { "id": "qpm@example.com", "strict_min_version": "55.0" }
+    "gecko": { "id": "neopass@example.com", "strict_min_version": "55.0" }
   }
 }
 
@@ -800,8 +800,8 @@ scripts/install-native-host.sh (macOS/Linux):
 Native host manifest template (com.quantum.passwordmanager.json):
 {
   "name": "com.quantum.passwordmanager",
-  "description": "Quantum Password Manager Native Host",
-  "path": "/path/to/qpm-native-host",
+  "description": "NeoPass Native Host",
+  "path": "/path/to/neopass-native-host",
   "type": "stdio",
   "allowed_origins": ["chrome-extension://EXTENSION_ID/"]  // or allowed_extensions for Firefox
 }
@@ -1011,7 +1011,7 @@ Dockerfile (multi-stage Go build):
 
 Makefile:
 - build-server: go build -o bin/server cmd/server/main.go
-- build-nativehost: go build -o bin/qpm-native-host cmd/nativehost/main.go
+- build-nativehost: go build -o bin/neopass-native-host cmd/nativehost/main.go
 - build-electron: cd electron && npm run build
 - build-extension-chrome: cd extension && npm run build:chrome
 - build-extension-firefox: cd extension && npm run build:firefox
@@ -1025,7 +1025,7 @@ Makefile:
 
 electron/electron-builder.yml:
 - appId: com.quantum.passwordmanager
-- productName: Quantum Password Manager
+- productName: NeoPass
 - Windows: nsis installer, include nativehost binary, run install-native-host.ps1 post-install
 - macOS: dmg + notarization config, include nativehost binary
 - Linux: AppImage + deb, include nativehost binary
@@ -1051,7 +1051,7 @@ README.md:
 ### Prompt 18b — Standalone Build (SQLite, No Docker)
 
 ```
-Add a standalone mode so LGI Pass can run as a single process with no external database or Docker dependency.
+Add a standalone mode so NeoPass can run as a single process with no external database or Docker dependency.
 Uses modernc.org/sqlite (pure Go, no CGO) as an embedded database alternative to PostgreSQL.
 
 Architecture:
@@ -1140,7 +1140,7 @@ Architecture:
       a. App shows "Organization features require a PostgreSQL database" dialog
       b. Dialog has two options:
          - "Use Docker" → shows docker run command to start PostgreSQL container:
-           docker run -d --name lgipass-db -e POSTGRES_DB=password_manager
+           docker run -d --name neopass-db -e POSTGRES_DB=password_manager
              -e POSTGRES_USER=pmuser -e POSTGRES_PASSWORD=<generated>
              -p 5432:5432 postgres:16-alpine
          - "Connect existing" → form fields: host, port, database, username, password
@@ -1332,7 +1332,7 @@ Safari doesn't support native messaging. Requires a macOS App Extension approach
 
 ```
 Add passkey management, FIDO2/WebAuthn credential storage, and hardware security key support.
-This makes LGI Pass a full passkey provider — users can create, store, and authenticate with
+This makes NeoPass a full passkey provider — users can create, store, and authenticate with
 passkeys on supported websites, and use hardware keys (YubiKey, Titan, SoloKeys) for vault login.
 
 Depends on: Prompt 3 (crypto), Prompt 4 (auth), Prompt 6 (vault), Prompt 13-16 (extension).
@@ -1441,7 +1441,7 @@ Depends on: Prompt 3 (crypto), Prompt 4 (auth), Prompt 6 (vault), Prompt 13-16 (
    Hardware key registration/authentication for vault login:
    - BeginHardwareKeyRegistration(ctx, userID) -> (options, sessionData, error)
      - Same as above but authenticatorAttachment: "cross-platform"
-     - RPDisplayName: "LGI Pass", RPID: configured domain
+     - RPDisplayName: "NeoPass", RPID: configured domain
    - FinishHardwareKeyRegistration(ctx, userID, sessionData, response, keyName) -> (HardwareAuthKey, error)
    - BeginHardwareKeyLogin(ctx, userID) -> (options, sessionData, error)
    - FinishHardwareKeyLogin(ctx, userID, sessionData, response) -> error
@@ -1491,7 +1491,7 @@ Depends on: Prompt 3 (crypto), Prompt 4 (auth), Prompt 6 (vault), Prompt 13-16 (
    - Detect PublicKeyCredentialCreationOptions in the options argument
    - Extract: rp.id, rp.name, user.id, user.name, user.displayName, challenge,
      pubKeyCredParams, excludeCredentials, authenticatorSelection, timeout
-   - Show UI prompt: "LGI Pass — Save a passkey for [rp.name]?" with user info
+   - Show UI prompt: "NeoPass — Save a passkey for [rp.name]?" with user info
    - If user approves:
      a. Send to native host: { action: "passkeyCreate", rpId, rpName, userId, userName, ... }
      b. Go sidecar generates key pair (ES256 P-256 by default):
@@ -1640,10 +1640,10 @@ Depends on: Prompt 3 (crypto), Prompt 4 (auth), Prompt 6 (vault), Prompt 13-16 (
    - On Chromium MV3: use chrome.scripting.registerContentScripts with world: "MAIN"
    - On Firefox MV2: use page script injection via script element with src=runtime.getURL()
 
-15. AAGUID for LGI Pass software authenticator:
-   - Generate a fixed AAGUID for LGI Pass: use a deterministic UUID v5 from
-     namespace DNS + "lgipass.lancastergroup.com"
-   - This identifies credentials created by LGI Pass vs other authenticators
+15. AAGUID for NeoPass software authenticator:
+   - Generate a fixed AAGUID for NeoPass: use a deterministic UUID v5 from
+     namespace DNS + "neopass.lancastergroup.com"
+   - This identifies credentials created by NeoPass vs other authenticators
    - Register with the FIDO Metadata Service (future)
 
 16. Tests — internal/crypto/passkey_test.go:
@@ -2072,7 +2072,7 @@ Depends on: Prompt 6 (vault), Prompt 10 (UI).
 
 ```
 Implement Secure Send — time-limited encrypted sharing of text or files via a unique link.
-Recipients don't need an LGI Pass account. The decryption key is in the URL fragment
+Recipients don't need an NeoPass account. The decryption key is in the URL fragment
 (never sent to the server). This is Bitwarden's "Send" feature equivalent.
 
 Depends on: Prompt 3 (crypto), Prompt 4 (auth), Prompt 18 (Docker/server).
@@ -2191,7 +2191,7 @@ Depends on: Prompt 3 (crypto), Prompt 4 (auth), Prompt 18 (Docker/server).
      d. Decrypts data in browser using SubtleCrypto API with the key from fragment
      e. Text type: show decrypted text with copy button
      f. File type: decrypt and offer download
-     g. Branding: "Sent via LGI Pass" with link to project
+     g. Branding: "Sent via NeoPass" with link to project
    - The fragment (key) is NEVER sent to the server — browsers strip fragments from HTTP requests
 
 9. Add IPC handlers for send operations:
@@ -2540,7 +2540,7 @@ Depends on: Prompt 6 (vault), Prompt 10 (Electron UI).
    - Duplicate detection: check against existing vault entries by (username + URI)
      - Highlight duplicates with "Already exists" badge
      - Checkbox: "Skip duplicates" (default: checked)
-   - Folder mapping: show detected folders, option to create in LGI Pass or skip
+   - Folder mapping: show detected folders, option to create in NeoPass or skip
    - Select/deselect individual entries with checkboxes
 
    Step 4 — Import:
@@ -2572,7 +2572,7 @@ Depends on: Prompt 6 (vault), Prompt 10 (Electron UI).
 
 1. Update electron/src/renderer/pages/Settings.tsx — "Export Data" section:
    - Three export format options:
-     a. Encrypted JSON (existing) — full backup, importable back into LGI Pass
+     a. Encrypted JSON (existing) — full backup, importable back into NeoPass
      b. Unencrypted JSON — all entries decrypted, standard format
      c. Unencrypted CSV — flat CSV for spreadsheet/import into other managers
 
@@ -3049,7 +3049,7 @@ IMPORTANT: PostgreSQL-only (enterprise features).
    - GET /api/v1/admin/orgs/{id}/events/export — export audit logs in structured format
      - Query params: format (json, cef, syslog), since, until, limit
      - JSON format: NDJSON (newline-delimited JSON), one event per line
-     - CEF format: CEF:0|LGI|Pass|1.0|{action}|{description}|{severity}|...
+     - CEF format: CEF:0|NeoPass||1.0|{action}|{description}|{severity}|...
      - Syslog format: RFC 5424 structured data
 
    Webhook delivery:
@@ -3063,7 +3063,7 @@ IMPORTANT: PostgreSQL-only (enterprise features).
 7. Webhook delivery system:
    - When an audit log entry is created, check for matching webhooks
    - POST to webhook URL with JSON body: { event, timestamp, actor, target, details }
-   - Header: X-LGIPass-Signature: HMAC-SHA256(body, secret)
+   - Header: X-NeoPass-Signature: HMAC-SHA256(body, secret)
    - Retry: 3 attempts with exponential backoff (1s, 5s, 30s)
    - Store delivery status in webhook_deliveries table
 

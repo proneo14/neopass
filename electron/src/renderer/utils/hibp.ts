@@ -109,7 +109,7 @@ export async function checkEmailBreach(
     {
       headers: {
         'hibp-api-key': apiKey,
-        'user-agent': 'LGI-Pass-PasswordManager',
+        'user-agent': 'NeoPass-PasswordManager',
       },
     },
   );

@@ -519,7 +519,7 @@ function ExportModal({ onClose }: { onClose: () => void }) {
         }));
         const payload = {
           version: 1,
-          format: 'lgipass_encrypted',
+          format: 'neopass_encrypted',
           exportDate: new Date().toISOString(),
           entries: exportData,
           folders: folders.map((f) => ({
@@ -673,7 +673,7 @@ function ExportModal({ onClose }: { onClose: () => void }) {
             <p className="text-sm text-surface-400 mb-4">Choose an export format:</p>
             <div className="space-y-2 mb-6">
               {([
-                { value: 'encrypted_json' as const, label: 'Encrypted JSON', desc: 'Full backup — can be re-imported into LGI Pass' },
+                { value: 'encrypted_json' as const, label: 'Encrypted JSON', desc: 'Full backup — can be re-imported into NeoPass' },
                 { value: 'json' as const, label: 'Unencrypted JSON', desc: 'All entries decrypted in standard JSON format' },
                 { value: 'csv' as const, label: 'Unencrypted CSV', desc: 'Flat CSV for spreadsheet / import into other managers' },
               ]).map((opt) => (
@@ -1492,8 +1492,8 @@ export function Settings() {
               </p>
               <input
                 type="text"
-                value={(() => { try { return localStorage.getItem('lgi-pass-catchall-domain') || ''; } catch { return ''; } })()}
-                onChange={(e) => { localStorage.setItem('lgi-pass-catchall-domain', e.target.value); }}
+                value={(() => { try { return localStorage.getItem('neopass-catchall-domain') || ''; } catch { return ''; } })()}
+                onChange={(e) => { localStorage.setItem('neopass-catchall-domain', e.target.value); }}
                 placeholder="mydomain.com"
                 className="w-full px-3 py-2 bg-surface-900 border border-surface-600 rounded-md text-surface-100 placeholder-surface-500 focus:outline-none focus:ring-1 focus:ring-accent-500 text-sm"
               />
@@ -1505,8 +1505,8 @@ export function Settings() {
               </p>
               <input
                 type="password"
-                value={(() => { try { return localStorage.getItem('lgi-pass-simplelogin-key') || ''; } catch { return ''; } })()}
-                onChange={(e) => { localStorage.setItem('lgi-pass-simplelogin-key', e.target.value); }}
+                value={(() => { try { return localStorage.getItem('neopass-simplelogin-key') || ''; } catch { return ''; } })()}
+                onChange={(e) => { localStorage.setItem('neopass-simplelogin-key', e.target.value); }}
                 placeholder="sl_..."
                 className="w-full px-3 py-2 bg-surface-900 border border-surface-600 rounded-md text-surface-100 placeholder-surface-500 focus:outline-none focus:ring-1 focus:ring-accent-500 text-sm"
               />
@@ -1518,8 +1518,8 @@ export function Settings() {
               </p>
               <input
                 type="password"
-                value={(() => { try { return localStorage.getItem('lgi-pass-addyio-key') || ''; } catch { return ''; } })()}
-                onChange={(e) => { localStorage.setItem('lgi-pass-addyio-key', e.target.value); }}
+                value={(() => { try { return localStorage.getItem('neopass-addyio-key') || ''; } catch { return ''; } })()}
+                onChange={(e) => { localStorage.setItem('neopass-addyio-key', e.target.value); }}
                 placeholder="API key"
                 className="w-full px-3 py-2 bg-surface-900 border border-surface-600 rounded-md text-surface-100 placeholder-surface-500 focus:outline-none focus:ring-1 focus:ring-accent-500 text-sm"
               />
@@ -1535,7 +1535,7 @@ export function Settings() {
               <label className="block text-sm font-medium text-surface-300 mb-1">Send Domain (optional)</label>
               <p className="text-xs text-surface-500 mb-2">
                 Set a public domain to enable link-based sharing with server-side password protection and access tracking.
-                The domain must point to your LGI Pass server.
+                The domain must point to your NeoPass server.
               </p>
               <div className="flex gap-2">
                 <input
@@ -1584,7 +1584,7 @@ export function Settings() {
           >
             Keyboard Shortcuts →
           </button>
-          <p className="text-xs text-surface-600">LGI Pass v{appVersion}</p>
+          <p className="text-xs text-surface-600">NeoPass v{appVersion}</p>
           <p className="text-xs text-surface-700 mt-0.5">Post-quantum encryption: X-Wing KEM + AES-256-GCM</p>
 
           {/* Update section */}

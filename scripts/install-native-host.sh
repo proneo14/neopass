@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 #
-# Installs the Quantum Password Manager native messaging host
+# Installs the NeoPass native messaging host
 # for Chrome, Edge (Linux), and Firefox on macOS/Linux.
 #
 set -euo pipefail
 
 APP_NAME="com.quantum.passwordmanager"
-DISPLAY_NAME="Quantum Password Manager Native Host"
+DISPLAY_NAME="NeoPass Native Host"
 BINARY_PATH="${1:-}"
 EXTENSION_ID="${2:-}"
 
@@ -16,7 +16,7 @@ OS="$(uname -s)"
 # Find binary
 if [ -z "$BINARY_PATH" ]; then
     SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-    BINARY_PATH="$SCRIPT_DIR/../bin/qpm-native-host"
+    BINARY_PATH="$SCRIPT_DIR/../bin/neopass-native-host"
 fi
 
 if [ ! -f "$BINARY_PATH" ]; then
@@ -34,11 +34,11 @@ else
 fi
 
 mkdir -p "$INSTALL_DIR"
-cp "$BINARY_PATH" "$INSTALL_DIR/qpm-native-host"
-chmod +x "$INSTALL_DIR/qpm-native-host"
-echo "Installed binary to: $INSTALL_DIR/qpm-native-host"
+cp "$BINARY_PATH" "$INSTALL_DIR/neopass-native-host"
+chmod +x "$INSTALL_DIR/neopass-native-host"
+echo "Installed binary to: $INSTALL_DIR/neopass-native-host"
 
-INSTALLED_BINARY="$INSTALL_DIR/qpm-native-host"
+INSTALLED_BINARY="$INSTALL_DIR/neopass-native-host"
 
 # Chrome allowed_origins
 CHROME_ORIGINS="[]"
@@ -65,7 +65,7 @@ FIREFOX_MANIFEST=$(cat <<EOF
   "description": "$DISPLAY_NAME",
   "path": "$INSTALLED_BINARY",
   "type": "stdio",
-  "allowed_extensions": ["qpm@quantum-password-manager.com"]
+  "allowed_extensions": ["neopass@neopass.com"]
 }
 EOF
 )

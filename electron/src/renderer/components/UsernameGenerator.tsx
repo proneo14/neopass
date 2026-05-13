@@ -66,7 +66,7 @@ export function UsernameGenerator({ onUse, defaultMode = 'word_number' }: Userna
 
   // Catch-all options
   const [catchAllDomain, setCatchAllDomain] = useState(() => {
-    try { return localStorage.getItem('lgi-pass-catchall-domain') || ''; } catch { return ''; }
+    try { return localStorage.getItem('neopass-catchall-domain') || ''; } catch { return ''; }
   });
 
   // Service options
@@ -121,12 +121,12 @@ export function UsernameGenerator({ onUse, defaultMode = 'word_number' }: Userna
       let headers: Record<string, string> = {};
 
       if (aliasService === 'simplelogin') {
-        apiKey = localStorage.getItem('lgi-pass-simplelogin-key') || '';
+        apiKey = localStorage.getItem('neopass-simplelogin-key') || '';
         if (!apiKey) { setServiceError('SimpleLogin API key not configured. Set it in Settings.'); return; }
         url = 'https://app.simplelogin.io/api/alias/random/new';
         headers = { 'Authentication': apiKey, 'Content-Type': 'application/json' };
       } else {
-        apiKey = localStorage.getItem('lgi-pass-addyio-key') || '';
+        apiKey = localStorage.getItem('neopass-addyio-key') || '';
         if (!apiKey) { setServiceError('Addy.io API key not configured. Set it in Settings.'); return; }
         url = 'https://app.addy.io/api/v1/aliases';
         headers = { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' };
@@ -268,7 +268,7 @@ export function UsernameGenerator({ onUse, defaultMode = 'word_number' }: Userna
             value={catchAllDomain}
             onChange={(e) => {
               setCatchAllDomain(e.target.value);
-              localStorage.setItem('lgi-pass-catchall-domain', e.target.value);
+              localStorage.setItem('neopass-catchall-domain', e.target.value);
             }}
             placeholder="mydomain.com"
             className="w-full px-3 py-2 rounded-md bg-surface-800 border border-surface-700 text-surface-100 text-sm placeholder-surface-500 focus:outline-none focus:ring-2 focus:ring-accent-500"

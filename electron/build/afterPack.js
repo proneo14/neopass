@@ -15,7 +15,7 @@ exports.default = async function afterPack(context) {
 
   // The native host binary is included in extraResources/bin/
   const ext = platform === 'win32' ? '.exe' : '';
-  const nativeHostBinary = path.join(resourcesDir, 'bin', `qpm-native-host${ext}`);
+  const nativeHostBinary = path.join(resourcesDir, 'bin', `neopass-native-host${ext}`);
 
   if (!fs.existsSync(nativeHostBinary)) {
     console.warn(`[afterPack] native host binary not found at ${nativeHostBinary}, skipping registration`);

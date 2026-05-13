@@ -12,7 +12,7 @@ const sendReceivePageHTML = `<!DOCTYPE html>
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>LGI Pass — Secure Send</title>
+<title>NeoPass — Secure Send</title>
 <style>
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
   body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0f172a; color: #e2e8f0; min-height: 100vh; display: flex; align-items: center; justify-content: center; }
@@ -38,7 +38,7 @@ const sendReceivePageHTML = `<!DOCTYPE html>
 <body>
 <div class="card">
   <h1>🔒 Secure Send</h1>
-  <div class="brand">Sent via <a href="#">LGI Pass</a></div>
+  <div class="brand">Sent via <a href="#">NeoPass</a></div>
 
   <div id="loading" class="loading"><div class="spinner"></div><p style="margin-top:0.5rem">Loading…</p></div>
   <div id="error" class="error" style="display:none"></div>

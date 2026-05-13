@@ -13,13 +13,13 @@ const NATIVE_HOST_ID = 'com.quantum.passwordmanager';
 const NATIVE_HOST_TIMEOUT_MS = 5000;
 
 /** Storage key for the offline credential queue. */
-const CREDENTIAL_QUEUE_KEY = 'qpm_credential_queue';
+const CREDENTIAL_QUEUE_KEY = 'neopass_credential_queue';
 
 /** Storage key for pending save prompts (survives service worker restarts). */
-const PENDING_PROMPTS_KEY = 'qpm_pending_save_prompts';
+const PENDING_PROMPTS_KEY = 'neopass_pending_save_prompts';
 
 /** Alarm name for periodic credential queue flush. */
-const QUEUE_FLUSH_ALARM = 'qpm_flush_queue';
+const QUEUE_FLUSH_ALARM = 'neopass_flush_queue';
 
 /** Pending save prompts stored in-memory for fast access, synced to storage. */
 let pendingSavePrompts = new Map<
@@ -74,7 +74,7 @@ async function enqueueCredential(cred: Omit<QueuedCredential, 'timestamp'>) {
 
   queue.push({ ...cred, timestamp: Date.now() });
   await browserAPI.storage.set({ [CREDENTIAL_QUEUE_KEY]: queue });
-  console.debug('[QPM] Credential queued for later sync:', cred.domain, cred.username);
+  console.debug('[NeoPass] Credential queued for later sync:', cred.domain, cred.username);
 }
 
 /** Try to flush the queued credentials to the native host. */
@@ -96,7 +96,7 @@ async function flushCredentialQueue() {
       (c) => c.username === cred.username && c.domain === cred.domain
     );
     if (isDuplicate) {
-      console.debug('[QPM] Skipping queued duplicate:', cred.domain, cred.username);
+      console.debug('[NeoPass] Skipping queued duplicate:', cred.domain, cred.username);
       continue;
     }
 
@@ -111,7 +111,7 @@ async function flushCredentialQueue() {
       // Keep in queue for retry if save failed
       remaining.push(cred);
     } else {
-      console.debug('[QPM] Queued credential saved:', cred.domain, cred.username);
+      console.debug('[NeoPass] Queued credential saved:', cred.domain, cred.username);
     }
   }
 
@@ -208,7 +208,7 @@ async function getCredentialsForDomain(
 /*  Stores domain+username pairs — no passwords.                       */
 /* ------------------------------------------------------------------ */
 
-const KNOWN_CREDS_KEY = 'qpm_known_credentials';
+const KNOWN_CREDS_KEY = 'neopass_known_credentials';
 
 interface KnownCredEntry {
   domain: string;
@@ -226,7 +226,7 @@ async function updateKnownCredentials(domain: string, creds: Credential[]) {
     filtered.push({ domain: c.domain || domain, username: c.username });
   }
   await browserAPI.storage.set({ [KNOWN_CREDS_KEY]: filtered });
-  console.debug('[QPM] Known credentials cache updated for', domain, '— total entries:', filtered.length);
+  console.debug('[NeoPass] Known credentials cache updated for', domain, '— total entries:', filtered.length);
 }
 
 /** Add a single entry to the cache (after a successful save). */
@@ -236,7 +236,7 @@ async function addKnownCredential(domain: string, username: string) {
   if (!known.some((k) => k.domain === domain && k.username === username)) {
     known.push({ domain, username });
     await browserAPI.storage.set({ [KNOWN_CREDS_KEY]: known });
-    console.debug('[QPM] Added to known credentials cache:', domain, username);
+    console.debug('[NeoPass] Added to known credentials cache:', domain, username);
   }
 }
 
@@ -248,7 +248,7 @@ async function isKnownCredential(domain: string, username: string): Promise<bool
   const known: KnownCredEntry[] = (record[KNOWN_CREDS_KEY] as KnownCredEntry[]) ?? [];
   const cached = known.some((k) => k.domain === domain && k.username === username);
   if (cached) {
-    console.debug('[QPM] Duplicate found in known-credentials cache:', domain, username);
+    console.debug('[NeoPass] Duplicate found in known-credentials cache:', domain, username);
     return true;
   }
 
@@ -256,11 +256,11 @@ async function isKnownCredential(domain: string, username: string): Promise<bool
   const queue: QueuedCredential[] = (record[CREDENTIAL_QUEUE_KEY] as QueuedCredential[]) ?? [];
   const queued = queue.some((q) => q.domain === domain && q.username === username);
   if (queued) {
-    console.debug('[QPM] Duplicate found in offline queue:', domain, username);
+    console.debug('[NeoPass] Duplicate found in offline queue:', domain, username);
     return true;
   }
 
-  console.debug('[QPM] Not in cache or queue:', domain, username);
+  console.debug('[NeoPass] Not in cache or queue:', domain, username);
   return false;
 }
 
@@ -634,7 +634,7 @@ browserAPI.runtime.onMessage.addListener(
                 if (tabId) {
                   browserAPI.tabs.sendMessage(tabId, {
                     type: 'showToast',
-                    message: `Passkey for ${message.rpId} saved to LGI Pass`,
+                    message: `Passkey for ${message.rpId} saved to NeoPass`,
                     icon: browserAPI.runtime.getURL('icons/icon-128.png'),
                   }).catch(() => {});
                 }
@@ -766,7 +766,7 @@ browserAPI.runtime.onMessage.addListener(
 
             return { error: 'No QR code found' };
           } catch (err) {
-            console.debug('[QPM] QR scan error:', err);
+            console.debug('[NeoPass] QR scan error:', err);
             return { error: 'QR scan failed' };
           }
         })();

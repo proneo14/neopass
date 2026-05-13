@@ -219,7 +219,7 @@ export function Passkeys() {
             <div className="text-4xl mb-4">🔐</div>
             <h3 className="text-lg font-medium text-surface-300 mb-2">No Passkeys Yet</h3>
             <p className="text-sm text-surface-500 max-w-md mx-auto">
-              Passkeys will appear here when you create them on websites using the LGI Pass browser extension.
+              Passkeys will appear here when you create them on websites using the NeoPass browser extension.
             </p>
           </div>
         ) : (

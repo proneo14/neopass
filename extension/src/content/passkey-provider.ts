@@ -1,6 +1,6 @@
 /**
  * Passkey provider – intercepts navigator.credentials.create/get
- * and routes WebAuthn requests through the LGI Pass extension.
+ * and routes WebAuthn requests through the NeoPass extension.
  *
  * This script runs in the MAIN world (page context) so it has NO access
  * to chrome.runtime / browser extension APIs.  Communication goes through
@@ -10,17 +10,17 @@
  */
 
 // Guard against double injection
-if ((window as any).__lgiPasskeyProvider) {
+if ((window as any).__neoPasskeyProvider) {
   // Already injected, skip
 } else {
-(window as any).__lgiPasskeyProvider = true;
+(window as any).__neoPasskeyProvider = true;
 
-const PASSKEY_REQ = 'lgipass-passkey-request';
-const PASSKEY_RES = 'lgipass-passkey-response';
+const PASSKEY_REQ = 'neopass-passkey-request';
+const PASSKEY_RES = 'neopass-passkey-response';
 
 let reqCounter = 0;
 
-console.debug('[LGI Pass] passkey provider loaded on', window.location.hostname);
+console.debug('[NeoPass] passkey provider loaded on', window.location.hostname);
 
 /** Decode a base64url string to a Uint8Array. */
 const b64urlToBytes = (b64: string): Uint8Array => {
@@ -158,7 +158,7 @@ CredProto.create = async function (
   const origin = window.location.origin;
   const userId = pk.user?.id ? bytesToB64url(pk.user.id as ArrayBuffer) : '';
 
-  console.debug('[LGI Pass] intercepted credentials.create for', rpId, '(user:', userName, ')');
+  console.debug('[NeoPass] intercepted credentials.create for', rpId, '(user:', userName, ')');
 
   try {
     const response = await sendPasskeyMessage({
@@ -173,10 +173,10 @@ CredProto.create = async function (
       userId,
     });
 
-    console.debug('[LGI Pass] create response:', JSON.stringify(response).slice(0, 200));
+    console.debug('[NeoPass] create response:', JSON.stringify(response).slice(0, 200));
 
     if (response.error) {
-      console.warn('[LGI Pass] create error, falling back to browser:', response.error);
+      console.warn('[NeoPass] create error, falling back to browser:', response.error);
       return originalCreate.call(this, options);
     }
 
@@ -184,13 +184,13 @@ CredProto.create = async function (
     const inner = (response.options ?? response) as Record<string, unknown>;
 
     if (inner.credential_id && inner.attestation_object) {
-      console.info('[LGI Pass] passkey created successfully for', rpId);
+      console.info('[NeoPass] passkey created successfully for', rpId);
       return buildCreateCredential(inner, challenge);
     }
 
-    console.warn('[LGI Pass] unexpected response shape, falling back');
+    console.warn('[NeoPass] unexpected response shape, falling back');
   } catch (err) {
-    console.warn('[LGI Pass] create exception, falling back:', err);
+    console.warn('[NeoPass] create exception, falling back:', err);
   }
 
   return originalCreate.call(this, options);
@@ -210,7 +210,7 @@ CredProto.get = async function (
   );
   const mediation = (options as any).mediation as string | undefined;
 
-  console.debug('[LGI Pass] intercepted credentials.get for', rpId, 'mediation:', mediation);
+  console.debug('[NeoPass] intercepted credentials.get for', rpId, 'mediation:', mediation);
 
   try {
     const response = await sendPasskeyMessage({
@@ -222,7 +222,7 @@ CredProto.get = async function (
     const passkeys = response.passkeys as { credentialId: string }[] | undefined;
 
     if (response.error || !passkeys?.length) {
-      console.debug('[LGI Pass] no passkeys found for', rpId, ', falling back');
+      console.debug('[NeoPass] no passkeys found for', rpId, ', falling back');
       // For conditional mediation (autofill), don't trigger native dialog
       if (mediation === 'conditional') {
         return originalGet.call(this, options);
@@ -230,7 +230,7 @@ CredProto.get = async function (
       return originalGet.call(this, options);
     }
 
-    console.debug('[LGI Pass] found', passkeys.length, 'passkey(s) for', rpId);
+    console.debug('[NeoPass] found', passkeys.length, 'passkey(s) for', rpId);
 
     const cred = passkeys[0];
 
@@ -243,23 +243,23 @@ CredProto.get = async function (
     });
 
     if (signResponse.error) {
-      console.warn('[LGI Pass] sign failed, falling back:', signResponse.error);
+      console.warn('[NeoPass] sign failed, falling back:', signResponse.error);
       return originalGet.call(this, options);
     }
 
     const assertion = (signResponse.assertion ?? signResponse) as Record<string, unknown>;
 
     if (assertion.credential_id && assertion.signature) {
-      console.info('[LGI Pass] passkey assertion signed for', rpId);
+      console.info('[NeoPass] passkey assertion signed for', rpId);
       return buildGetCredential(assertion);
     }
   } catch (err) {
-    console.warn('[LGI Pass] get exception, falling back:', err);
+    console.warn('[NeoPass] get exception, falling back:', err);
   }
 
   return originalGet.call(this, options);
 };
 
-console.debug('[LGI Pass] WebAuthn override installed on CredentialsContainer.prototype');
+console.debug('[NeoPass] WebAuthn override installed on CredentialsContainer.prototype');
 
 } // end dedup guard

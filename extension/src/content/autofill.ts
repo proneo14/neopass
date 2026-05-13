@@ -176,7 +176,7 @@ function detectUsernameOnlyForms(domain: string): FormInfo[] {
       seenFields.add(field);
       const form = field.closest('form');
       forms.push({ form, usernameField: field, passwordField: null, domain });
-      console.debug('[QPM] detected username-only field:', field.id || field.name, 'attrs:', attrs);
+      console.debug('[NeoPass] detected username-only field:', field.id || field.name, 'attrs:', attrs);
     }
   }
 
@@ -220,7 +220,7 @@ export function simulateInput(field: HTMLInputElement, value: string) {
 
   field.dispatchEvent(new Event('change', { bubbles: true }));
 
-  console.debug('[QPM] simulateInput done:', field.id || field.name, 'value:', field.value);
+  console.debug('[NeoPass] simulateInput done:', field.id || field.name, 'value:', field.value);
 }
 
 /**
@@ -280,7 +280,7 @@ export function findVisibleLoginField(): HTMLInputElement | null {
 /*  Side Panel (slides in from right when login form detected)         */
 /* ------------------------------------------------------------------ */
 
-const PANEL_ID = 'qpm-side-panel';
+const PANEL_ID = 'neopass-side-panel';
 let activePanel: HTMLElement | null = null;
 let activePanelDismissed = false;
 
@@ -301,26 +301,26 @@ export function showSidePanel(
   getCredentials: () => Credential[],
   getForms: () => FormInfo[]
 ) {
-  console.debug('[QPM] showSidePanel called, creds:', credentials.length, 'dismissed:', activePanelDismissed);
+  console.debug('[NeoPass] showSidePanel called, creds:', credentials.length, 'dismissed:', activePanelDismissed);
   if (credentials.length === 0) return;
   if (activePanelDismissed) return;
 
   // Only show the pill on pages that look like login pages
   if (!isLikelyLoginPage()) {
-    console.debug('[QPM] not a login page — suppressing pill');
+    console.debug('[NeoPass] not a login page — suppressing pill');
     return;
   }
 
   if (activePanel) {
-    const prev = activePanel.getAttribute('data-qpm-count');
+    const prev = activePanel.getAttribute('data-neopass-count');
     if (prev === String(credentials.length)) return;
     removePanel();
   }
 
   const panel = document.createElement('div');
   panel.id = PANEL_ID;
-  panel.setAttribute('data-qpm', 'true');
-  panel.setAttribute('data-qpm-count', String(credentials.length));
+  panel.setAttribute('data-neopass', 'true');
+  panel.setAttribute('data-neopass-count', String(credentials.length));
 
   const shadow = panel.attachShadow({ mode: 'closed' });
 
@@ -328,14 +328,14 @@ export function showSidePanel(
   style.textContent = `
     :host { all: initial; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
 
-    .qpm-wrapper {
+    .neopass-wrapper {
       position: fixed;
       top: 8px;
       right: 8px;
       z-index: 2147483647;
     }
 
-    .qpm-pill {
+    .neopass-pill {
       display: flex;
       align-items: center;
       gap: 6px;
@@ -348,17 +348,17 @@ export function showSidePanel(
       transition: all 0.2s ease;
       user-select: none;
     }
-    .qpm-pill:hover {
+    .neopass-pill:hover {
       background: #334155;
       box-shadow: 0 4px 20px rgba(0,0,0,0.5);
     }
-    .qpm-pill-label {
+    .neopass-pill-label {
       font-size: 11px;
       font-weight: 600;
       color: #818cf8;
       letter-spacing: 0.02em;
     }
-    .qpm-pill-badge {
+    .neopass-pill-badge {
       background: #818cf8;
       color: #fff;
       font-size: 10px;
@@ -370,7 +370,7 @@ export function showSidePanel(
       border-radius: 8px;
       padding: 0 4px;
     }
-    .qpm-pill-close {
+    .neopass-pill-close {
       background: none;
       border: none;
       color: #64748b;
@@ -380,10 +380,10 @@ export function showSidePanel(
       line-height: 1;
       transition: color 0.15s;
     }
-    .qpm-pill-close:hover { color: #f1f5f9; }
+    .neopass-pill-close:hover { color: #f1f5f9; }
 
     /* Dropdown — overlaps pill bottom so mouse can travel seamlessly */
-    .qpm-dropdown {
+    .neopass-dropdown {
       position: absolute;
       top: 100%;
       right: 0;
@@ -394,7 +394,7 @@ export function showSidePanel(
       display: none;
       flex-direction: column;
     }
-    .qpm-dropdown-inner {
+    .neopass-dropdown-inner {
       background: #0f172a;
       border: 1px solid #334155;
       border-radius: 10px;
@@ -403,17 +403,17 @@ export function showSidePanel(
       display: flex;
       flex-direction: column;
       max-height: 320px;
-      animation: qpm-fade-in 0.15s ease-out;
+      animation: neopass-fade-in 0.15s ease-out;
     }
-    @keyframes qpm-fade-in {
+    @keyframes neopass-fade-in {
       from { opacity: 0; transform: translateY(-4px); }
       to { opacity: 1; transform: translateY(0); }
     }
-    .qpm-wrapper:hover .qpm-dropdown {
+    .neopass-wrapper:hover .neopass-dropdown {
       display: flex;
     }
 
-    .qpm-dd-header {
+    .neopass-dd-header {
       display: flex;
       align-items: center;
       justify-content: space-between;
@@ -423,12 +423,12 @@ export function showSidePanel(
       font-weight: 600;
       border-bottom: 1px solid #1e293b;
     }
-    .qpm-dd-header-domain {
+    .neopass-dd-header-domain {
       font-size: 10px;
       color: #64748b;
       font-weight: 400;
     }
-    .qpm-dd-section {
+    .neopass-dd-section {
       padding: 6px 12px 2px;
       font-size: 9px;
       font-weight: 700;
@@ -436,17 +436,17 @@ export function showSidePanel(
       text-transform: uppercase;
       letter-spacing: 0.06em;
     }
-    .qpm-dd-list {
+    .neopass-dd-list {
       flex: 1;
       overflow-y: auto;
       padding: 2px 0;
       scrollbar-width: none;
       -ms-overflow-style: none;
     }
-    .qpm-dd-list::-webkit-scrollbar {
+    .neopass-dd-list::-webkit-scrollbar {
       display: none;
     }
-    .qpm-dd-item {
+    .neopass-dd-item {
       display: flex;
       align-items: center;
       gap: 8px;
@@ -454,8 +454,8 @@ export function showSidePanel(
       cursor: pointer;
       transition: background 0.12s;
     }
-    .qpm-dd-item:hover { background: #1e293b; }
-    .qpm-dd-avatar {
+    .neopass-dd-item:hover { background: #1e293b; }
+    .neopass-dd-avatar {
       width: 28px;
       height: 28px;
       border-radius: 6px;
@@ -468,8 +468,8 @@ export function showSidePanel(
       font-weight: 700;
       flex-shrink: 0;
     }
-    .qpm-dd-info { flex: 1; min-width: 0; }
-    .qpm-dd-name {
+    .neopass-dd-info { flex: 1; min-width: 0; }
+    .neopass-dd-name {
       font-size: 12px;
       color: #f1f5f9;
       font-weight: 500;
@@ -477,14 +477,14 @@ export function showSidePanel(
       overflow: hidden;
       text-overflow: ellipsis;
     }
-    .qpm-dd-user {
+    .neopass-dd-user {
       font-size: 10px;
       color: #94a3b8;
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
     }
-    .qpm-dd-fill {
+    .neopass-dd-fill {
       background: #818cf8;
       color: white;
       border: none;
@@ -496,23 +496,23 @@ export function showSidePanel(
       flex-shrink: 0;
       transition: background 0.12s;
     }
-    .qpm-dd-fill:hover { background: #6366f1; }
+    .neopass-dd-fill:hover { background: #6366f1; }
   `;
   shadow.appendChild(style);
 
   // Wrapper holds pill + dropdown — hover on wrapper keeps dropdown open
   const wrapper = document.createElement('div');
-  wrapper.className = 'qpm-wrapper';
+  wrapper.className = 'neopass-wrapper';
 
   // --- Pill ---
   const pill = document.createElement('div');
-  pill.className = 'qpm-pill';
+  pill.className = 'neopass-pill';
   pill.innerHTML = `
-    <span class="qpm-pill-label">LGI Pass</span>
-    <span class="qpm-pill-badge">${credentials.length}</span>
+    <span class="neopass-pill-label">NeoPass</span>
+    <span class="neopass-pill-badge">${credentials.length}</span>
   `;
   const closeBtn = document.createElement('button');
-  closeBtn.className = 'qpm-pill-close';
+  closeBtn.className = 'neopass-pill-close';
   closeBtn.textContent = '\u00D7';
   closeBtn.title = 'Dismiss';
   closeBtn.addEventListener('click', (e) => {
@@ -525,55 +525,55 @@ export function showSidePanel(
 
   // --- Dropdown ---
   const dropdown = document.createElement('div');
-  dropdown.className = 'qpm-dropdown';
+  dropdown.className = 'neopass-dropdown';
 
   const ddInner = document.createElement('div');
-  ddInner.className = 'qpm-dropdown-inner';
+  ddInner.className = 'neopass-dropdown-inner';
 
   const domain = detectedForms[0]?.domain ?? '';
   const ddHeader = document.createElement('div');
-  ddHeader.className = 'qpm-dd-header';
+  ddHeader.className = 'neopass-dd-header';
   const headerLabel = document.createElement('span');
-  headerLabel.textContent = 'LGI Pass';
+  headerLabel.textContent = 'NeoPass';
   ddHeader.appendChild(headerLabel);
   if (domain) {
     const headerDomain = document.createElement('span');
-    headerDomain.className = 'qpm-dd-header-domain';
+    headerDomain.className = 'neopass-dd-header-domain';
     headerDomain.textContent = domain;
     ddHeader.appendChild(headerDomain);
   }
   ddInner.appendChild(ddHeader);
 
   const sectionLabel = document.createElement('div');
-  sectionLabel.className = 'qpm-dd-section';
+  sectionLabel.className = 'neopass-dd-section';
   sectionLabel.textContent = 'For this site';
   ddInner.appendChild(sectionLabel);
 
   const ddList = document.createElement('div');
-  ddList.className = 'qpm-dd-list';
+  ddList.className = 'neopass-dd-list';
 
   const matchedCreds = credentials.filter((c) => c.matched);
   const otherCreds = credentials.filter((c) => !c.matched);
 
   function addCredItem(cred: Credential, container: HTMLElement) {
     const item = document.createElement('div');
-    item.className = 'qpm-dd-item';
+    item.className = 'neopass-dd-item';
 
     const initial = (cred.name || cred.username || '?')[0].toUpperCase();
 
     const avatar = document.createElement('div');
-    avatar.className = 'qpm-dd-avatar';
+    avatar.className = 'neopass-dd-avatar';
     avatar.textContent = initial;
 
     const info = document.createElement('div');
-    info.className = 'qpm-dd-info';
+    info.className = 'neopass-dd-info';
     info.innerHTML = `
-      <div class="qpm-dd-name">${escapeHtml(cred.name || cred.domain)}</div>
-      <div class="qpm-dd-user">${escapeHtml(cred.username)}</div>
+      <div class="neopass-dd-name">${escapeHtml(cred.name || cred.domain)}</div>
+      <div class="neopass-dd-user">${escapeHtml(cred.username)}</div>
     `;
 
     const fillBtn = document.createElement('button');
-    fillBtn.className = 'qpm-dd-fill';
+    fillBtn.className = 'neopass-dd-fill';
     fillBtn.textContent = 'Fill';
     fillBtn.addEventListener('click', (e) => {
       e.stopPropagation();
@@ -594,7 +594,7 @@ export function showSidePanel(
 
   if (otherCreds.length > 0) {
     const otherLabel = document.createElement('div');
-    otherLabel.className = 'qpm-dd-section';
+    otherLabel.className = 'neopass-dd-section';
     otherLabel.textContent = 'Other logins';
     ddList.appendChild(otherLabel);
     otherCreds.forEach((cred) => addCredItem(cred, ddList));
@@ -609,7 +609,7 @@ export function showSidePanel(
 
   document.body.appendChild(panel);
   activePanel = panel;
-  console.debug('[QPM] pill appended to DOM, credentials:', credentials.length);
+  console.debug('[NeoPass] pill appended to DOM, credentials:', credentials.length);
 }
 
 function fillFromPanel(cred: Credential, detectedForms: FormInfo[]) {
@@ -649,7 +649,7 @@ export function resetPanelDismissed() {
 
 /* Keep the old overlay functions as internal helpers — they're still
    used by the popup Fill flow (via content script message handler).   */
-const OVERLAY_ID = 'qpm-autofill-overlay';
+const OVERLAY_ID = 'neopass-autofill-overlay';
 let activeOverlay: HTMLElement | null = null;
 let activeField: HTMLInputElement | null = null;
 
@@ -664,7 +664,7 @@ function removeOverlay() {
 function createOverlayElement(): HTMLElement {
   const overlay = document.createElement('div');
   overlay.id = OVERLAY_ID;
-  overlay.setAttribute('data-qpm', 'true');
+  overlay.setAttribute('data-neopass', 'true');
 
   // Shadow DOM so page styles don't leak in
   const shadow = overlay.attachShadow({ mode: 'closed' });
@@ -675,7 +675,7 @@ function createOverlayElement(): HTMLElement {
       all: initial;
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
     }
-    .qpm-overlay {
+    .neopass-overlay {
       background: #1e293b;
       border: 1px solid #334155;
       border-radius: 8px;
@@ -684,7 +684,7 @@ function createOverlayElement(): HTMLElement {
       max-height: 240px;
       overflow-y: auto;
     }
-    .qpm-header {
+    .neopass-header {
       padding: 6px 10px;
       font-size: 10px;
       text-transform: uppercase;
@@ -696,35 +696,35 @@ function createOverlayElement(): HTMLElement {
       align-items: center;
       gap: 6px;
     }
-    .qpm-item {
+    .neopass-item {
       display: flex;
       align-items: center;
       padding: 8px 10px;
       cursor: pointer;
       transition: background 0.15s;
     }
-    .qpm-item:hover, .qpm-item.qpm-focused {
+    .neopass-item:hover, .neopass-item.neopass-focused {
       background: #334155;
     }
-    .qpm-item-info {
+    .neopass-item-info {
       flex: 1;
       min-width: 0;
     }
-    .qpm-item-name {
+    .neopass-item-name {
       font-size: 13px;
       color: #f1f5f9;
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
     }
-    .qpm-item-user {
+    .neopass-item-user {
       font-size: 11px;
       color: #94a3b8;
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
     }
-    .qpm-empty {
+    .neopass-empty {
       padding: 12px 10px;
       font-size: 12px;
       color: #64748b;
@@ -735,7 +735,7 @@ function createOverlayElement(): HTMLElement {
   shadow.appendChild(style);
 
   const container = document.createElement('div');
-  container.className = 'qpm-overlay';
+  container.className = 'neopass-overlay';
   shadow.appendChild(container);
 
   return overlay;
@@ -758,12 +758,12 @@ export function showAutofillOverlay(
   activeField = field;
   const overlay = createOverlayElement();
   const shadow = overlay.shadowRoot!;
-  const container = shadow.querySelector('.qpm-overlay')!;
+  const container = shadow.querySelector('.neopass-overlay')!;
 
   // Header
   const header = document.createElement('div');
-  header.className = 'qpm-header';
-  header.textContent = 'LGI Pass';
+  header.className = 'neopass-header';
+  header.textContent = 'NeoPass';
   container.appendChild(header);
 
   let focusedIndex = -1;
@@ -772,13 +772,13 @@ export function showAutofillOverlay(
   // List credentials
   credentials.forEach((cred, idx) => {
     const item = document.createElement('div');
-    item.className = 'qpm-item';
+    item.className = 'neopass-item';
     item.setAttribute('role', 'option');
 
     item.innerHTML = `
-      <div class="qpm-item-info">
-        <div class="qpm-item-name">${escapeHtml(cred.name || cred.domain)}</div>
-        <div class="qpm-item-user">${escapeHtml(cred.username)}</div>
+      <div class="neopass-item-info">
+        <div class="neopass-item-name">${escapeHtml(cred.name || cred.domain)}</div>
+        <div class="neopass-item-user">${escapeHtml(cred.username)}</div>
       </div>
     `;
 
@@ -796,9 +796,9 @@ export function showAutofillOverlay(
   });
 
   function setFocused(idx: number) {
-    items.forEach((el) => el.classList.remove('qpm-focused'));
+    items.forEach((el) => el.classList.remove('neopass-focused'));
     if (idx >= 0 && idx < items.length) {
-      items[idx].classList.add('qpm-focused');
+      items[idx].classList.add('neopass-focused');
     }
     focusedIndex = idx;
   }
@@ -868,10 +868,10 @@ function fillFromOverlay(cred: Credential, detectedForms: FormInfo[]) {
 /*  Save Prompt (after form submission)                                */
 /* ------------------------------------------------------------------ */
 
-const SAVE_PROMPT_ID = 'qpm-save-prompt';
+const SAVE_PROMPT_ID = 'neopass-save-prompt';
 
-/** Inline SVG for the LGI Pass shield logo */
-const LGI_LOGO_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#818cf8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="M9 12l2 2 4-4" stroke="#818cf8" stroke-width="2"/></svg>`;
+/** Inline SVG for the NeoPass shield logo */
+const NEOPASS_LOGO_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#818cf8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="M9 12l2 2 4-4" stroke="#818cf8" stroke-width="2"/></svg>`;
 
 /**
  * Show a compact "Save this password?" popup on the right side of the page.
@@ -882,7 +882,7 @@ function showSavePrompt(domain: string, username: string, password: string) {
 
   const banner = document.createElement('div');
   banner.id = SAVE_PROMPT_ID;
-  banner.setAttribute('data-qpm', 'true');
+  banner.setAttribute('data-neopass', 'true');
 
   const shadow = banner.attachShadow({ mode: 'closed' });
 
@@ -892,7 +892,7 @@ function showSavePrompt(domain: string, username: string, password: string) {
       all: initial;
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
     }
-    .qpm-save-popup {
+    .neopass-save-popup {
       position: fixed;
       top: 12px;
       right: 12px;
@@ -903,30 +903,30 @@ function showSavePrompt(domain: string, username: string, password: string) {
       padding: 12px;
       z-index: 2147483647;
       box-shadow: 0 8px 32px rgba(0,0,0,0.5);
-      animation: qpm-slide-in 0.2s ease-out;
+      animation: neopass-slide-in 0.2s ease-out;
     }
-    @keyframes qpm-slide-in {
+    @keyframes neopass-slide-in {
       from { transform: translateX(100%); opacity: 0; }
       to { transform: translateX(0); opacity: 1; }
     }
-    .qpm-save-header {
+    .neopass-save-header {
       display: flex;
       align-items: center;
       gap: 8px;
       margin-bottom: 10px;
     }
-    .qpm-save-logo {
+    .neopass-save-logo {
       display: flex;
       align-items: center;
       flex-shrink: 0;
     }
-    .qpm-save-title {
+    .neopass-save-title {
       font-size: 11px;
       font-weight: 600;
       color: #818cf8;
       letter-spacing: 0.02em;
     }
-    .qpm-save-close {
+    .neopass-save-close {
       margin-left: auto;
       background: none;
       border: none;
@@ -937,16 +937,16 @@ function showSavePrompt(domain: string, username: string, password: string) {
       line-height: 1;
       transition: color 0.15s;
     }
-    .qpm-save-close:hover { color: #f1f5f9; }
-    .qpm-save-info {
+    .neopass-save-close:hover { color: #f1f5f9; }
+    .neopass-save-info {
       margin-bottom: 10px;
     }
-    .qpm-save-label {
+    .neopass-save-label {
       color: #94a3b8;
       font-size: 11px;
       margin-bottom: 2px;
     }
-    .qpm-save-user {
+    .neopass-save-user {
       color: #f1f5f9;
       font-size: 13px;
       font-weight: 500;
@@ -954,16 +954,16 @@ function showSavePrompt(domain: string, username: string, password: string) {
       overflow: hidden;
       text-overflow: ellipsis;
     }
-    .qpm-save-domain {
+    .neopass-save-domain {
       color: #64748b;
       font-size: 10px;
       margin-top: 2px;
     }
-    .qpm-save-actions {
+    .neopass-save-actions {
       display: flex;
       gap: 8px;
     }
-    .qpm-btn {
+    .neopass-btn {
       flex: 1;
       padding: 6px 0;
       border-radius: 6px;
@@ -974,32 +974,32 @@ function showSavePrompt(domain: string, username: string, password: string) {
       transition: background 0.15s;
       text-align: center;
     }
-    .qpm-btn-save {
+    .neopass-btn-save {
       background: #818cf8;
       color: white;
     }
-    .qpm-btn-save:hover { background: #6366f1; }
-    .qpm-btn-dismiss {
+    .neopass-btn-save:hover { background: #6366f1; }
+    .neopass-btn-dismiss {
       background: #1e293b;
       color: #94a3b8;
       border: 1px solid #334155;
     }
-    .qpm-btn-dismiss:hover { color: #f1f5f9; border-color: #475569; }
+    .neopass-btn-dismiss:hover { color: #f1f5f9; border-color: #475569; }
   `;
   shadow.appendChild(style);
 
   const container = document.createElement('div');
-  container.className = 'qpm-save-popup';
+  container.className = 'neopass-save-popup';
 
   // Header with logo
   const header = document.createElement('div');
-  header.className = 'qpm-save-header';
+  header.className = 'neopass-save-header';
   header.innerHTML = `
-    <span class="qpm-save-logo">${LGI_LOGO_SVG}</span>
-    <span class="qpm-save-title">LGI Pass</span>
+    <span class="neopass-save-logo">${NEOPASS_LOGO_SVG}</span>
+    <span class="neopass-save-title">NeoPass</span>
   `;
   const closeBtn = document.createElement('button');
-  closeBtn.className = 'qpm-save-close';
+  closeBtn.className = 'neopass-save-close';
   closeBtn.textContent = '\u00D7';
   closeBtn.addEventListener('click', () => banner.remove());
   header.appendChild(closeBtn);
@@ -1007,20 +1007,20 @@ function showSavePrompt(domain: string, username: string, password: string) {
 
   // Credential info
   const info = document.createElement('div');
-  info.className = 'qpm-save-info';
+  info.className = 'neopass-save-info';
   info.innerHTML = `
-    <div class="qpm-save-label">Save password for</div>
-    <div class="qpm-save-user">${escapeHtml(username)}</div>
-    <div class="qpm-save-domain">${escapeHtml(domain)}</div>
+    <div class="neopass-save-label">Save password for</div>
+    <div class="neopass-save-user">${escapeHtml(username)}</div>
+    <div class="neopass-save-domain">${escapeHtml(domain)}</div>
   `;
   container.appendChild(info);
 
   // Action buttons
   const actions = document.createElement('div');
-  actions.className = 'qpm-save-actions';
+  actions.className = 'neopass-save-actions';
 
   const saveBtn = document.createElement('button');
-  saveBtn.className = 'qpm-btn qpm-btn-save';
+  saveBtn.className = 'neopass-btn neopass-btn-save';
   saveBtn.textContent = 'Save';
   saveBtn.addEventListener('click', () => {
     browserAPI.runtime.sendMessage({
@@ -1033,7 +1033,7 @@ function showSavePrompt(domain: string, username: string, password: string) {
   });
 
   const dismissBtn = document.createElement('button');
-  dismissBtn.className = 'qpm-btn qpm-btn-dismiss';
+  dismissBtn.className = 'neopass-btn neopass-btn-dismiss';
   dismissBtn.textContent = 'Not now';
   dismissBtn.addEventListener('click', () => {
     banner.remove();
@@ -1169,8 +1169,8 @@ export function attachGlobalFocusListener(
   fetchAndShow: (field: HTMLInputElement) => Promise<void>
 ) {
   // Use window-level flag to survive content script re-injection
-  if ((window as any).__qpmGlobalListener) return;
-  (window as any).__qpmGlobalListener = true;
+  if ((window as any).__neopassGlobalListener) return;
+  (window as any).__neopassGlobalListener = true;
 
   const handler = (e: Event) => {
     const target = e.target;
@@ -1196,7 +1196,7 @@ export function attachGlobalFocusListener(
     const isLoginField = USERNAME_HINTS.test(attrs) || type === 'password';
     if (!isLoginField) return;
 
-    console.debug('[QPM] global handler fired:', e.type, 'field:', target.id || target.name);
+    console.debug('[NeoPass] global handler fired:', e.type, 'field:', target.id || target.name);
 
     // Re-show pill if user focuses a login field after dismissing
     if (activePanelDismissed) {
@@ -1209,7 +1209,7 @@ export function attachGlobalFocusListener(
       showSidePanel(creds, forms, getCredentials, getForms);
     } else {
       // Credentials not loaded yet — fetch on demand
-      console.debug('[QPM] no cached creds, fetching on demand...');
+      console.debug('[NeoPass] no cached creds, fetching on demand...');
       fetchAndShow(target);
     }
   };
@@ -1240,7 +1240,7 @@ document.addEventListener(
 );
 
 /**
- * Remove all LGI Pass UI from the page (panel, overlay, save prompt).
+ * Remove all NeoPass UI from the page (panel, overlay, save prompt).
  * Called when the vault is locked.
  */
 export function clearAllUI() {

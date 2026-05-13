@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-    Installs the Quantum Password Manager native messaging host for Chrome, Edge, and Firefox.
+    Installs the NeoPass native messaging host for Chrome, Edge, and Firefox.
 .DESCRIPTION
     Copies the native host binary and registers it with browser native messaging registries.
 #>
@@ -15,7 +15,7 @@ param(
 
 $ErrorActionPreference = "Stop"
 $AppName = "com.quantum.passwordmanager"
-$DisplayName = "Quantum Password Manager Native Host"
+$DisplayName = "NeoPass Native Host"
 
 # Support legacy -ExtensionID parameter
 if (-not $ChromeExtensionID -and $ExtensionID) {
@@ -24,7 +24,7 @@ if (-not $ChromeExtensionID -and $ExtensionID) {
 
 # Determine binary path
 if (-not $BinaryPath) {
-    $BinaryPath = Join-Path $PSScriptRoot "..\bin\qpm-native-host.exe"
+    $BinaryPath = Join-Path $PSScriptRoot "..\bin\neopass-native-host.exe"
 }
 
 if (-not (Test-Path $BinaryPath)) {
@@ -40,7 +40,7 @@ if (-not (Test-Path $InstallDir)) {
     New-Item -ItemType Directory -Path $InstallDir -Force | Out-Null
 }
 
-$InstalledBinary = Join-Path $InstallDir "qpm-native-host.exe"
+$InstalledBinary = Join-Path $InstallDir "neopass-native-host.exe"
 Copy-Item -Path $BinaryPath -Destination $InstalledBinary -Force
 Write-Host "Installed binary to: $InstalledBinary"
 
@@ -84,7 +84,7 @@ $FirefoxManifest = @{
     description = $DisplayName
     path = $InstalledBinary
     type = "stdio"
-    allowed_extensions = @("lgipass@lancastergroup.com")
+    allowed_extensions = @("neopass@lancastergroup.com")
 } | ConvertTo-Json -Depth 3
 
 $FirefoxManifestPath = Join-Path $InstallDir "$AppName.firefox.json"
@@ -119,5 +119,5 @@ Write-Host ""
 Write-Host "Native messaging host installed successfully." -ForegroundColor Green
 Write-Host "Chrome Extension ID: $(if ($ChromeExtensionID) { $ChromeExtensionID } else { '(any)' })" -ForegroundColor Cyan
 Write-Host "Edge Extension ID:   $(if ($EdgeExtensionID) { $EdgeExtensionID } else { '(any)' })" -ForegroundColor Cyan
-Write-Host "Firefox Extension ID: lgipass@lancastergroup.com" -ForegroundColor Cyan
+Write-Host "Firefox Extension ID: neopass@lancastergroup.com" -ForegroundColor Cyan
 Write-Host "Restart your browsers for changes to take effect."

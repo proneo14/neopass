@@ -303,7 +303,7 @@ function createWindow(): void {
     height: 800,
     minWidth: 800,
     minHeight: 600,
-    title: 'LGI Pass',
+    title: 'NeoPass',
     backgroundColor: '#ffffff',
     autoHideMenuBar: true,
     titleBarStyle: 'hidden',
@@ -806,7 +806,7 @@ function registerIpcHandlers(): void {
     const filterName = isCsv ? 'CSV' : 'JSON';
     const result = await dialog.showSaveDialog(win!, {
       title: 'Export Vault',
-      defaultPath: `lgipass-export-${new Date().toISOString().slice(0, 10)}.${ext}`,
+      defaultPath: `neopass-export-${new Date().toISOString().slice(0, 10)}.${ext}`,
       filters: [{ name: filterName, extensions: [ext] }],
     });
     if (result.canceled || !result.filePath) return { cancelled: true };
@@ -2417,7 +2417,7 @@ transports:r.getTransports?.()??['usb']
     const win = BrowserWindow.getFocusedWindow();
     const result = await dialog.showSaveDialog(win!, {
       title: 'Save Secure Send',
-      defaultPath: defaultFileName || `lgipass-send-${new Date().toISOString().slice(0, 10)}.html`,
+      defaultPath: defaultFileName || `neopass-send-${new Date().toISOString().slice(0, 10)}.html`,
       filters: [{ name: 'HTML', extensions: ['html'] }],
     });
     if (result.canceled || !result.filePath) return { cancelled: true };

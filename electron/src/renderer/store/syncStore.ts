@@ -16,7 +16,7 @@ interface SyncState {
   setAutoSyncInterval: (seconds: number) => void;
 }
 
-const SYNC_STORAGE_KEY = 'lgi-pass-sync';
+const SYNC_STORAGE_KEY = 'neopass-sync';
 
 function loadPersistedSync(): { lastSyncAt: string | null; autoSyncInterval: number } {
   try {

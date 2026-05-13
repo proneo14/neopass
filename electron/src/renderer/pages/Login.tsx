@@ -192,7 +192,7 @@ export function Login() {
       <div className="w-full max-w-sm px-6">
         <div className="text-center mb-8">
           <span className="text-4xl">🔑</span>
-          <h1 className="mt-3 text-xl font-semibold text-surface-100">LGI Pass</h1>
+          <h1 className="mt-3 text-xl font-semibold text-surface-100">NeoPass</h1>
           <p className="mt-1 text-sm text-surface-400">Unlock your vault</p>
         </div>
 

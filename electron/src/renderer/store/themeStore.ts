@@ -3,7 +3,7 @@ import { create } from 'zustand';
 export type ThemeMode = 'dark' | 'light' | 'system';
 export type ResolvedTheme = 'dark' | 'light';
 
-const THEME_STORAGE_KEY = 'lgi-pass-theme';
+const THEME_STORAGE_KEY = 'neopass-theme';
 
 function loadPersistedTheme(): ThemeMode {
   try {

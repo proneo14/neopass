@@ -6,12 +6,12 @@
  * 2. otpauth:// URIs in links, text, data attributes, input values
  * 3. Base32-encoded secrets displayed as "setup key" / "manual entry" text
  *
- * When a secret is found, shows a banner offering to save it to LGI Pass.
+ * When a secret is found, shows a banner offering to save it to NeoPass.
  */
 
 import { browserAPI, extractDomain } from '../lib/browser-api';
 
-const TOTP_BANNER_ID = 'lgipass-totp-banner';
+const TOTP_BANNER_ID = 'neopass-totp-banner';
 
 /**
  * Valid base32 (RFC 4648): only A-Z and 2-7, at least 16 chars.
@@ -86,7 +86,7 @@ async function scanQRCodes(): Promise<{ secret: string; otpauthUri: string } | n
       return { secret: response.secret, otpauthUri: response.otpauthUri };
     }
   } catch {
-    console.debug('[QPM] QR scan request failed');
+    console.debug('[NeoPass] QR scan request failed');
   }
   return null;
 }
@@ -278,7 +278,7 @@ function showTOTPBanner(secret: string) {
       <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
       <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
     </svg>
-    Save TOTP to LGI Pass?
+    Save TOTP to NeoPass?
   `;
 
   const secretDisplay = document.createElement('div');
@@ -365,7 +365,7 @@ export async function detectAndPromptTOTP() {
       lastDetectedSecret = qrResult.secret;
       bannerShown = true;
       showTOTPBanner(qrResult.secret);
-      console.debug('[QPM] TOTP secret found via QR code');
+      console.debug('[NeoPass] TOTP secret found via QR code');
       return;
     }
   }
@@ -379,7 +379,7 @@ export async function detectAndPromptTOTP() {
 
   bannerShown = true;
   showTOTPBanner(result.secret);
-  console.debug('[QPM] TOTP secret detected via text scan');
+  console.debug('[NeoPass] TOTP secret detected via text scan');
 }
 
 /**

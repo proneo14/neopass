@@ -13,7 +13,7 @@ permissions:
   contents: read
 
 jobs:
-  # ── Go Backend ──────────────────────────────────────────────
+  # â”€â”€ Go Backend â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   go-lint:
     name: Go Lint
     runs-on: ubuntu-latest
@@ -81,13 +81,13 @@ jobs:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
       - name: Build native host
-        run: go build -trimpath -ldflags="-s -w" -o bin/qpm-native-host-${{ matrix.suffix }}${{ matrix.ext }} ./cmd/nativehost/
+        run: go build -trimpath -ldflags="-s -w" -o bin/neopass-native-host-${{ matrix.suffix }}${{ matrix.ext }} ./cmd/nativehost/
         env:
           CGO_ENABLED: "0"
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
 
-  # ── Docker ──────────────────────────────────────────────────
+  # â”€â”€ Docker â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   docker:
     name: Docker Build
     runs-on: ubuntu-latest
@@ -95,15 +95,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Build Docker image
-        run: docker build -t lgi-pass-server:ci .
+        run: docker build -t neopass-server:ci .
       - name: Verify health endpoint
         run: |
-          docker run -d --name test-server -p 8443:8443 -e PORT=8443 lgi-pass-server:ci
+          docker run -d --name test-server -p 8443:8443 -e PORT=8443 neopass-server:ci
           sleep 3
           curl -sf http://localhost:8443/health | grep -q ok
           docker stop test-server
 
-  # ── Electron Desktop App ────────────────────────────────────
+  # â”€â”€ Electron Desktop App â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   electron-lint:
     name: Electron Lint
     runs-on: ubuntu-latest
@@ -153,7 +153,7 @@ jobs:
       - run: npm ci
       - run: npm run build
 
-  # ── Browser Extension ───────────────────────────────────────
+  # â”€â”€ Browser Extension â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   extension-lint:
     name: Extension Lint
     runs-on: ubuntu-latest
@@ -209,4 +209,4 @@ jobs:
       - name: Build ${{ matrix.browser }}
         run: npx cross-env TARGET_BROWSER=${{ matrix.browser }} npx webpack --mode production
       - name: Package extension
-        run: cd dist/${{ matrix.browser }} && zip -r ../../lgi-pass-${{ matrix.browser }}.zip .
+        run: cd dist/${{ matrix.browser }} && zip -r ../../neopass-${{ matrix.browser }}.zip .

@@ -31,9 +31,9 @@ const (
 	COSECurveEd25519 = 6
 )
 
-// LGI Pass software authenticator AAGUID (UUID v5 from DNS namespace + "lgipass.lancastergroup.com").
+// NeoPass software authenticator AAGUID (UUID v5 from DNS namespace + "neopass.lancastergroup.com").
 // Pre-computed: 5a2f7e8b-3c41-5d09-a1b6-4e8f2d7c9a03
-var LGIPassAAGUID = [16]byte{
+var NeoPassAAGUID = [16]byte{
 	0x5a, 0x2f, 0x7e, 0x8b, 0x3c, 0x41, 0x5d, 0x09,
 	0xa1, 0xb6, 0x4e, 0x8f, 0x2d, 0x7c, 0x9a, 0x03,
 }

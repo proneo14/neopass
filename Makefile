@@ -1,4 +1,4 @@
-.PHONY: build-server build-nativehost build-electron build-extension-chrome build-extension-firefox build-extension-edge build-all test docker migrate lint clean
+﻿.PHONY: build-server build-nativehost build-electron build-extension-chrome build-extension-firefox build-extension-edge build-all test docker migrate lint clean
 
 # Go binaries
 build-server:
@@ -8,7 +8,7 @@ build-standalone:
 	go build -trimpath -ldflags="-s -w" -o bin/server-standalone ./cmd/server/main.go
 
 build-nativehost:
-	go build -trimpath -ldflags="-s -w" -o bin/qpm-native-host ./cmd/nativehost/main.go
+	go build -trimpath -ldflags="-s -w" -o bin/neopass-native-host ./cmd/nativehost/main.go
 
 # Electron desktop app
 build-electron:
@@ -65,13 +65,13 @@ lint-go:
 
 # Extension packaging (zip for store submission)
 package-extension-chrome: build-extension-chrome
-	cd extension && cd dist/chrome && zip -r ../../lgi-pass-chrome.zip .
+	cd extension && cd dist/chrome && zip -r ../../neopass-chrome.zip .
 
 package-extension-firefox: build-extension-firefox
-	cd extension && cd dist/firefox && zip -r ../../lgi-pass-firefox.zip .
+	cd extension && cd dist/firefox && zip -r ../../neopass-firefox.zip .
 
 package-extension-edge: build-extension-edge
-	cd extension && cd dist/edge && zip -r ../../lgi-pass-edge.zip .
+	cd extension && cd dist/edge && zip -r ../../neopass-edge.zip .
 
 package-extensions: package-extension-chrome package-extension-firefox package-extension-edge
 
