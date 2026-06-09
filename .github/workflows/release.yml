@@ -89,6 +89,10 @@ jobs:
       - name: Install Electron deps
         working-directory: electron
         run: npm ci
+      - name: Install Linux packaging deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y rpm
       - name: Stamp version
         working-directory: electron
         run: npm pkg set version=${{ needs.version.outputs.version }}
@@ -178,6 +182,7 @@ jobs:
           files: |
             electron/release/*.AppImage
             electron/release/*.deb
+            electron/release/*.rpm
 
   # ── Browser extensions (single job, no artifacts) ───────────
   extensions:
